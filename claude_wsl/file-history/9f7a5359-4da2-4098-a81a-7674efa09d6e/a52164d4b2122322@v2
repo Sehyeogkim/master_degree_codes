@@ -1,0 +1,83 @@
+#!/usr/bin/env python
+"""Single-case LAP (Type-1 solid) mesher, distance-field recipe.
+Reads solid_data/case_<c>/{lumen,solid,lipid,fc}.stp + lesion_length from
+pre_data/parameter_0728.csv (row index == case_id), meshes via
+HXT_meshing_I_dist.gmshing_solid, then moves solid_type_1.msh ->
+LAP_mesh/solid_LAP_<c>.msh. Prints one final `STATUS {json}` line.
+
+Usage: mesh_one_LAP.py <case> <nproc> <mesh_size> [algo2d] [algo3d]
+Skips (status=skipped) if LAP_mesh/solid_LAP_<c>.msh already exists.
+"""
+import sys, os, io, json, time, shutil, contextlib
+from pathlib import Path
+import pandas as pd
+
+HERE = Path(__file__).resolve().parent
+CSV = HERE / "pre_data" / "parameter_0728.csv"
+LAPDIR = HERE / "LAP_mesh"
+
+
+def main():
+    case = int(sys.argv[1])
+    nproc = int(sys.argv[2]) if len(sys.argv) > 2 else 12
+    size = float(sys.argv[3]) if len(sys.argv) > 3 else 0.055
+    algo2d = int(sys.argv[4]) if len(sys.argv) > 4 else 5
+    algo3d = int(sys.argv[5]) if len(sys.argv) > 5 else 10
+
+    out = LAPDIR / f"solid_LAP_{case}.msh"
+    if out.exists():
+        print("STATUS " + json.dumps({"case": case, "status": "skipped"}))
+        return
+
+    d = HERE / "solid_data" / f"case_{case}"
+    df = pd.read_csv(str(CSV))
+    lesion = float(df.loc[case, "lesion_length"])
+
+    import HXT_meshing_I_dist as M
+    t0 = time.time()
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            msh = M.gmshing_solid(
+                d / "lumen.stp", d / "solid.stp", d / "lipid.stp", d / "fc.stp",
+                d, nproc, True, False, size, lesion, algo2d, algo3d,
+            )
+    except Exception as e:
+        sys.stdout.write(buf.getvalue()[-4000:])
+        print("STATUS " + json.dumps({
+            "case": case, "status": "failed", "mesh_size": size,
+            "algo2d": algo2d, "algo3d": algo3d,
+            "error": f"{type(e).__name__}: {e}", "seconds": round(time.time() - t0, 1),
+        }))
+        return
+
+    txt = buf.getvalue()
+    sys.stdout.write(txt[-4000:])
+
+    # prefer quality.json (written by the dist mesher)
+    n_elem = min_q = avg_q = neg = poor = None
+    qj = d / "quality.json"
+    if qj.exists():
+        try:
+            q = json.loads(qj.read_text())
+            n_elem = q.get("num_elements"); min_q = q.get("min_quality")
+            avg_q = q.get("avg_quality"); neg = q.get("neg_jacobian_count")
+            poor = q.get("poor_count")
+        except Exception:
+            pass
+
+    LAPDIR.mkdir(exist_ok=True)
+    shutil.move(str(msh), str(out))
+
+    st = {
+        "case": case, "status": "done", "mesh_size": size,
+        "algo2d": algo2d, "algo3d": algo3d,
+        "num_elements": n_elem, "min_quality": min_q, "avg_quality": avg_q,
+        "neg_jacobian": neg, "poor_count": poor,
+        "seconds": round(time.time() - t0, 1),
+    }
+    print("STATUS " + json.dumps(st))
+
+
+if __name__ == "__main__":
+    main()

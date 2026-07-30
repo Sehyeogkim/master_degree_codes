@@ -1,0 +1,2 @@
+- [Server abbreviations](server-abbreviations.md) — cv1=ws1, cv2=ws2, hy/하비=harvey
+- [65_final_0723 workflow](65-final-0723-workflow.md) — lumen pipeline runs on cv1/cv2/harvey, ansys_new env

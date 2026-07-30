@@ -1,0 +1,30 @@
+engine: engine_fable3      # fable2와 동일 로직, 플립 컷오프 기본 10:00
+screener: momentum_v1
+cap_min: 500000000000
+top_change: 20
+top_value: 5
+direction: up
+
+# live3(플립 09:30 + 게이트10)에서 플립 창만 10:00까지 연장한 변형
+strat:
+  tp_gate: 0.10            # 익절 게이트 10%
+  flip_monday: true        # 리버설 플립 on
+  flip_days: 1             # 월요일만
+  flip_cutoff_hm: "10:00"  # ★ live3(09:30) → 10:00 으로 연장
+  flip_max: 1              # 주당 최대 1회
+
+title: "live4 · 플립10:00+게이트10 (live3 창 연장)"
+emails:
+  - kimse991228@gmail.com
+  - limsung7969@naver.com   # cofounder
+
+desc: |
+  live4 — live3(플립 09:30 + 게이트10)에서 리버설 플립 창을 10:00까지 연장한 변형.
+
+  구성: 281 + 리버설 플립(월요일 10:00까지 최대 1회) + 익절 게이트 10%. 사다리 리셋 미적용.
+  live3과 유일한 차이 = 플립 컷오프 09:30 → 10:00. 엔진은 engine_fable3(=fable2 복사 + 기본 10:00).
+
+  배경: 백테스트(실험 15) 미세 컷오프 곡선에서 09:15~09:30이 고원이었고 09:35부터 절벽,
+  10:00은 고원 아래였다. 즉 이 연장은 백테스트상 09:30보다 불리할 가능성이 높다 —
+  전방 관찰로 그 판정(창을 늦추면 노이즈 플립이 늘어 손해)이 실제 데이터에서도 재현되는지
+  확인하는 대조군. live1(281)·live2(갭필터)·live3(09:30)과 4-way 비교.

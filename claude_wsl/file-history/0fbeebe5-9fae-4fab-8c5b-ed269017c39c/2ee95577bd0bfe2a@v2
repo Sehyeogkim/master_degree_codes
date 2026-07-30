@@ -1,0 +1,184 @@
+"""리포트 렌더 — 배분규칙별 부트스트랩 결과 → self-contained HTML 1개.
+박스플롯: 박스=IQR(25~75), whisker=95% CI(2.5~97.5), 가운데선=중앙, ◆=관측평균.
+스타일은 저장소 톤(F0EEE6/CC785C) 준수. 외부 의존 0(순수 SVG)."""
+import html
+
+BG, INK, ACCENT, GRID = "#F0EEE6", "#1A1A1A", "#CC785C", "#D9D3C7"
+POS, NEG, LOOK = "#2E7D32", "#C25744", "#6B5E54"
+
+
+def _esc(s):
+    return html.escape(str(s))
+
+
+def _boxplot(results, w=920, h=470):
+    """results: [(key,label,stats,causal)]. y=평균주간 net %."""
+    padL, padR, padT, padB = 64, 24, 24, 96
+    pw, ph = w - padL - padR, h - padT - padB
+    lo = min(min(s["ci_lo"], s["p5"]) for _, _, s, _ in results)
+    hi = max(max(s["ci_hi"], s["p95"]) for _, _, s, _ in results)
+    lo = min(lo, 0.0); hi = max(hi, 0.0)
+    span = (hi - lo) or 1.0
+    lo -= span * 0.08; hi += span * 0.08; span = hi - lo
+    y = lambda v: padT + ph * (hi - v) / span
+    n = len(results)
+    slot = pw / n
+    bw = min(46, slot * 0.5)
+
+    el = [f'<svg viewBox="0 0 {w} {h}" width="100%" style="max-width:{w}px;font-family:system-ui,sans-serif">']
+    el.append(f'<rect x="0" y="0" width="{w}" height="{h}" fill="{BG}"/>')
+    # y 그리드 + 눈금
+    ticks = _nice_ticks(lo, hi)
+    for tv in ticks:
+        yy = y(tv)
+        col = INK if abs(tv) < 1e-9 else GRID
+        el.append(f'<line x1="{padL}" y1="{yy:.1f}" x2="{w-padR}" y2="{yy:.1f}" stroke="{col}" stroke-width="{1.4 if abs(tv)<1e-9 else 1}" opacity="{0.8 if abs(tv)<1e-9 else 0.6}"/>')
+        el.append(f'<text x="{padL-8}" y="{yy+3:.1f}" text-anchor="end" font-size="11" fill="{INK}">{tv:+.1f}%</text>')
+    el.append(f'<text x="16" y="{padT+ph/2:.0f}" font-size="12" fill="{INK}" transform="rotate(-90 16 {padT+ph/2:.0f})" text-anchor="middle" font-weight="600">평균주간 net 수익률 (부트스트랩)</text>')
+
+    for i, (key, label, s, causal) in enumerate(results):
+        cx = padL + slot * (i + 0.5)
+        clr = LOOK if not causal else (POS if s["obs_mean"] >= 0 else NEG)
+        y_hi, y_lo = y(s["ci_hi"]), y(s["ci_lo"])
+        yq_hi, yq_lo = y(s["iqr_hi"]), y(s["iqr_lo"])
+        ymed = y(s["boot_median"]); ymean = y(s["obs_mean"])
+        # whisker = 95% CI
+        el.append(f'<line x1="{cx}" y1="{y_hi:.1f}" x2="{cx}" y2="{y_lo:.1f}" stroke="{clr}" stroke-width="1.4"/>')
+        for yy in (y_hi, y_lo):
+            el.append(f'<line x1="{cx-bw*0.28:.1f}" y1="{yy:.1f}" x2="{cx+bw*0.28:.1f}" y2="{yy:.1f}" stroke="{clr}" stroke-width="1.4"/>')
+        # box = IQR
+        dash = ' stroke-dasharray="4 3"' if not causal else ""
+        el.append(f'<rect x="{cx-bw/2:.1f}" y="{yq_hi:.1f}" width="{bw:.1f}" height="{max(1,yq_lo-yq_hi):.1f}" fill="{clr}" fill-opacity="0.18" stroke="{clr}" stroke-width="1.4"{dash}/>')
+        # median line
+        el.append(f'<line x1="{cx-bw/2:.1f}" y1="{ymed:.1f}" x2="{cx+bw/2:.1f}" y2="{ymed:.1f}" stroke="{clr}" stroke-width="2.2"/>')
+        # 관측평균 ◆
+        el.append(f'<path d="M {cx} {ymean-4.5:.1f} L {cx+4.5} {ymean:.1f} L {cx} {ymean+4.5:.1f} L {cx-4.5} {ymean:.1f} Z" fill="{BG}" stroke="{clr}" stroke-width="1.6"/>')
+        # 관측평균 값 라벨
+        el.append(f'<text x="{cx}" y="{yq_hi-8:.1f}" text-anchor="middle" font-size="11.5" font-weight="700" fill="{clr}">{s["obs_mean"]:+.2f}%</text>')
+        # x 라벨(2줄)
+        el.append(f'<text x="{cx}" y="{h-padB+20:.0f}" text-anchor="middle" font-size="11.5" font-weight="700" fill="{INK}">{_esc(key)}</text>')
+        el.append(f'<text x="{cx}" y="{h-padB+37:.0f}" text-anchor="middle" font-size="10" fill="{INK}" opacity="0.7">{_esc(label)}</text>')
+        el.append(f'<text x="{cx}" y="{h-padB+53:.0f}" text-anchor="middle" font-size="9.5" fill="{INK}" opacity="0.6">P(&gt;0)={s["prob_pos"]*100:.0f}%</text>')
+    el.append('</svg>')
+    return "".join(el)
+
+
+def _nice_ticks(lo, hi):
+    span = hi - lo
+    step = 0.5
+    for cand in (0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5):
+        if span / cand <= 8:
+            step = cand; break
+    import math
+    t0 = math.ceil(lo / step) * step
+    out = []; v = t0
+    while v <= hi + 1e-9:
+        out.append(round(v, 4)); v += step
+    return out
+
+
+def _row(key, label, s, causal):
+    tag = "" if causal else ' style="opacity:.72"'
+    badge = "" if causal else ' <span class="look">look-ahead</span>'
+    ci = f'[{s["ci_lo"]:+.2f}, {s["ci_hi"]:+.2f}]'
+    pos = "ok" if s["prob_pos"] >= 0.9 else ("mid" if s["prob_pos"] >= 0.75 else "low")
+    return (f'<tr{tag}><td><b>{_esc(key)}</b>{badge}<br><span class="sub">{_esc(label)}</span></td>'
+            f'<td class="num big">{s["obs_mean"]:+.2f}%</td>'
+            f'<td class="num">{ci}</td>'
+            f'<td class="num">{s["iqr_lo"]:+.2f} ~ {s["iqr_hi"]:+.2f}</td>'
+            f'<td class="num">{s["t"]:.2f}</td>'
+            f'<td class="num {pos}">{s["prob_pos"]*100:.1f}%</td>'
+            f'<td class="num">{s["ann_median"]:+.1f}%</td></tr>')
+
+
+def build_html(results, meta):
+    """results: [(key,label,stats,causal)]. meta: dict(stamp, coverage, seed, B)."""
+    causal_res = [r for r in results if r[3]]
+    best = max(causal_res, key=lambda r: r[2]["obs_mean"])
+    eq = next(r for r in results if r[0] == "equal")
+    look = next((r for r in results if r[0] == "lookahead_gap4"), None)
+    rows = "".join(_row(k, l, s, c) for k, l, s, c in results)
+    plot = _boxplot(results)
+    cov = meta["coverage"]
+
+    look_line = ""
+    if look:
+        gap = best[2]["obs_mean"] - look[2]["obs_mean"]
+        look_line = (f'<li><b>Causal의 대가</b>: 최고 causal(<b>{best[0]}</b> {best[2]["obs_mean"]:+.2f}%)는 '
+                     f'look-ahead 상한(gap⁴ {look[2]["obs_mean"]:+.2f}%) 대비 <b>{gap:+.2f}%p</b>. '
+                     f'실시간 실행가능성을 얻는 대신 이만큼을 내려놓는다.</li>')
+
+    return f"""<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>281 자본배분 부트스트랩 — causal 신호(직전주변동율)</title>
+<style>
+:root{{color-scheme:light}}
+*{{box-sizing:border-box}}
+body{{margin:0;background:{BG};color:{INK};font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.6}}
+.wrap{{max-width:1000px;margin:0 auto;padding:32px 22px 72px}}
+h1{{font-size:25px;margin:0 0 4px}}
+.subtitle{{color:#6B5E54;font-size:13.5px;margin-bottom:22px}}
+h2{{font-size:17px;margin:34px 0 12px;border-bottom:2px solid {ACCENT};padding-bottom:5px;display:inline-block}}
+.card{{background:#fff;border:1px solid {GRID};border-radius:10px;padding:18px 20px;margin:14px 0}}
+.plotwrap{{overflow-x:auto}}
+ul{{margin:8px 0;padding-left:20px}} li{{margin:5px 0}}
+table{{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px}}
+th,td{{border-bottom:1px solid {GRID};padding:8px 10px;text-align:left}}
+th{{background:#EDE8DD;font-size:12px}}
+td.num{{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}}
+td.big{{font-weight:700;font-size:14px}}
+.sub{{color:#8A7E72;font-size:11px}}
+.look{{background:{LOOK};color:#fff;font-size:9.5px;padding:1px 5px;border-radius:4px;vertical-align:middle}}
+.ok{{color:{POS};font-weight:700}} .mid{{color:#B8860B}} .low{{color:{NEG}}}
+.legend{{font-size:12px;color:#6B5E54;margin-top:10px}}
+.legend b{{color:{INK}}}
+code{{background:#EDE8DD;padding:1px 5px;border-radius:4px;font-size:12px}}
+.warn{{background:#FBF3E9;border-left:3px solid {ACCENT}}}
+.hi{{color:{ACCENT};font-weight:700}}
+</style></head><body><div class="wrap">
+<h1>281 자본배분 규칙 — 부트스트랩 비교</h1>
+<div class="subtitle">causal 신호(<b>직전주 주간변동율</b>)로 5종목 배분 · 원자=주 · SEED={meta['seed']} · B={meta['B']:,} · 생성 {_esc(meta['stamp'])}</div>
+
+<div class="card warn">
+<b>왜 이 실험인가.</b> 옛 281 배분은 <b>진입 gap⁴</b>로 자본을 나눴는데, 진입은 주중 시점이 제각각이라
+5종목 gap을 동시에 알아야 정규화가 된다 → <b>look-ahead(실시간 실행 불가)</b>. 이를
+<b>매매주 시작 전 확정되는 '직전주 주간변동율'</b>로 대체하면 완전 causal. 그 신호를
+어떤 스케일(선형·제곱·⁴제곱·시그모이드…)로 배분에 쓰는 게 최적인지 부트스트랩으로 비교한다.
+</div>
+
+<h2>핵심 결론</h2>
+<div class="card"><ul>
+<li>최고 causal 규칙: <span class="hi">{best[0]} ({_esc(best[1])})</span> — 평균주간 <b>{best[2]['obs_mean']:+.2f}%</b>,
+    95% CI [{best[2]['ci_lo']:+.2f}, {best[2]['ci_hi']:+.2f}], P(평균&gt;0)={best[2]['prob_pos']*100:.1f}%.</li>
+<li>균등 기준선(<b>equal</b> {eq[2]['obs_mean']:+.2f}%) 대비 <b>{best[2]['obs_mean']-eq[2]['obs_mean']:+.2f}%p</b> —
+    신호 기반 집중이 균등분산보다 {'낫다' if best[2]['obs_mean']>eq[2]['obs_mean'] else '낫지 않다'}.</li>
+{look_line}
+<li>지수(⁴제곱·softmax)로 갈수록 집중↑ → 평균은 오를 수 있으나 CI 폭(불확실성)도 커진다. 박스플롯의 whisker 길이로 확인.</li>
+</ul></div>
+
+<h2>박스플롯 — 규칙별 평균주간수익률 분포</h2>
+<div class="card"><div class="plotwrap">{plot}</div>
+<div class="legend">◆ 관측 평균 · 박스 = <b>IQR</b>(25~75%) · whisker = <b>95% CI</b>(2.5~97.5%) · 가운데선 = 부트스트랩 중앙값 ·
+<b style="color:{POS}">초록</b>/<b style="color:{NEG}">빨강</b> = causal(+/−) · <b style="color:{LOOK}">회색 점선</b> = look-ahead 참고상한.</div>
+</div>
+
+<h2>통계 표</h2>
+<div class="card"><table>
+<thead><tr><th>배분 규칙</th><th>평균주간</th><th>95% CI</th><th>IQR</th><th>t</th><th>P(&gt;0)</th><th>연율(중앙)</th></tr></thead>
+<tbody>{rows}</tbody></table>
+<div class="legend">평균주간 = 관측 net %/주 (‘2.81’ 자리). t≈평균/표준오차, |t|&gt;2면 5% 유의. 연율 = (1+주중앙값)^52−1.</div>
+</div>
+
+<h2>방법론 · 커버리지 · 한계</h2>
+<div class="card"><ul>
+<li><b>원자 = 주</b>(월 진입~금 청산 5종목 묶음), 관측 <b>{cov['weeks_used']}주</b> net 수익률 벡터를
+    복원추출 ×{meta['B']:,}(SEED={meta['seed']}) → 평균의 표집분포. <code>bootstrap_method.md §4.3</code> 준수.</li>
+<li><b>신호</b> = (직전 금종가 / 직전 월시가 − 1)×100. <b>F0·직전주변동율은 yfinance 일봉</b>으로 조달
+    (CREON 5분봉과 시가 일치 확인). 배분은 정규화·무레버(100% 투입).</li>
+<li><b>커버리지</b>: 데이터 {cov['stock_weeks']} 종목-주 중 사용 {cov['kept']} · 일봉없음 {cov['no_daily']} ·
+    F0 불일치 제외 {cov['bad_f0']}(yfinance 분할조정 vs CREON 원주가 괴리&gt;35%).</li>
+<li><b>한계</b>: (1) 같은 {cov['weeks_used']}주 재조합이라 <b>과적합은 못 고침</b> → walk-forward 병행 필요.
+    (2) 2020~2026 레짐 조건부. (3) net 비용 반영하나 대량주문 충격·미체결 미반영.
+    (4) look-ahead 열은 실행 불가·비교 상한선일 뿐.</li>
+</ul></div>
+</div></body></html>"""

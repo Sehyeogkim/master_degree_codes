@@ -1,0 +1,70 @@
+"""p_live (Process 3) — 실시간(모의운영). cron 진입점, 두 모드.
+
+  select (주말 1회): 다음 주 종목선정 → _top5.json + _live_week.txt(월요일 저장)
+  update (평일 5분마다): _top5.json 읽어 월~now 5분봉으로 엔진 → 같은 OUT 덮어씀
+                        (bars_5m가 월→now를 받고 차트폭이 봉수 비례라 캔들이 옆으로 자동 확장)
+
+cron:
+  0 18 * * 6        python3 p_live.py --mode select
+  */5 9-15 * * 1-5  python3 p_live.py --mode update
+"""
+import os, sys, json, datetime
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from weekcal import week_bounds, to_monday
+from f_select_stocks import select_stocks, resolve_names
+from f_run_engine import run_engine, STRAT281
+from f_build_report import build_report
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TOP5 = os.path.join(HERE, "_top5.json")
+LIVE_WK = os.path.join(HERE, "_live_week.txt")
+OUT = os.path.join(HERE, "..", "report", "live", "live-281-thisweek.html")
+
+
+def _now_str():
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def _next_monday():
+    t = datetime.date.today()
+    return (t + datetime.timedelta(days=(7 - t.weekday()) % 7 or 7)).strftime("%Y-%m-%d")
+
+
+def select(monday=None):
+    monday = monday or _next_monday()
+    select_stocks(monday, with_names=True, out_path=TOP5)
+    open(LIVE_WK, "w").write(monday)
+    print(f"선정 완료 → 가동 주 월요일 = {monday}")
+
+
+def update():
+    top = json.load(open(TOP5))
+    monday = open(LIVE_WK).read().strip() if os.path.exists(LIVE_WK) else to_monday(datetime.date.today()).strftime("%Y-%m-%d")
+    ws, we = week_bounds(monday)
+    names = {r["code"]: r.get("name") for r in top}
+    if any(v is None for v in names.values()):
+        names.update(resolve_names([c for c, v in names.items() if v is None]))
+    sections = []
+    for sel in top:
+        code = sel["code"]; name = names.get(code) or code
+        sec = run_engine(code, ws, we, sel["fri_close"])
+        if not sec:
+            print(f"  {code} {name}: 5분봉 없음(스킵)"); continue
+        sec["name"] = name; sec["label"] = f"{name} ({code})"; sec["sel"] = sel
+        sections.append(sec)
+    html = build_report(sections, meta=dict(stamp=_now_str(), live=True, intro=True, refresh=300))
+    os.makedirs(os.path.dirname(os.path.abspath(OUT)), exist_ok=True)
+    open(OUT, "w", encoding="utf-8").write(html)
+    print(f"[{_now_str()}] update → {os.path.abspath(OUT)} ({len(sections)}종목, 가동주 {monday})")
+
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--mode", choices=["select", "update"], required=True)
+    ap.add_argument("--monday", help="select: 가동 주 월요일 지정(기본=다음 월요일)")
+    a = ap.parse_args()
+    if a.mode == "select":
+        select(a.monday)
+    else:
+        update()

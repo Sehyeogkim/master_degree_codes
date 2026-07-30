@@ -1,0 +1,98 @@
+"""플립 원인 분석 — 왜 fable(월요일 리버설)이 281보다 낮은가.
+각 flip 발생 종목-주에 대해 281/fable 이벤트를 재생성해 원인을 분류하고
+대표 예시를 고른다."""
+import os, sys, json
+
+ROOT = "/home/jeff/bullet281"
+sys.path.insert(0, os.path.join(ROOT, "engines", "engine_fable"))
+sys.path.insert(0, os.path.join(ROOT, "engines", "engine281"))
+sys.path.insert(0, os.path.join(ROOT, "back_test"))
+sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+
+import engine_fable
+import engine as engine281
+import blib
+from strategy_fable import STRAT_FABLE
+STRAT281 = dict(tp_gate=0.08, entries=("trail",), stop_mode="none",
+                fee=0.00015, slip=0.0005, tax=0.0015, round_shares=True)
+
+DATA = os.path.join(ROOT, "data", "data_creon_API", "intraday_5m_by_week")
+
+a = json.load(open(os.path.join(ROOT, "back_test", "weekly_records.json")))
+b = json.load(open(os.path.join(ROOT, "back_test", "weekly_records_fable.json")))
+
+# 종목-주 매칭: (week, code) → r
+def flat(d):
+    return {(w, s["code"]): s for w in d["weeks"] for s in d["weeks"][w]}
+A, Bm = flat(a), flat(b)
+
+flips = []
+for key in A:
+    if key in Bm and abs(A[key]["r"] - Bm[key]["r"]) > 1e-12:
+        flips.append(key)
+print(f"플립 종목-주: {len(flips)}")
+
+# 각 플립: 방향/타이밍/결과 재구성
+def week_path(week, code):
+    d = os.path.join(DATA, week)
+    for f in os.listdir(d):
+        if f.startswith(code + "_") and f.endswith("_5m.csv"):
+            return os.path.join(d, f)
+    return None
+
+records = []
+worse = better = 0
+whipsaw = 0            # 플립 후 반대로 다시 감(전환이 오히려 손해)
+flip_dir_long2short = 0
+for (week, code) in flips:
+    path = week_path(week, code)
+    if not path:
+        continue
+    F0 = A[(week, code)]["F0"]
+    bars = engine_fable.load_bars(path)
+    ev281, c281 = engine281.run(bars, F0, **STRAT281)
+    evfab, cfab = engine_fable.run(bars, F0, **STRAT_FABLE)
+    r0, rf = c281["weekly_return"], cfab["weekly_return"]
+    d = rf - r0
+    if d < 0: worse += 1
+    else: better += 1
+    # fable 진입/청산 이벤트
+    entries = [e for e in evfab if e.kind == "ENTRY"]
+    exits = [e for e in evfab if e.kind == "EXIT"]
+    if len(entries) >= 2:
+        e0, e1 = entries[0], entries[1]   # 원포지션, 전환포지션
+        # 전환 방향
+        if e0.direction > 0: flip_dir_long2short += 1
+        # 전환 후 최종 손익 부호
+        flip_leg_pnl = sum(x.pnl for x in exits if x.idx >= e1.idx)
+        orig_leg_pnl = sum(x.pnl for x in exits if x.idx < e1.idx)
+        # whipsaw: 전환 leg도 손실이면 양쪽 다 깨진 것
+        if flip_leg_pnl < 0:
+            whipsaw += 1
+    records.append(dict(week=week, code=code, name=A[(week,code)].get("name",""),
+                        r281=r0, rfab=rf, d=d,
+                        n_entries=len(entries),
+                        flip_idx=entries[1].idx if len(entries)>=2 else None,
+                        flip_dt=entries[1].dt if len(entries)>=2 else None,
+                        flip_from=entries[0].direction if len(entries)>=2 else None,
+                        path=path, F0=F0))
+
+print(f"플립 결과: 악화 {worse} / 개선 {better}")
+print(f"롱→숏 전환 비율: {flip_dir_long2short}/{len([r for r in records if r['n_entries']>=2])}")
+print(f"whipsaw(전환 leg도 손실): {whipsaw}")
+mean_d = sum(r["d"] for r in records)/len(records)
+print(f"플립 평균 Δ(fable-281): {mean_d*100:+.3f}%p")
+
+# 악화 폭 큰 대표 예시 (whipsaw 성) — 롱→숏 전환 위주, 데이터 적당한 것
+records.sort(key=lambda r: r["d"])
+print("\n=== 악화 top 12 ===")
+for r in records[:12]:
+    print(f"  {r['week']} {r['code']} {r['name'][:10]:10} 281={r['r281']*100:+.2f}% fable={r['rfab']*100:+.2f}% "
+          f"Δ{r['d']*100:+.2f}%p flip@{r['flip_dt']} from={'롱' if r['flip_from']==1 else '숏'} nbars_ok")
+
+print("\n=== 개선 top 6 (참고) ===")
+for r in records[-6:][::-1]:
+    print(f"  {r['week']} {r['code']} {r['name'][:10]:10} 281={r['r281']*100:+.2f}% fable={r['rfab']*100:+.2f}% "
+          f"Δ{r['d']*100:+.2f}%p flip@{r['flip_dt']} from={'롱' if r['flip_from']==1 else '숏'}")
+
+json.dump(records, open("/tmp/claude-1000/-home-jeff-bullet281/214fe36d-405b-475d-b386-7fa939fbe78b/scratchpad/flip_records.json","w"), ensure_ascii=False, indent=1)

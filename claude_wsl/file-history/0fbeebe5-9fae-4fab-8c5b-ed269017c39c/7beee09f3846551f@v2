@@ -1,0 +1,54 @@
+"""부트스트랩 — bootstrap_method.md 준수. 원자=주, 평균주간수익률 재표본.
+SEED=42, B=5000. 규칙별 weekly[](주별 포트폴리오 net) → 평균의 표집분포 → 95% CI·IQR.
+
+§4.3 전체표본 평균 CI: 관측 n주에서 n개 복원추출 ×B → 평균 분포. '2.81 자리' = 관측평균.
+반환 통계는 리포트 표/박스플롯에 그대로 사용."""
+import random, math
+
+SEED = 42
+B = 5000
+
+
+def _pct(sorted_xs, q):
+    if not sorted_xs:
+        return 0.0
+    i = q * (len(sorted_xs) - 1)
+    lo = int(math.floor(i)); hi = int(math.ceil(i))
+    if lo == hi:
+        return sorted_xs[lo]
+    return sorted_xs[lo] * (hi - i) + sorted_xs[hi] * (i - lo)
+
+
+def analyze(weekly, seed=SEED, B=B):
+    """weekly(주별 net 수익률, decimal) → 평균의 부트스트랩 통계(모두 %/주 단위)."""
+    n = len(weekly)
+    obs_mean = sum(weekly) / n
+    sd = math.sqrt(sum((x - obs_mean) ** 2 for x in weekly) / (n - 1)) if n > 1 else 0.0
+    se = sd / math.sqrt(n) if n else 0.0
+    t = obs_mean / se if se else 0.0
+
+    rng = random.Random(seed)
+    means = []
+    for _ in range(B):
+        s = 0.0
+        for _ in range(n):
+            s += weekly[rng.randrange(n)]
+        means.append(s / n)
+    means.sort()
+    to_pct = lambda x: x * 100
+    return dict(
+        n_weeks=n,
+        obs_mean=to_pct(obs_mean),                 # 관측 평균주간 net % ('2.81 자리')
+        obs_std=to_pct(sd),
+        t=t,
+        ci_lo=to_pct(_pct(means, 0.025)),          # 95% CI
+        ci_hi=to_pct(_pct(means, 0.975)),
+        boot_median=to_pct(_pct(means, 0.50)),
+        iqr_lo=to_pct(_pct(means, 0.25)),          # IQR (박스)
+        iqr_hi=to_pct(_pct(means, 0.75)),
+        p5=to_pct(_pct(means, 0.05)),
+        p95=to_pct(_pct(means, 0.95)),
+        prob_pos=sum(1 for m in means if m > 0) / B,
+        # 복리 연율화(52주) 중앙값 — 참고
+        ann_median=(pow(1 + _pct(means, 0.50), 52) - 1) * 100,
+    )

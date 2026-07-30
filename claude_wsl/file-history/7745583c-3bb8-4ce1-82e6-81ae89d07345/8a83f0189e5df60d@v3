@@ -1,0 +1,45 @@
+import json, os, glob
+import numpy as np
+import pandas as pd
+
+ROOT = "/home/jeff/project/65_final_0723"
+par = pd.read_csv(f"{ROOT}/pre_data/parameter.csv")
+
+def z_from_xyzts(path):
+    zs = []
+    for line in open(path):
+        p = line.strip().split()
+        if len(p) != 4:
+            continue
+        try:
+            zs.append(float(p[2]))
+        except ValueError:
+            continue
+    return zs
+
+def pt_id_distal(zs, z_given):
+    for i, z in enumerate(zs):
+        if z >= z_given:
+            return i, False
+    return len(zs) - 1, True   # fallback = last point
+
+def seg0_pressure_len(case):
+    d = f"{ROOT}/fluid_0723/case_{case}/pulsatile_1d_hyperemia/result"
+    fs = sorted(glob.glob(f"{d}/result_*.json"))
+    if not fs:
+        return None, None, None
+    data = json.load(open(fs[-1]))
+    nseg = len(data.get("segments", []))
+    seg0 = data["segments"][0]["double_point_data"]["pressure"]
+    return nseg, len(seg0), fs[-1]
+
+for case in [55, 8, 24, 56, 152, 100, 200]:
+    LL = float(par.loc[case, "lesion_length"])
+    z_distal = LL / 2 + 3
+    zs = z_from_xyzts(f"{ROOT}/fluid_0723/case_{case}/xyzts.dat")
+    pid, fb = pt_id_distal(zs, z_distal)
+    nseg, seg0len, _ = seg0_pressure_len(case)
+    over = "OUT_OF_SEG0" if (seg0len is not None and pid >= seg0len) else "ok"
+    print(f"case {case:>3}: LL={LL:.3f} z_distal={z_distal:.3f}cm  "
+          f"xyzts_n={len(zs)} z[min={min(zs):.3f},max={max(zs):.3f}]  "
+          f"pt_id_distal={pid} fallback_last={fb}  seg0_len={seg0len} nseg={nseg} -> {over}")

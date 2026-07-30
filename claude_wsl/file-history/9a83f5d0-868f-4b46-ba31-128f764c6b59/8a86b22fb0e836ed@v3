@@ -1,0 +1,42 @@
+"""오케스트레이터 — weekly_records → 규칙별 부트스트랩 → report/ HTML 1개.
+사용: python3 run_all.py   (weekly_records.json 없으면 build_weekly 먼저 실행)"""
+import os, sys, json, datetime
+import allocation, bootstrap, report
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+OUT = os.path.join(ROOT, "report", "backtest_allocation_bootstrap.html")
+
+
+def main():
+    wr_path = os.path.join(HERE, "weekly_records.json")
+    if not os.path.exists(wr_path):
+        print("weekly_records.json 없음 → build_weekly 실행"); import build_weekly
+        recs, stats = build_weekly.build()
+        json.dump(dict(stats=stats, weeks=recs), open(wr_path, "w", encoding="utf-8"),
+                  ensure_ascii=False, indent=1)
+    data = json.load(open(wr_path, encoding="utf-8"))
+    weeks_recs = data["weeks"]; stats = data["stats"]
+
+    results = []
+    for key, label, fn in allocation.RULES:
+        weekly = allocation.weekly_returns(weeks_recs, fn)
+        st = bootstrap.analyze(weekly)
+        results.append((key, label, st, key in allocation.CAUSAL))
+        print(f"  {key:16} 평균 {st['obs_mean']:+.3f}%  CI[{st['ci_lo']:+.2f},{st['ci_hi']:+.2f}]  "
+              f"P(>0)={st['prob_pos']*100:.1f}%  n={st['n_weeks']}")
+
+    now = datetime.datetime.now()
+    wd = ["월", "화", "수", "목", "금", "토", "일"][now.weekday()]
+    meta = dict(stamp=now.strftime(f"%Y-%m-%d ({wd}) %H:%M"),
+                seed=bootstrap.SEED, B=bootstrap.B,
+                coverage=dict(weeks_used=len(weeks_recs), stock_weeks=stats["stock_weeks"],
+                              kept=stats["kept"], no_daily=stats["no_daily"], bad_f0=stats["bad_f0"]))
+    html = report.build_html(results, meta)
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    open(OUT, "w", encoding="utf-8").write(html)
+    print("wrote", OUT)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,5 @@
+- [ANSYS Linux install (planned)](project_ansys_linux_install.md) — user plans Linux install; reference the KAIST manual for FTP/license server info
+- [KAIST TERA Lab ANSYS install manual](reference_ansys_install_manual.md) — `/home/jeff/project/58_ansys_install/...pdf`, read with pymupdf (no poppler/sudo)
+- [54_analysis ANSYS variants of interest](project_54_analysis.md) — on ws2 cvbml02, only analyze `ansys_results_type1` and `ansys_results_type1_expB` per case dir
+- [Output directory (cvbml02)](project_output_dir.md) — all output goes to `/home/jeff/project/55c_final_defense_0512/VI_test/test10_rupture_location` on ws2
+- [PSS units & validation figure](project_pss_units_and_validation_figure.md) — PSS output is dyne/cm² (÷10000 → kPa); Ch.4.0 figure_result0_validation panels + verified refs

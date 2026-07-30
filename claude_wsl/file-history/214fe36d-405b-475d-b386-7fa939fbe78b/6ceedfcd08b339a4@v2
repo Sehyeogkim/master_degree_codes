@@ -1,0 +1,130 @@
+"""리버설밴드 스윕 히트맵 리포트 — 컷오프(13) × flip_max(11), square 주간평균.
+사용: python3 make_band_report.py → report/backtest_band_sweep.html"""
+import os, json, html
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+OUT = os.path.join(ROOT, "report", "backtest_band_sweep.html")
+R = json.load(open(os.path.join(HERE, "sweep_band_results.json"), encoding="utf-8"))
+BASE = next(r for r in R if r["label"] == "281"); B0 = BASE["square_mean"]
+
+PAPER, INK, ACC, GRID = "#F0EEE6", "#211D18", "#CC785C", "#D9D3C7"
+MUTE, CARD, POS, NEG, NEUT = "#6B5E54", "#FBFAF6", "#2E7D32", "#C2493C", "#EDE8DD"
+esc = html.escape
+CUTS = ["09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30", "13:00", "13:30", "14:00", "14:30", "15:00", "15:30"]
+MAXS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 999]
+
+
+def get(c, m):
+    return next((r for r in R if r["cut"] == c and r["max"] == (None if m == 0 else m)), None)
+
+
+def heatmap():
+    cw, ch, labL, labT = 52, 26, 52, 38
+    W = labL + len(MAXS) * cw + 8
+    H = labT + len(CUTS) * ch + 26
+    el = [f'<svg viewBox="0 0 {W} {H}" width="{W}" font-family="ui-sans-serif,system-ui,sans-serif">']
+    el.append(f'<text x="{labL+len(MAXS)*cw/2:.0f}" y="12" font-size="11" fill="{MUTE}" text-anchor="middle" font-weight="700">flip_max (교체 횟수)</text>')
+    for j, m in enumerate(MAXS):
+        el.append(f'<text x="{labL+j*cw+cw/2:.0f}" y="{labT-6}" font-size="10" fill="{INK}" text-anchor="middle" font-weight="700">{"∞" if m>10 else m}</text>')
+    for i, c in enumerate(CUTS):
+        el.append(f'<text x="{labL-6}" y="{labT+i*ch+ch/2+3:.0f}" font-size="10" fill="{INK}" text-anchor="end" font-weight="600">~{c}</text>')
+        for j, m in enumerate(MAXS):
+            r = get(c, m)
+            dv = r["square_mean"] - B0
+            if abs(dv) < 0.03:
+                fill, alpha = NEUT, 1.0
+            else:
+                fill = POS if dv > 0 else NEG
+                alpha = 0.16 + min(1.0, abs(dv) / 0.5) * 0.74
+            x, y = labL + j * cw, labT + i * ch
+            best = r["label"] == "09:30·x1"
+            stroke = f' stroke="{INK}" stroke-width="1.6"' if best else ""
+            tip = f'~{c} · flip_max {"∞" if m>10 else m} · square {r["square_mean"]:+.3f}%/주 (281 대비 {dv:+.3f}) · P={r["p_pos"]*100:.0f}% · 플립율 {r["flip_rate"]:.0f}%'
+            el.append(f'<g><title>{esc(tip)}</title>'
+                      f'<rect x="{x+1}" y="{y+1}" width="{cw-2}" height="{ch-2}" rx="3" fill="{fill}" fill-opacity="{alpha:.2f}"{stroke}/>'
+                      f'<text x="{x+cw/2:.0f}" y="{y+ch/2+3:.0f}" font-size="9" font-weight="600" fill="{INK}" text-anchor="middle">{r["square_mean"]:.2f}</text></g>')
+    el.append(f'<text x="{labL}" y="{H-8}" font-size="9.5" fill="{MUTE}">테두리=최고(09:30·x1) · 초록=281({B0:+.2f}%) 상회 · 빨강=하회 · 셀 위 커서=상세</text>')
+    el.append('</svg>')
+    return "".join(el)
+
+
+def cutoff_rows():
+    rows = []
+    for c in CUTS:
+        r1 = get(c, 1); ri = get(c, 999)
+        d1 = r1["square_mean"] - B0
+        col = "pos" if d1 > 0.02 else ("neg" if d1 < -0.02 else "")
+        rows.append(f'<tr><td>~{c}</td>'
+                    f'<td class="num {col}">{r1["square_mean"]:+.3f}%</td>'
+                    f'<td class="num">{ri["square_mean"]:+.3f}%</td>'
+                    f'<td class="num">{ri["flip_rate"]:.0f}%</td>'
+                    f'<td class="num sub">{r1["p_pos"]*100:.0f}%</td></tr>')
+    return "".join(rows)
+
+
+def build():
+    ranked = sorted((r for r in R if r["label"] != "281"), key=lambda r: -r["square_mean"])
+    best = ranked[0]
+    return f"""<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>리버설밴드 스윕 — 컷오프×횟수</title>
+<style>
+*{{box-sizing:border-box}}body{{margin:0;background:{PAPER};color:{INK};font-family:ui-sans-serif,system-ui,"Apple SD Gothic Neo",sans-serif;line-height:1.6}}
+.wrap{{max-width:960px;margin:0 auto;padding:34px 20px 70px}}
+.eyebrow{{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:{ACC};font-weight:800;margin:0 0 8px}}
+h1{{font-size:25px;margin:0 0 6px;font-weight:800;letter-spacing:-.02em}}
+.sub{{color:{MUTE};font-size:13.5px;margin:0 0 18px;max-width:74ch}}
+h2{{font-size:18px;margin:32px 0 8px;font-weight:800}}
+.verdict{{display:flex;flex-wrap:wrap;gap:14px;margin:22px 0}}
+.vc{{flex:1 1 200px;background:{CARD};border:1px solid {GRID};border-radius:12px;padding:15px 17px}}
+.vc .k{{font-size:11.5px;color:{MUTE};font-weight:700}} .vc .v{{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px}}
+.vc .d{{font-size:12.5px;color:{MUTE};margin-top:2px}} .vc.hi .v{{color:{POS}}} .vc.hi{{border-color:{POS}}}
+.card{{background:{CARD};border:1px solid {GRID};border-radius:12px;padding:16px 18px;margin:12px 0}}
+.scrollx{{overflow-x:auto}}
+table{{border-collapse:collapse;width:100%;font-size:13px}}
+th,td{{border-bottom:1px solid {GRID};padding:7px 9px;text-align:left}}
+th{{background:{NEUT};font-size:11.5px}} td.num{{text-align:right;font-variant-numeric:tabular-nums}}
+.pos{{color:{POS};font-weight:700}} .neg{{color:{NEG}}} .sub{{color:{MUTE}}}
+ul{{margin:6px 0;padding-left:20px}} li{{margin:5px 0}}
+.foot{{margin-top:30px;font-size:12px;color:{MUTE};border-top:1px solid {GRID};padding-top:14px}}
+.foot code{{background:#e7e1d5;padding:1px 5px;border-radius:4px}}
+</style></head><body><div class="wrap">
+<p class="eyebrow">리버설밴드(fable4) · 부트스트랩 스윕 · 143설정</p>
+<h1>월요일 컷오프 × 교체횟수 — square 주간평균</h1>
+<p class="sub">진입선을 첫 진입가에 고정하고 반대편 선을 단순 돌파하면 전환하는 ‘리버설 밴드’를,
+<b>전환 허용 시각(월 09:30~15:30, 30분 단위)</b> × <b>최대 교체횟수(1~10·∞)</b> 전 조합으로 부트스트랩(SEED=42·B=5,000). 베이스=281.</p>
+
+<div class="verdict">
+  <div class="vc"><div class="k">기준 281</div><div class="v">{B0:+.2f}%</div><div class="d">square 주간평균</div></div>
+  <div class="vc hi"><div class="k">최고 {esc(best["label"])}</div><div class="v">{best["square_mean"]:+.2f}%</div>
+    <div class="d">CI[{best["ci_lo"]:+.2f},{best["ci_hi"]:+.2f}] · P={best["p_pos"]*100:.0f}%</div></div>
+  <div class="vc"><div class="k">교체횟수 효과</div><div class="v">≈0</div><div class="d">x1=x2=…=∞ 거의 동일</div></div>
+</div>
+
+<h2>히트맵</h2>
+<div class="card scrollx">{heatmap()}</div>
+
+<h2>컷오프별 (x1 vs 무한)</h2>
+<div class="card scrollx"><table>
+<thead><tr><th>컷오프</th><th class="num">x1</th><th class="num">x∞</th><th class="num">플립율(∞)</th><th class="num">P(&gt;0)</th></tr></thead>
+<tbody>{cutoff_rows()}</tbody></table></div>
+
+<h2>해석</h2>
+<div class="card"><ul>
+<li><b>최고 = 09:30·x1 (+0.99%).</b> 개장 25분 창이 최적이고, 늦출수록 단조 하락 — 이전 플립 실험(‘개장 25분’)과 완전 동일한 결론.</li>
+<li><b>교체횟수는 무의미.</b> 어느 컷오프에서도 x1=x2=…=∞ 거의 같음. 25분 창에선 2번째 전환이 거의 안 뜨고, 늦은 창에서 많이 튕겨도 이득 없음(오히려 P(&gt;0)이 98%→88%로 하락).</li>
+<li><b>밴드 방식이 기존 트레일 플립을 못 이김.</b> 09:30·x1 +0.99%는 옛 트레일 플립과 동일 수치. 그리고 <b>갭필터(+2.53%)에는 한참 못 미침.</b></li>
+<li>⚠️ 143설정 중 최고 선택 = 선택편향. <b>부트스트랩만 한 인샘플 결과</b>이므로 walk-forward 전엔 채택 금지(옛 플립도 여기까진 통과했다가 WF서 기각됨).</li>
+</ul></div>
+
+<div class="foot">
+엔진 <code>engine_fable4</code>(cross_freeze) · 베이스 281(tp_gate 0.08) · 데이터 CREON 5분봉 255주/1,233 종목-주 ·
+부트스트랩 SEED=42·B=5,000·square 배분 · net 비용·정수주. 재현 <code>back_test/sweep_band.py</code>.
+</div>
+</div></body></html>"""
+
+
+if __name__ == "__main__":
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    open(OUT, "w", encoding="utf-8").write(build())
+    print("wrote", OUT)

@@ -1,0 +1,18 @@
+---
+name: cvbml02-quad-batch
+description: "cvbml02 batch Type2 quad meshing of all geo_0723 cases (run_type2_0723.py, size 0.06, msh-only)"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: ee471b4a-e3b0-41ee-80bd-85771435f221
+  modified: 2026-07-23T08:28:53.588Z
+---
+
+Batch Type-2 SOLID meshing of all 384 geo_0723 cases on **cvbml02**, started 2026-07-23.
+
+- Runner: `65_final_0723/run_type2_0723.py <case> <nproc> [SOL=1] [SAVE_VTU=0] [MESH_SIZE=0.06]`. Resumable (skips if target .msh exists), HXT→Delaunay fallback, cleans intermediate cal files (keeps only final .msh). Params from parameter.csv, geometry from geo_0723, output to `solid_0723/case_<i>/type2_mesh/solid_type_2_quad.msh`.
+- User settings: **quad (SOL=1, second_order_linear=True), mesh_size=0.06 (coarse — ~1.4-2.4M tets vs 3.6M @0.05), nproc=20, .msh ONLY (no .vtu), all 384 cases.**
+- Driver: `run_batch_mesh.sh` — `seq 0 383 | xargs -P 3` (3-wide = 60 cores ≤ 64). Per-case logs `mesh_logs/case_N.log`. ~4-5 min/case, ETA ~10-11h. (progress-log `PROG` var wasn't exported → mesh_batch_progress.log stays empty; track via `ls solid_0723/case_*/type2_mesh/solid_type_2_quad.msh | wc -l`.)
+- ~10-15% cases fail on geometry (OCC boolean / PLC / HXT-3D errors, e.g. case 10, 14) — collect and retry separately.
+- parameter.csv has 384 rows (case_id 0-383), matches geo_0723. See [[solid-mesh-two-types]] [[solid-mesh-env-cv1]].
+- NOTE distinct from the cvbml01 dist-meshing batch [[batch-dist-meshing-0723]].

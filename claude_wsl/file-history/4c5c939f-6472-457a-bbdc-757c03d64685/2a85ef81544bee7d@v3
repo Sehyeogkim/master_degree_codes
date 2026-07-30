@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Copy every locally-complete case (>=5) that is not yet fully on harvey.
+# Cases are copied PAR-at-a-time; meshing now outruns a sequential copier.
+set -uo pipefail
+LOCAL=/home/jeff/project/65_final_0723
+REMOTE_BASE=/home/jeff/project/65_final_0723/fluid_0723
+SD="$(cd "$(dirname "$0")" && pwd)"
+MINCASE=5
+PAR=${COPY_PAR:-4}
+
+exec 9>"$SD/copy_backlog.lock"
+flock -n 9 || { echo "copy_backlog: already running, skip"; exit 0; }
+
+# A case counts as "on harvey" only if xyzts.dat is present (copied LAST => full copy done).
+mapfile -t ONH < <(ssh -o BatchMode=yes harvey \
+  "for d in $REMOTE_BASE/case_*; do [ -f \"\$d/xyzts.dat\" ] && basename \"\$d\" | sed 's/case_//'; done" 2>/dev/null)
+declare -A HAS; for n in "${ONH[@]}"; do HAS[$n]=1; done
+
+pending=()
+mapfile -t NUMS < <(for d in "$LOCAL"/fluid_0723/case_*; do basename "$d" | sed 's/case_//'; done | sort -n)
+for N in "${NUMS[@]}"; do
+  [ "$N" -lt "$MINCASE" ] && continue
+  [ -n "${HAS[$N]:-}" ] && continue
+  [ -f "$LOCAL/fluid_0723/case_$N/xyzts.dat" ] || continue
+  [ -f "$LOCAL/fluid_0723/case_$N/tree.dat" ] || continue
+  [ -d "$LOCAL/fluid_0723/case_$N/meshing/mesh-complete" ] || continue
+  pending+=("$N")
+done
+
+[ "${#pending[@]}" -eq 0 ] && { echo "copy_backlog: nothing to copy"; exit 0; }
+echo "copy_backlog: ${#pending[@]} pending, ${PAR}-wide -> ${pending[0]}..${pending[-1]}"
+printf '%s\n' "${pending[@]}" | xargs -P "$PAR" -I{} bash "$SD/copy_case_to_harvey.sh" {}
+echo "copy_backlog: pass done ($(date '+%H:%M:%S'))"

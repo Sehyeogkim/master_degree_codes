@@ -1,0 +1,14 @@
+---
+name: notion-harvey-qramp-monitor
+description: Notion page for reporting the mesh-copy + Q_ramp pipeline status
+metadata: 
+  node_type: memory
+  type: reference
+  originSessionId: 4c5c939f-6472-457a-bbdc-757c03d64685
+  modified: 2026-07-23T04:02:34.058Z
+---
+
+Report pipeline status to Notion page **"⛸️ Harvey Q ramp monitor"**:
+https://app.notion.com/p/3a62a46dc68c803dac13f122172d4180 (id `3a62a46d-c68c-803d-ac13-f122172d4180`, under Plaque > monitoring).
+
+Include BOTH mesh copy AND Q_ramp status (user asked 2026-07-23). Each report: timestamp (KST), table of meshing / copy→harvey / Q_ramp progress, plus which Q_ramp cases are running/pending. Insert at page **start** (newest on top). Relates to [[copy-mesh-to-harvey]], [[harvey-qramp-pipeline]], [[reporting-format-mesh]].

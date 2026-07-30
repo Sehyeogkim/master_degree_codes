@@ -1,0 +1,66 @@
+"""결합 리포트(MD+HTML)를 jeff+cofounder에게 메일 발송. p_email의 creds/SMTP 재사용.
+사용: python3 send_report_email.py [--dry-run] [--to a@b,c@d]"""
+import os, sys, ssl, smtplib, argparse
+from email.message import EmailMessage
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+from p_email import _load_creds            # 동일 .gmail_creds 형식/파서 재사용
+import report_combined
+
+DEFAULT_TO = ["kimse991228@gmail.com", "limsung7969@naver.com"]   # jeff + cofounder (config.yaml)
+
+BODY = """<div style="font-family:sans-serif;max-width:720px;line-height:1.6">
+<h2 style="margin-bottom:4px">281 자본배분 방법론 + causal 부트스트랩 결과</h2>
+<p style="color:#6B5E54;font-size:13px">원자=주 · SEED=42 · B=5,000 · 관측 255주</p>
+<p><b>한 줄 요약:</b> 옛 <b>+2.81%/주</b>의 정체는 <b>look-ahead</b>(진입 gap을 미리 안다는 가정)였고,
+실시간 실행가능한 진짜 엣지는 <b>~+0.7%/주</b>다.</p>
+<ul>
+<li>옛 배분(진입 gap⁴)은 5종목 gap을 동시에 알아야 정규화 → 실시간 실행 불가.</li>
+<li>이를 <b>직전주 주간변동율</b>(매매주 전 확정) 신호로 대체 → 완전 causal.</li>
+<li>스케일 규칙 7종 부트스트랩 비교: causal 전부 +0.6~0.73%/주, 최고는 살짝 기운 <b>square(²)</b>.
+    강집중(⁴제곱·softmax)은 오히려 손해(직전주 모멘텀은 이번주의 약한 예측자).</li>
+<li>look-ahead 상한(gap⁴)만 +2.33% — 비교 기준선일 뿐 실행 불가.</li>
+</ul>
+<p style="font-size:13px"><b>첨부:</b> 방법론+결과 문서 (HTML=박스플롯 포함 / MD=요약).<br>
+<span style="color:#6B5E54">한계: 같은 255주 재조합이라 과적합은 못 고침 → walk-forward 병행 필요.</span></p>
+<p style="color:#6B5E54;font-size:12px">— bullet281 back_test 자동 발송</p></div>"""
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--to", help="수신자 override(쉼표)")
+    ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+    to = [x.strip() for x in a.to.split(",")] if a.to else DEFAULT_TO
+
+    md_path, html_path, _ = report_combined.generate()
+    subject = "[bullet281] 281 자본배분 방법론 + causal 부트스트랩 결과 (255주)"
+
+    msg = EmailMessage()
+    msg["To"] = ", ".join(to)
+    msg["Subject"] = subject
+    msg.set_content("HTML 지원 클라이언트에서 보세요. 상세는 첨부 HTML/MD.")
+    msg.add_alternative(BODY, subtype="html")
+    with open(html_path, "rb") as f:
+        msg.add_attachment(f.read(), maintype="text", subtype="html",
+                           filename="281_causal배분_방법론+결과.html")
+    with open(md_path, "rb") as f:
+        msg.add_attachment(f.read(), maintype="text", subtype="markdown",
+                           filename="281_causal배분_방법론+결과.md")
+
+    if a.dry_run:
+        print(f"[dry-run] → {to}\n제목: {subject}\n첨부: {os.path.basename(html_path)}, {os.path.basename(md_path)}")
+        return
+    sender, password = _load_creds()
+    msg["From"] = sender
+    ctx = ssl.create_default_context()
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ctx) as s:
+        s.login(sender, password)
+        s.send_message(msg)
+    print(f"전송 완료 → {', '.join(to)} | {subject} | 첨부 HTML+MD")
+
+
+if __name__ == "__main__":
+    main()

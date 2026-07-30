@@ -1,0 +1,64 @@
+"""cofounder 설득 보고서 발송 — HTML + docx 첨부. p_email creds 재사용.
+사용: python3 send_cofounder_doc.py [--dry-run] [--to a@b,c@d]"""
+import os, sys, ssl, smtplib, argparse
+from email.message import EmailMessage
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+from p_email import _load_creds
+
+DEFAULT_TO = ["kimse991228@gmail.com", "limsung7969@naver.com"]   # 본인 + cofounder
+HTML = os.path.join(ROOT, "report", "live2_갭필터_설명_cofounder.html")
+DOCX = os.path.join(ROOT, "report", "live2_갭필터_설명_cofounder.docx")
+
+BODY = """<div style="font-family:sans-serif;max-width:680px;line-height:1.65">
+<p>형,</p>
+<p>요즘 돌리던 백테스트에서 <b>진짜 걸러진 결과 하나</b>가 나와서 공유해. 한 줄로 요약하면:</p>
+<p style="font-size:16px"><b>“월요일 아침에 크게 갭 뜬 종목에만 자본을 넣는다”</b> — 이 규칙 하나로
+검증구간 주당 수익이 <b style="color:#2E7D32">+1.02% → +2.89%</b>로 뛰었어 (신뢰도 99%).</p>
+<ul>
+<li>새 매매 규칙이 아니라 <b>자본을 어디에 넣느냐</b>만 바꾼 거라 단순해.</li>
+<li>백테스트만 좋은 게 아니라 <b>walk-forward(과거로 정하고 미래로 채점) 6구간 전부 플러스</b>로 통과했어.
+    이번에 아이디어 19개를 같은 검증에 넣었는데 <b>이거 하나만 살아남음.</b></li>
+<li>대신 <b>변동성은 2배</b>로 커지고(최악주 −32%·현금주 24%) 백테스트가 미래 보장은 아니라,
+    지금은 <b>돈 안 걸고 라이브로 전방 관찰만</b> 하는 단계야.</li>
+</ul>
+<p><b>첨부 2개</b> — 같은 내용, 편한 걸로 봐:<br>
+① <b>HTML</b> (차트 포함, 폰에서 바로 열림) · ② <b>워드(.docx)</b> (글·표만, 편집 가능)</p>
+<p>몇 주 같이 지켜보고 방향 맞으면 소액 실전 배분 얘기해보자. 편하게 물어봐줘.</p>
+<p style="color:#6B5E54;font-size:12px">— bullet281 · live2 갭필터 실험</p></div>"""
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--to"); ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+    to = [x.strip() for x in a.to.split(",")] if a.to else DEFAULT_TO
+    subject = "[bullet281] 갭필터 전략(live2) 설명 — 검증구간 +2.89%/주, 같이 봐줘"
+
+    msg = EmailMessage()
+    msg["To"] = ", ".join(to); msg["Subject"] = subject
+    msg.set_content("HTML 지원 클라이언트에서 보세요. 첨부: HTML + 워드(.docx).")
+    msg.add_alternative(BODY, subtype="html")
+    with open(HTML, "rb") as f:
+        msg.add_attachment(f.read(), maintype="text", subtype="html",
+                           filename="갭필터_live2_설명.html")
+    with open(DOCX, "rb") as f:
+        msg.add_attachment(f.read(),
+                           maintype="application",
+                           subtype="vnd.openxmlformats-officedocument.wordprocessingml.document",
+                           filename="갭필터_live2_설명.docx")
+
+    if a.dry_run:
+        print(f"[dry-run] → {to}\n제목: {subject}\n첨부: HTML + docx")
+        return
+    sender, pw = _load_creds()
+    msg["From"] = sender
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context()) as s:
+        s.login(sender, pw); s.send_message(msg)
+    print(f"전송 완료 → {', '.join(to)} | {subject}")
+
+
+if __name__ == "__main__":
+    main()

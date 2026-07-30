@@ -1,0 +1,79 @@
+"""자본배분 규칙 — 직전주 변동율(신호, causal)로 5종목에 가중.
+각 규칙: 종목 리스트(신호·수익률·gap) → 그 주 포트폴리오 net 수익률 1스칼라.
+
+핵심: 신호는 매매주 시작 전 확정된 '직전주 변동율' → 실시간 실행 가능(look-ahead 없음).
+비교 기준선으로 lookahead_gap4(옛 방식, 진입gap 사후배분)도 포함 — 이것만 look-ahead.
+가중은 항상 정규화(Σw=1)·무레버(100% 투입)."""
+import math
+
+
+def _norm(weights, rets):
+    s = sum(weights)
+    if s <= 0:
+        n = len(rets)
+        return sum(r / n for r in rets) if n else 0.0     # 전부 0 → 균등 폴백
+    return sum(w * r for w, r in zip(weights, rets)) / s
+
+
+def _pos(x):
+    return x if x > 0 else 0.0
+
+
+def _zscores(sig):
+    n = len(sig); m = sum(sig) / n
+    var = sum((x - m) ** 2 for x in sig) / n
+    sd = math.sqrt(var) or 1.0
+    return [(x - m) / sd for x in sig]
+
+
+# 규칙: stocks(dict list) → 포트폴리오 net 수익률 -------------------
+def equal(stocks):
+    rets = [s["r"] for s in stocks]
+    return sum(rets) / len(rets) if rets else 0.0
+
+def _power(stocks, p):
+    sig = [_pos(s["signal"]) for s in stocks]
+    rets = [s["r"] for s in stocks]
+    return _norm([x ** p for x in sig], rets)
+
+def linear(stocks):  return _power(stocks, 1)
+def square(stocks):  return _power(stocks, 2)
+def quartic(stocks): return _power(stocks, 4)
+
+def sigmoid(stocks):
+    """신호 주간 z-score → 시그모이드 1/(1+e^-z). 중심=주평균, 기울기=주표준편차."""
+    sig = [s["signal"] for s in stocks]; rets = [s["r"] for s in stocks]
+    z = _zscores(sig)
+    return _norm([1.0 / (1.0 + math.exp(-t)) for t in z], rets)
+
+def softmax(stocks):
+    """신호 z-score softmax exp(z)/Σ — 시그모이드보다 강한 집중(참고)."""
+    sig = [s["signal"] for s in stocks]; rets = [s["r"] for s in stocks]
+    z = _zscores(sig)
+    ex = [math.exp(t) for t in z]
+    return _norm(ex, rets)
+
+def lookahead_gap4(stocks):
+    """옛 방식(참고 상한선) — 진입 gap⁴ 사후배분. gap은 주중 진입시점에 확정되므로
+    5종목 동시 정규화가 look-ahead. 진입 없으면(gap None) 가중 0."""
+    rets = [s["r"] for s in stocks]
+    w = [(_pos(s["gap"]) ** 4 if s["gap"] is not None else 0.0) for s in stocks]
+    return _norm(w, rets)
+
+
+# 순서 = 리포트 표시 순서 (causal 규칙들 → 참고 상한선 마지막)
+RULES = [
+    ("equal",          "균등 (기준선)",        equal),
+    ("linear",         "신호¹ 선형",           linear),
+    ("square",         "신호² 제곱",           square),
+    ("quartic",        "신호⁴ (281 정신)",     quartic),
+    ("sigmoid",        "시그모이드(z)",        sigmoid),
+    ("softmax",        "softmax(z)",           softmax),
+    ("lookahead_gap4", "진입gap⁴ (look-ahead·참고상한)", lookahead_gap4),
+]
+CAUSAL = {"equal", "linear", "square", "quartic", "sigmoid", "softmax"}
+
+
+def weekly_returns(weeks_recs, rule_fn):
+    """{monday:[stocks]} + 규칙함수 → [주별 포트폴리오 net 수익률] (월요일 정렬)."""
+    return [rule_fn(weeks_recs[w]) for w in sorted(weeks_recs)]

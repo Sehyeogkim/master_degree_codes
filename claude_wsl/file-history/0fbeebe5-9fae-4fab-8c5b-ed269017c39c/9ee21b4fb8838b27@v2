@@ -1,0 +1,11 @@
+"""표준 엔진 어댑터 — engine_loader.load_engine 이 기대하는 (STRAT dict, run 콜러블) 노출.
+
+규약: engines/<name>/strategy.py 는 반드시
+  - STRAT : run(bars, F0, capital, **STRAT) 에 넘길 설정 dict
+  - run   : 엔진 실행 콜러블 (engine.run 시그니처)
+를 노출한다. 향후 파생 엔진도 각 폴더에 이 strategy.py 규약을 따르면 로더가 이름으로 로드한다.
+"""
+from engine import run
+from strategy281 import STRAT281 as STRAT
+
+__all__ = ["run", "STRAT"]

@@ -1,0 +1,42 @@
+#!/bin/bash
+# One-shot status for the 54_analysis LAP/CP sim. Prints machine-readable KEY=VAL lines.
+Q=/home/jeff/project/54_analysis
+W=$Q/post_data/wall_no_hyperemia
+cnt(){ ls "$1" 2>/dev/null | wc -l; }
+meshes(){ ls $Q/${1}_mesh/solid_${1}_*.msh 2>/dev/null | wc -l; }
+donecnt(){ local P=$1; ls $Q/ansys_${P}_0728/case_*/FC_case_*_low.vtk 2>/dev/null | wc -l; }   # low-only
+# runnable = mesh present AND both peak&low wall csv present, in 500..999
+runnable(){ local P=$1 n=0 i; for f in $W/peak/wall_peak_case_*.csv; do
+             i=$(echo "$f" | sed -E 's/.*wall_peak_case_([0-9]+).csv/\1/');
+             [ "$i" -ge 500 ] 2>/dev/null || continue;
+             [ -f "$W/low/wall_low_case_$i.csv" ] && [ -f "$Q/${P}_mesh/solid_${P}_$i.msh" ] && n=$((n+1)); done; echo $n; }
+frontier(){ ls $W/peak/wall_peak_case_*.csv 2>/dev/null | sed -E 's/.*case_([0-9]+).csv/\1/' | sort -n | tail -1; }
+
+echo "LAP_MESHES=$(meshes LAP)"
+echo "LAP_DONE=$(donecnt LAP)"
+echo "LAP_RUNNABLE=$(runnable LAP)"
+echo "CP_MESHES=$(meshes CP)"
+echo "CP_DONE=$(donecnt CP)"
+echo "CP_RUNNABLE=$(runnable CP)"
+echo "WALL_PEAK=$(cnt "$W/peak")"
+echo "WALL_LOW=$(cnt "$W/low")"
+echo "HARVEY_FRONTIER=$(frontier)"
+echo "LAP_RUNNING=$(pgrep -f 'run_plaque_batch.sh LAP' >/dev/null && echo 1 || echo 0)"
+echo "CP_RUNNING=$(pgrep -f 'run_plaque_batch.sh CP' >/dev/null && echo 1 || echo 0)"
+echo "ANSYS_PROCS=$(pgrep -c ansys.e 2>/dev/null || echo 0)"
+echo "STOP_LAP=$([ -f $Q/STOP_LAP ] && echo 1 || echo 0)"
+echo "STOP_CP=$([ -f $Q/STOP_CP ] && echo 1 || echo 0)"
+# orphan scratch: results case dirs >2G whose newest file is stale (>300s) and no both-vtk
+echo "--- ORPHANS ---"
+for P in LAP CP; do
+  for d in $Q/ansys_${P}_0728/case_*; do
+    [ -d "$d" ] || continue
+    lowv=$(ls "$d"/FC_case_*_low.vtk 2>/dev/null | head -1)
+    [ -n "$lowv" ] && continue   # low-only: has low vtk -> complete, keep
+    sz=$(du -sm "$d" 2>/dev/null | cut -f1)
+    [ "${sz:-0}" -gt 2048 ] || continue
+    newest=$(find "$d" -type f -printf '%T@\n' 2>/dev/null | sort -n | tail -1 | cut -d. -f1)
+    now=$(date +%s); age=$(( now - ${newest:-$now} ))
+    [ "$age" -gt 300 ] && echo "ORPHAN $d sz=${sz}M age=${age}s"
+  done
+done

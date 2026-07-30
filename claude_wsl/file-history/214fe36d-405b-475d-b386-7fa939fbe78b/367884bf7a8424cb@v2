@@ -1,0 +1,109 @@
+"""live4(engine_fable3) 7/6~7/11 주 백테스트 결과 메일. p_email creds 재사용.
+사용: python3 send_live4_test.py [--dry-run]"""
+import os, sys, ssl, smtplib, argparse, json
+from email.message import EmailMessage
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+from p_email import _load_creds
+
+DEFAULT_TO = ["kimse991228@gmail.com", "limsung7969@naver.com"]
+POS, NEG, MUTE, GRID = "#2E7D32", "#C2493C", "#6B5E54", "#D9D3C7"
+ST = json.load(open("/tmp/claude-1000/-home-jeff-bullet281/214fe36d-405b-475d-b386-7fa939fbe78b/scratchpad/live4_test.json"))
+
+
+def pct(x, bold=False):
+    c = POS if x >= 0 else NEG
+    w = "700" if bold else "400"
+    return f"<span style='color:{c};font-weight:{w}'>{x*100:+.2f}%</span>"
+
+
+def rows():
+    out = []
+    for s in ST:
+        out.append(
+            f"<tr><td style='padding:6px 9px;border-bottom:1px solid {GRID}'>{s['name']} ({s['code']})</td>"
+            f"<td style='padding:6px 9px;border-bottom:1px solid {GRID}'>{'롱' if s['dir']>0 else '숏'}</td>"
+            f"<td style='padding:6px 9px;border-bottom:1px solid {GRID};text-align:right'>{pct(s['r281'])}</td>"
+            f"<td style='padding:6px 9px;border-bottom:1px solid {GRID};text-align:right'>{pct(s['r3'])}</td>"
+            f"<td style='padding:6px 9px;border-bottom:1px solid {GRID};text-align:right'>{pct(s['r4'], True)}</td>"
+            f"<td style='padding:6px 9px;border-bottom:1px solid {GRID};text-align:center'>{s['flips']}회</td></tr>")
+    n = len(ST)
+    a281 = sum(s['r281'] for s in ST) / n
+    a3 = sum(s['r3'] for s in ST) / n
+    a4 = sum(s['r4'] for s in ST) / n
+    out.append(
+        f"<tr style='background:#EDE8DD'><td style='padding:7px 9px'><b>평균</b></td><td></td>"
+        f"<td style='padding:7px 9px;text-align:right'><b>{pct(a281)}</b></td>"
+        f"<td style='padding:7px 9px;text-align:right'><b>{pct(a3)}</b></td>"
+        f"<td style='padding:7px 9px;text-align:right'><b>{pct(a4, True)}</b></td><td></td></tr>")
+    return "".join(out), a281, a3, a4
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dry-run", action="store_true"); ap.add_argument("--to")
+    a = ap.parse_args()
+    to = [x.strip() for x in a.to.split(",")] if a.to else DEFAULT_TO
+    tbl, a281, a3, a4 = rows()
+    subject = "[bullet281] live4 (플립 10:00 연장) 백테스트 — 7/6~7/11 주 결과"
+
+    body = f"""<div style="font-family:sans-serif;max-width:700px;line-height:1.7;color:#211D18">
+<p>형,</p>
+<p>요청한 <b>live4</b> 만들었어. live3(플립 09:30까지)에서 <b>플립 창을 10:00까지 연장</b>한 버전이야.
+새 엔진 <b>engine_fable3</b>으로 돌려. <b>7/6~7/11 주</b> 데이터로 백테스트한 결과 공유해.</p>
+
+<h3 style="margin:20px 0 6px">7/6~7/11 주 · 종목별 (완전한 주, 금 청산 완료)</h3>
+<table style="border-collapse:collapse;font-size:13px;width:100%">
+<tr style="background:#E6E0D4">
+<th style="padding:7px 9px;text-align:left">종목</th>
+<th style="padding:7px 9px">방향</th>
+<th style="padding:7px 9px;text-align:right">281(기존)</th>
+<th style="padding:7px 9px;text-align:right">live3(9:30)</th>
+<th style="padding:7px 9px;text-align:right">live4(10:00)</th>
+<th style="padding:7px 9px">플립</th></tr>
+{tbl}
+</table>
+
+<h3 style="margin:20px 0 6px">해석</h3>
+<ul>
+<li>이번 주는 <b>live3(9:30)과 live4(10:00) 결과가 같아.</b> 유일하게 플립이 걸린 종목(스피어 347700)이
+    <b>09:15에 전환</b>돼서, 창을 9:30이든 10:00이든 똑같이 잡았기 때문이야. (창 연장이 이번 주엔 영향 없음)</li>
+<li>스피어는 <b>281이면 −16.8%</b>였는데 플립으로 롱→숏 전환해 <b>+6.0%</b>로 뒤집었어 — 플립이 통한 케이스.</li>
+<li>단, 주 전체 평균은 셋 다 마이너스({a281*100:+.1f}% / {a3*100:+.1f}% / {a4*100:+.1f}%).
+    이번 주는 선정 5종목이 대체로 안 좋았던 주라 그래. (플립이 그중 손실 하나는 구제)</li>
+</ul>
+
+<p style="background:#FBF3E9;border-left:3px solid #C2493C;padding:9px 13px;font-size:13.5px">
+<b>참고 — 백테스트상 09:30이 10:00보다 유리할 가능성이 높음.</b> 예전 미세분석(실험15)에서
+09:15~09:30이 ‘고원’이었고 09:35부터 성적이 떨어졌거든. 그래서 live4(10:00 연장)는
+<b>“창을 늦추면 노이즈 플립이 늘어 손해”라는 판정이 실제로 맞는지 확인하는 대조군</b>이야.
+한 주로는 판단 못 하고, 앞으로 여러 주 쌓여야 09:30 vs 10:00 차이가 드러나.</p>
+
+<h3 style="margin:20px 0 6px">지금 라이브 4종 체제</h3>
+<ul style="font-size:14px">
+<li><b>live1</b> 순수 281 — 중단(대조 기준)</li>
+<li><b>live2</b> 갭필터 θ3 — <b>검증 통과한 본命</b></li>
+<li><b>live3</b> 플립 09:30 + 게이트10 — 대조군</li>
+<li><b>live4</b> 플립 <b>10:00</b> + 게이트10 — 창 연장 대조군 (신규)</li>
+</ul>
+<p>live4도 매일 자동으로 돌고 장마감 리포트가 우리 둘에게 가게 세팅했어.</p>
+<p style="color:{MUTE};font-size:12.5px">— bullet281 · live4 세팅 + 7/6~7/11 백테스트</p>
+</div>"""
+
+    msg = EmailMessage()
+    msg["To"] = ", ".join(to); msg["Subject"] = subject
+    msg.set_content("HTML 지원 클라이언트에서 보세요.")
+    msg.add_alternative(body, subtype="html")
+    if a.dry_run:
+        print(f"[dry-run] → {to}\n제목: {subject}\n평균 281 {a281*100:+.2f} live3 {a3*100:+.2f} live4 {a4*100:+.2f}")
+        return
+    sender, pw = _load_creds(); msg["From"] = sender
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context()) as s:
+        s.login(sender, pw); s.send_message(msg)
+    print(f"전송 완료 → {', '.join(to)} | {subject}")
+
+
+if __name__ == "__main__":
+    main()

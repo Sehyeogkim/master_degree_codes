@@ -1,0 +1,69 @@
+#!/usr/bin/env python
+"""
+Mesh ONE case with the distance-field recipe (HXT_meshing_I_dist.gmshing_solid),
+saving ONLY the .msh (no vtu). Prints a final one-line JSON status:
+  STATUS {"case":..,"status":"done|skipped|failed", ...}
+
+Usage: python mesh_one_dist.py <case> <nproc> <mesh_size> [algo2d] [algo3d]
+       algo2d: 2 = Automatic (default, falls back to MeshAdapt), 5 = Delaunay, 6 = Frontal-Delaunay
+       algo3d: 10 = HXT (default), 1 = Delaunay
+"""
+import sys
+import json
+import time
+from pathlib import Path
+
+import pandas as pd
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from HXT_meshing_I_dist import gmshing_solid
+
+CASE = int(sys.argv[1])
+NPROC = int(sys.argv[2])
+MESH_SIZE = float(sys.argv[3])
+ALGO2D = int(sys.argv[4]) if len(sys.argv) > 4 else 2
+ALGO3D = int(sys.argv[5]) if len(sys.argv) > 5 else 10
+
+geo = HERE / "geo_0723" / f"case_{CASE}"
+out = HERE / "solid_0723" / f"case_{CASE}" / "dist_run"
+out.mkdir(parents=True, exist_ok=True)
+final_msh = out / "solid_type_1_dist.msh"
+
+
+def emit(d):
+    print("STATUS " + json.dumps(d), flush=True)
+
+
+if final_msh.exists():
+    emit({"case": CASE, "status": "skipped"})
+    sys.exit(0)
+
+t0 = time.time()
+try:
+    csv = Path("/home/jeff/project/54_analysis/pre_data/bin/parameter.csv")
+    lesion_length = float(pd.read_csv(str(csv)).loc[CASE, "lesion_length"])
+
+    msh = gmshing_solid(
+        geo / "lumen.stp", geo / "solid.stp", geo / "lipid.stp", geo / "fc.stp",
+        str(out), nproc=NPROC, Terminal_display=True, save_vtu=False,
+        mesh_size=MESH_SIZE, lesion_length=lesion_length,
+        algo2d=ALGO2D, algo3d=ALGO3D,
+    )
+    Path(msh).replace(final_msh)   # solid_type_1.msh -> solid_type_1_dist.msh ; NO vtu
+
+    q = {}
+    qp = out / "quality.json"
+    if qp.exists():
+        q = json.loads(qp.read_text())
+    emit({"case": CASE, "status": "done",
+          "algo2d": ALGO2D, "algo3d": ALGO3D,
+          "num_elements": q.get("num_elements"),
+          "min_quality": q.get("min_quality"),
+          "neg_jacobian": q.get("neg_jacobian_count"),
+          "seconds": round(time.time() - t0, 1)})
+except Exception as e:
+    emit({"case": CASE, "status": "failed",
+          "error": f"{type(e).__name__}: {e}",
+          "seconds": round(time.time() - t0, 1)})
+    sys.exit(1)

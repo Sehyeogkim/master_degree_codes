@@ -1,0 +1,56 @@
+네, 맞습니다. 이 논문이 바로 그 표준 예시네요. Elsevier elsarticle 클래스([preprint,12pt])로 CMPB에 제출한 형태고, 정확히 이렇게 돼 있습니다:
+
+이 논문이 실제로 한 것 (= 정답 템플릿)
+
+본문 (Intro → Conclusion)
+  ↓  \clearpage
+Table 1, 2   ← 각각 새 페이지, 뒤로 뺌 (landscape로)
+  ↓  \clearpage
+Fig 1 ~ 10   ← 각각 \clearpage로
+  ↓
+\bibliography
+  ↓
+Declarations
+
+→ 본문 안에는 \ref로 "Fig.~\ref{fior}" 인용만 하고, 실제 그림/표객체는 전부 맨 뒤에 몰아서 배치. 당신이 기억한 그대로입니다.
+
+핵심 포인트 (이 논문에서 확인되는 관행)
+
+1. 그림·표를 본문 뒤로 뺀다 ✅ — \
+네, 맞습니다. 이 논문이 바로 그 표준 예시네요. Elsevier elsarticle 클래스([preprint,12pt])로 CMPB에 제출한 형태고, 정확히 이렇게 돼 있습니다:
+
+이 논문이 실제로 한 것 (= 정답 템플릿)
+
+본문 (Intro → Conclusion)
+  ↓  \clearpage
+Table 1, 2   ← 각각 새 페이지, 뒤로 뺌 (landscape로)
+  ↓  \clearpage
+Fig 1 ~ 10   ← 각각 \clearpage로 한 장에 하나씩
+  ↓
+\bibliography
+Declarations
+
+→ 본문 안에는 \ref로 "Fig.~\ref{fior}" 인용만 하고, 실제 그림/표객체는 전부 맨 뒤에 몰아서 배치. 당신이 기억한 그대로입니다.
+
+핵심 포인트 (이 논문에서 확인되는 관행)
+
+1. 그림·표를 본문 뒤로 뺀다 ✅ — \clearpage로 하나씩 새 페이지.
+2. 넓은 표는 \begin{landscape} (pdflscape) 로 가로 배치 — Table 1(9열), Table 2가 그렇게 돼 있음.
+3. preprint 옵션 — 초기 심사용 sin final,5p,twocolumn 등으로 편집부가
+
+→ 본문 안에는 \ref로 "Fig.~\ref{fig:fig1}", "Table~\ref{tab:error}" 인용만 하고, 실제 그림/표 객체는 전부 맨 뒤에 몰아서 배치. 당신이 기억한 그대로입니다.
+                                                                                                   핵심 포인트 (이 논문에서 확인되는
+                                                                                                   1. 그림·표를 본문 뒤로 뺀다 ✅ — \
+2. 넓은 표는 \begin{landscape} (pdflscape) 로 가로 배치 — Table 1(9열), Table 2가 그렇게 돼 있음.
+3. preprint 옵션 — 초기 심사용 single-column 형식. (최종 게재는 final,5p,twocolumn 등으로 편집부가 다시 조판)
+4. 본문엔 그림/표 위치 지정 안 함 — 어차피 production에서 재배치.
+
+그러니까 정리
+
+- 저널(Elsevier) 제출 → 이 논문처럼 뒤로 빼는 게 맞습니다. ✅ 당신 판단 정확.
+- 단, 우리가 작업하던 건 학위논문이라 → 거긴 inline 그대로 두면 됩니다 (학위논문은 제자리 배치가
+표준). 두 개는 별개예요.
+- 참고: Elsevier 가이드라인상 "본문 근처 embed"도 기술적으로 허용되긴 하지만, 연구실이 이렇게 뒤로
+빼서 내는 관행이면 그 방식을 따르 .
+
+즉 — 저널 낼 땐 뒤로, 학위논문은  널 제출본이라 뒤로 뺀 게 정답이맞습니다.

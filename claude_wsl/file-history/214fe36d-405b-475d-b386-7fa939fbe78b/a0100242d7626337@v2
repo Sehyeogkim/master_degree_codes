@@ -1,0 +1,56 @@
+"""선택 예시 종목-주의 캔들+이벤트+레벨을 아티팩트 렌더용 JSON으로 추출."""
+import os, sys, json
+
+ROOT = "/home/jeff/bullet281"
+sys.path.insert(0, os.path.join(ROOT, "engines", "engine_fable"))
+sys.path.insert(0, os.path.join(ROOT, "engines", "engine281"))
+import engine_fable
+import engine as engine281
+from strategy_fable import STRAT_FABLE
+STRAT281 = dict(tp_gate=0.08, entries=("trail",), stop_mode="none",
+                fee=0.00015, slip=0.0005, tax=0.0015, round_shares=True)
+DATA = os.path.join(ROOT, "data", "data_creon_API", "intraday_5m_by_week")
+a = json.load(open(os.path.join(ROOT, "back_test", "weekly_records.json")))
+A = {(w, s["code"]): s for w in a["weeks"] for s in a["weeks"][w]}
+
+# (week, code, 짧은설명)
+PICKS = [
+    ("2025-11-24", "058610", "loss"),   # +32.9% → -42.4%
+    ("2024-10-14", "087010", "loss"),   # +26.4% → -32.7%
+    ("2026-04-20", "027360", "gain"),   # -64.4% → +39.3% (개선 사례)
+]
+
+def week_file(week, code):
+    d = os.path.join(DATA, week)
+    for f in os.listdir(d):
+        if f.startswith(code + "_") and f.endswith("_5m.csv"):
+            return os.path.join(d, f), f
+    return None, None
+
+out = []
+for week, code, kind in PICKS:
+    path, fname = week_file(week, code)
+    name = fname.split("_")[1] if fname else code
+    F0 = A[(week, code)]["F0"]
+    bars = engine_fable.load_bars(path)
+    ev281, c281 = engine281.run(bars, F0, **STRAT281)
+    evfab, cfab = engine_fable.run(bars, F0, **STRAT_FABLE)
+    base, case, longL, shortL, initial = engine_fable.classify(bars[0], F0)
+    def ser_ev(ev):
+        return [dict(idx=e.idx, kind=e.kind, dir=e.direction, price=e.price,
+                     marker=e.marker, dt=e.dt, reason=e.reason, note=e.note, pnl=e.pnl)
+                for e in ev]
+    out.append(dict(
+        week=week, code=code, name=name, kind=kind, F0=F0,
+        longL=longL, shortL=shortL, long_gate=max(longL), short_gate=min(shortL),
+        r281=c281["weekly_return"], rfab=cfab["weekly_return"],
+        flips=cfab["flips_used"],
+        bars=[dict(dt=b.dt, o=b.o, h=b.h, l=b.l, c=b.c) for b in bars],
+        ev281=ser_ev(ev281), evfab=ser_ev(evfab),
+    ))
+    print(f"{week} {code} {name}: 281={c281['weekly_return']*100:+.2f}% "
+          f"fable={cfab['weekly_return']*100:+.2f}% bars={len(bars)} "
+          f"fabEv={len(evfab)} F0={F0}")
+
+json.dump(out, open("/tmp/claude-1000/-home-jeff-bullet281/214fe36d-405b-475d-b386-7fa939fbe78b/scratchpad/examples.json", "w"), ensure_ascii=False)
+print("saved examples.json")

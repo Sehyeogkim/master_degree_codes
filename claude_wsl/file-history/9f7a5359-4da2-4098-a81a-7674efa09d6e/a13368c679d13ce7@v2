@@ -1,0 +1,66 @@
+#!/usr/bin/env python
+"""
+Type-1 solid meshing for a single case, driven off geo_0723 geometry.
+
+  input : 65_final_0723/geo_0723/case_<i>/{lumen,solid,lipid,fc}.stp
+  output: 65_final_0723/solid_0723/case_<i>/solid_type_1.msh  (+ .vtu)
+
+Reuses HXT_meshing_I.gmshing_solid unchanged; only the paths are redirected
+to geo_0723 / solid_0723. The .msh -> .vtu step mirrors
+HXT_type2_utils.HXT_mesh_II.msh_to_vtu (points *= 0.1, drop cell_sets).
+
+Usage: python run_solid_0723.py <case> <nproc> <mesh_size>
+"""
+import sys
+import time
+from pathlib import Path
+
+import pandas as pd
+import meshio
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))            # HXT_meshing_I.py lives here
+from HXT_meshing_I import gmshing_solid
+
+CASE = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+NPROC = int(sys.argv[2]) if len(sys.argv) > 2 else 20
+MESH_SIZE = float(sys.argv[3]) if len(sys.argv) > 3 else 0.055
+
+geo = HERE / "geo_0723" / f"case_{CASE}"
+out = HERE / "solid_0723" / f"case_{CASE}"
+out.mkdir(parents=True, exist_ok=True)
+
+# lesion_length from the parameter table on cv1 (case index = row index)
+CSV = Path("/home/jeff/project/54_analysis/pre_data/bin/parameter.csv")
+lesion_length = float(pd.read_csv(CSV).loc[CASE, "lesion_length"])
+
+print(f"[cfg] case={CASE} nproc={NPROC} mesh_size={MESH_SIZE} lesion_length={lesion_length}")
+print(f"[in ] {geo}")
+print(f"[out] {out}")
+for f in ("lumen.stp", "solid.stp", "lipid.stp", "fc.stp"):
+    assert (geo / f).exists(), f"missing input: {geo / f}"
+
+t0 = time.time()
+msh = gmshing_solid(
+    geo / "lumen.stp",
+    geo / "solid.stp",
+    geo / "lipid.stp",
+    geo / "fc.stp",
+    str(out),
+    nproc=NPROC,
+    Terminal_display=True,
+    save_vtu=False,
+    mesh_size=MESH_SIZE,
+    lesion_length=lesion_length,
+)
+print(f"[msh] {msh}  ({time.time() - t0:.1f}s)")
+
+# ---- .msh -> .vtu (same convention as HXT_type2_utils.msh_to_vtu) ----
+vtu = str(msh).replace(".msh", ".vtu")
+mesh = meshio.read(str(msh))
+mesh.points *= 0.1
+if mesh.cell_sets:
+    mesh.cell_sets = {}
+meshio.write(vtu, mesh)
+print(f"[vtu] {vtu}")
+print("[done]")

@@ -1,0 +1,325 @@
+"""281 vs fable 아티팩트(body-only HTML) 생성 — 비교 + 원인분석 + 캔들 예시.
+사용: python3 make_artifact.py  → report/backtest_281_vs_fable.artifact.html
+예시 데이터는 scratchpad/examples.json (extract_examples.py 산출)."""
+import os, sys, json, html
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+import allocation, bootstrap
+
+SCRATCH = "/tmp/claude-1000/-home-jeff-bullet281/214fe36d-405b-475d-b386-7fa939fbe78b/scratchpad"
+OUT = os.path.join(ROOT, "report", "backtest_281_vs_fable.artifact.html")
+
+# ── 팔레트 (리포 웜페이퍼 정체성) ────────────────────────────────
+PAPER, INK, ACCENT, GRID = "#F0EEE6", "#211D18", "#CC785C", "#D9D3C7"
+MUTE, POS, NEG = "#6B5E54", "#2E7D32", "#C2493C"
+UP, DOWN = "#D24B4B", "#3A6EA5"      # 한국식 캔들 (상승=적, 하락=청)
+CARD = "#FBFAF6"
+esc = html.escape
+
+
+def results(recs):
+    out = {}
+    for key, label, fn in allocation.RULES:
+        weekly = allocation.weekly_returns(recs, fn)
+        out[key] = (label, bootstrap.analyze(weekly), key in allocation.CAUSAL)
+    return out
+
+
+# ── 캔들 SVG ─────────────────────────────────────────────────────
+def candle_svg(ex):
+    bars = ex["bars"]; n = len(bars)
+    cw = 2.7
+    W = round(n * cw); padT, padB, padL, padR = 34, 46, 8, 8
+    H = 330; plotH = H - padT - padB
+    lo = min(min(b["l"] for b in bars), ex["F0"], ex["short_gate"])
+    hi = max(max(b["h"] for b in bars), ex["F0"], ex["long_gate"])
+    span = hi - lo; pad = span * 0.06; lo -= pad; hi += pad; span = hi - lo
+    Y = lambda p: padT + plotH * (hi - p) / span
+    X = lambda i: padL + i * cw + cw / 2
+    el = [f'<svg viewBox="0 0 {W+padL+padR} {H}" width="{W+padL+padR}" height="{H}" '
+          f'font-family="ui-sans-serif,system-ui,sans-serif">']
+    el.append(f'<rect x="0" y="0" width="{W+padL+padR}" height="{H}" fill="{CARD}"/>')
+
+    # 일 구분선 + 요일 라벨
+    days = ["월", "화", "수", "목", "금"]
+    prev = None; di = 0
+    for i, b in enumerate(bars):
+        d = b["dt"][:10]
+        if d != prev:
+            if prev is not None:
+                el.append(f'<line x1="{X(i)-cw/2:.1f}" y1="{padT}" x2="{X(i)-cw/2:.1f}" '
+                          f'y2="{padT+plotH}" stroke="{GRID}" stroke-width="1"/>')
+            lab = days[di] if di < len(days) else d[5:]
+            el.append(f'<text x="{X(i)+2:.1f}" y="{padT+12:.0f}" font-size="10" '
+                      f'fill="{MUTE}" font-weight="700">{lab}</text>')
+            prev = d; di += 1
+
+    # 기준선: F0, long_gate, short_gate
+    for val, col, txt, dash in [
+        (ex["F0"], MUTE, f'F0 {ex["F0"]:,.0f}', "2 3"),
+        (ex["long_gate"], POS, f'롱 기준선', "5 3"),
+        (ex["short_gate"], DOWN, f'숏 기준선', "5 3")]:
+        yy = Y(val)
+        el.append(f'<line x1="{padL}" y1="{yy:.1f}" x2="{padL+W}" y2="{yy:.1f}" '
+                  f'stroke="{col}" stroke-width="1" stroke-dasharray="{dash}" opacity="0.55"/>')
+        el.append(f'<text x="{padL+W-4}" y="{yy-3:.1f}" font-size="9.5" fill="{col}" '
+                  f'text-anchor="end" opacity="0.9">{txt}</text>')
+
+    # 캔들
+    bw = max(1.4, cw * 0.62)
+    for i, b in enumerate(bars):
+        up = b["c"] >= b["o"]; col = UP if up else DOWN
+        cx = X(i)
+        el.append(f'<line x1="{cx:.1f}" y1="{Y(b["h"]):.1f}" x2="{cx:.1f}" y2="{Y(b["l"]):.1f}" '
+                  f'stroke="{col}" stroke-width="0.8"/>')
+        yo, yc = Y(b["o"]), Y(b["c"])
+        top = min(yo, yc); hgt = max(0.8, abs(yc - yo))
+        el.append(f'<rect x="{cx-bw/2:.1f}" y="{top:.1f}" width="{bw:.1f}" height="{hgt:.1f}" '
+                  f'fill="{col}"/>')
+
+    # 이벤트 마커
+    def find_flip(evfab):
+        ent = [e for e in evfab if e["kind"] == "ENTRY"]
+        return ent[0], (ent[1] if len(ent) > 1 else None), \
+               [e for e in evfab if e["kind"] == "EXIT"]
+    e0, eflip, exits = find_flip(ex["evfab"])
+
+    # 진입 E (원포지션)
+    ei = e0["idx"]; ey = Y(e0["price"])
+    el.append(f'<circle cx="{X(ei):.1f}" cy="{ey:.1f}" r="4.5" fill="none" stroke="{INK}" stroke-width="1.6"/>')
+    el.append(f'<text x="{X(ei):.1f}" y="{ey-9:.1f}" font-size="10" fill="{INK}" '
+              f'text-anchor="middle" font-weight="700">E</text>')
+
+    # 플립 수직선 + 라벨
+    if eflip:
+        fx = X(eflip["idx"])
+        el.append(f'<line x1="{fx:.1f}" y1="{padT}" x2="{fx:.1f}" y2="{padT+plotH}" '
+                  f'stroke="{ACCENT}" stroke-width="1.6" stroke-dasharray="3 2"/>')
+        fdir = "숏" if eflip["dir"] < 0 else "롱"
+        el.append(f'<rect x="{fx+3:.1f}" y="{padT+16:.0f}" width="86" height="16" rx="3" '
+                  f'fill="{ACCENT}"/>')
+        el.append(f'<text x="{fx+7:.1f}" y="{padT+27:.0f}" font-size="9.5" fill="#fff" '
+                  f'font-weight="700">FLIP → {fdir} 전환</text>')
+        fy = Y(eflip["price"])
+        el.append(f'<circle cx="{fx:.1f}" cy="{fy:.1f}" r="4.5" fill="{ACCENT}" stroke="#fff" stroke-width="1.2"/>')
+
+    # 강제청산(마지막) 마커
+    last = exits[-1]; lx = X(last["idx"]); ly = Y(last["price"])
+    el.append(f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="4" fill="{INK}"/>')
+    el.append(f'<text x="{lx:.1f}" y="{ly-9:.1f}" font-size="9.5" fill="{INK}" '
+              f'text-anchor="end" font-weight="700">청산 {last["price"]:,.0f}</text>')
+    el.append('</svg>')
+    return "".join(el), W + padL + padR
+
+
+def pct(x): return f'{x*100:+.1f}%'
+
+
+def example_card(ex):
+    svg, w = candle_svg(ex)
+    win = ex["kind"] == "gain"
+    e0 = [e for e in ex["evfab"] if e["kind"] == "ENTRY"][0]
+    d0 = "롱" if e0["dir"] > 0 else "숏"
+    flip = [e for e in ex["evfab"] if e["kind"] == "ENTRY"][1]
+    fdir = "숏" if flip["dir"] < 0 else "롱"
+    ft = flip["dt"][11:16]
+    delta = (ex["rfab"] - ex["r281"]) * 100
+    # 서사
+    if win:
+        story = (f'월요일 {ft} 원래 {d0} 진입이 반대로 밀리자 fable이 {fdir}으로 전환 — '
+                 f'이번엔 <b>진짜 반전</b>이라 이후 대세를 올라타 <b class="pos">{pct(ex["rfab"])}</b>. '
+                 f'281은 원래 {d0}을 고집해 <b class="neg">{pct(ex["r281"])}</b>. '
+                 f'플립이 맞는 <b>드문 케이스</b>(전체의 소수).')
+        verdict = "플립이 옳았던 예외"
+    else:
+        story = (f'월요일 {ft} 초반 <b>노이즈성 눌림</b>에 {d0} 손절 → {fdir} 전환. '
+                 f'그러나 그 주 대세는 원래 {d0} 방향으로 재개돼, 전환한 {fdir}이 정확히 '
+                 f'<b>추세 반대편</b>에 서서 <b class="neg">{pct(ex["rfab"])}</b>. '
+                 f'281은 월요일 노이즈를 <b>버티고 홀드</b>해 <b class="pos">{pct(ex["r281"])}</b>.')
+        verdict = "노이즈에 속은 whipsaw"
+    return f"""<figure class="ex {'win' if win else 'loss'}">
+<figcaption>
+  <div class="exhd">
+    <span class="tick">{esc(ex['name'])} · {esc(ex['code'])}</span>
+    <span class="wk">{esc(ex['week'])} 주</span>
+    <span class="tag">{verdict}</span>
+  </div>
+  <div class="scores">
+    <span class="s281">281 <b>{pct(ex['r281'])}</b></span>
+    <span class="arrow">vs</span>
+    <span class="sfab">fable <b class="{'pos' if ex['rfab']>0 else 'neg'}">{pct(ex['rfab'])}</b></span>
+    <span class="dlt {'pos' if delta>0 else 'neg'}">Δ {delta:+.1f}%p</span>
+  </div>
+</figcaption>
+<div class="chart"><div class="scroll">{svg}</div></div>
+<p class="story">{story}</p>
+</figure>"""
+
+
+def rule_rows(r281, r1, r3, r2):
+    rows = []
+    for key, label, fn in allocation.RULES:
+        l0, s0, causal = r281[key]; _, s1, _ = r1[key]; _, s3, _ = r3[key]; _, s2, _ = r2[key]
+        d = s2["obs_mean"] - s0["obs_mean"]        # v2(최대확장) vs 281
+        w = min(100, abs(d) / 0.60 * 100)
+        bar = (f'<span class="barwrap"><span class="bar0"></span>'
+               f'<span class="barneg" style="width:{w:.0f}%"></span></span>' if d < 0 else
+               f'<span class="barwrap"><span class="bar0"></span>'
+               f'<span class="barpos" style="width:{w:.0f}%"></span></span>')
+        badge = "" if causal else ' <span class="look">look-ahead</span>'
+        rows.append(
+            f'<tr{"" if causal else " class=dim"}>'
+            f'<td><b>{esc(key)}</b>{badge}<div class="sub">{esc(l0)}</div></td>'
+            f'<td class="num">{s0["obs_mean"]:+.2f}%</td>'
+            f'<td class="num">{s1["obs_mean"]:+.2f}%</td>'
+            f'<td class="num">{s3["obs_mean"]:+.2f}%</td>'
+            f'<td class="num">{s2["obs_mean"]:+.2f}%</td>'
+            f'<td class="num dcell {"pos" if d>0 else "neg"}">{d:+.2f}%p</td>'
+            f'<td class="barcell">{bar}</td></tr>')
+    return "".join(rows)
+
+
+def _sw_stats(base_weeks, var_weeks):
+    """종목-주 평균 net(%)와 baseline 대비 플립영향 비율(%)."""
+    A = {(w, s["code"]): s for w in base_weeks for s in base_weeks[w]}
+    Bm = {(w, s["code"]): s for w in var_weeks for s in var_weeks[w]}
+    keys = [k for k in A if k in Bm]
+    mean = sum(Bm[k]["r"] for k in keys) / len(keys) * 100
+    changed = sum(1 for k in keys if abs(A[k]["r"] - Bm[k]["r"]) > 1e-12)
+    return mean, changed / len(keys) * 100
+
+
+def build():
+    w281 = json.load(open(os.path.join(HERE, "weekly_records.json")))["weeks"]
+    w1 = json.load(open(os.path.join(HERE, "weekly_records_fable.json")))["weeks"]
+    w3 = json.load(open(os.path.join(HERE, "weekly_records_fable_v3.json")))["weeks"]
+    w2 = json.load(open(os.path.join(HERE, "weekly_records_fable_v2.json")))["weeks"]
+    r281, r1, r3, r2 = results(w281), results(w1), results(w3), results(w2)
+    ex = json.load(open(os.path.join(SCRATCH, "examples.json")))
+
+    m0 = sum(s["r"] for w in w281 for s in w281[w]) / sum(len(w281[w]) for w in w281) * 100
+    m1, f1 = _sw_stats(w281, w1)
+    m3, f3 = _sw_stats(w281, w3)
+    m2, f2 = _sw_stats(w281, w2)
+
+    best0 = max((k for k in r281 if r281[k][2]), key=lambda k: r281[k][1]["obs_mean"])
+    b0 = r281[best0][1]
+    cards = "".join(example_card(e) for e in ex)
+    rows = rule_rows(r281, r1, r3, r2)
+
+    return f"""<title>281 vs 리버설(v1·v3·v2) — 왜 더 낮은가</title>
+<style>
+.paper{{--paper:{PAPER};--ink:{INK};--acc:{ACCENT};--grid:{GRID};--mute:{MUTE};--pos:{POS};--neg:{NEG};--card:{CARD};
+background:var(--paper);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+line-height:1.62;-webkit-font-smoothing:antialiased;padding:0;margin:0}}
+.paper *{{box-sizing:border-box}}
+.wrap{{max-width:1080px;margin:0 auto;padding:44px 24px 90px}}
+.eyebrow{{font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--acc);font-weight:800;margin:0 0 10px}}
+h1{{font-size:33px;line-height:1.12;margin:0 0 12px;font-weight:800;letter-spacing:-.02em;text-wrap:balance;max-width:20ch}}
+.lede{{font-size:15.5px;color:#453d34;max-width:64ch;margin:0 0 6px}}
+.verdict{{display:flex;flex-wrap:wrap;gap:14px;margin:30px 0 8px}}
+.vc{{flex:1 1 200px;background:var(--card);border:1px solid var(--grid);border-radius:12px;padding:16px 18px}}
+.vc .k{{font-size:11.5px;color:var(--mute);font-weight:700;letter-spacing:.03em}}
+.vc .v{{font-size:27px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:3px;letter-spacing:-.01em}}
+.vc .d{{font-size:12.5px;color:var(--mute);margin-top:2px}}
+.vc.bad{{border-color:{NEG}}} .vc.bad .v{{color:{NEG}}}
+h2{{font-size:19px;margin:44px 0 4px;font-weight:800;letter-spacing:-.01em}}
+h2 .n{{color:var(--acc);font-variant-numeric:tabular-nums}}
+.sec-sub{{color:var(--mute);font-size:13px;margin:0 0 16px}}
+.pos{{color:var(--pos)}} .neg{{color:var(--neg)}}
+table{{border-collapse:collapse;width:100%;font-size:13px}}
+th,td{{border-bottom:1px solid var(--grid);padding:9px 10px;text-align:left;vertical-align:middle}}
+th{{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.05em;font-weight:800}}
+td.num{{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}}
+td.dcell{{font-weight:800}}
+.sub{{color:var(--mute);font-size:11px;font-weight:500}}
+tr.dim{{opacity:.6}}
+.look{{background:var(--mute);color:#fff;font-size:9px;padding:1px 5px;border-radius:4px;font-weight:700}}
+.barcell{{width:120px}}
+.barwrap{{position:relative;display:block;height:14px;width:110px}}
+.bar0{{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--grid)}}
+.barneg{{position:absolute;right:50%;top:2px;height:10px;background:{NEG};border-radius:2px 0 0 2px;opacity:.85}}
+.barpos{{position:absolute;left:50%;top:2px;height:10px;background:{POS};border-radius:0 2px 2px 0;opacity:.85}}
+.mech{{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-top:6px}}
+.mc{{background:var(--card);border:1px solid var(--grid);border-radius:12px;padding:16px 18px}}
+.mc .big{{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.01em}}
+.mc .lab{{font-size:12.5px;color:var(--mute);margin-top:2px}}
+.mc p{{font-size:13px;margin:9px 0 0;color:#453d34}}
+.ex{{background:var(--card);border:1px solid var(--grid);border-radius:14px;padding:18px 18px 20px;margin:16px 0}}
+.ex.loss{{border-left:4px solid {NEG}}} .ex.win{{border-left:4px solid {POS}}}
+.exhd{{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}}
+.tick{{font-size:16px;font-weight:800}}
+.wk{{font-size:12px;color:var(--mute);font-variant-numeric:tabular-nums}}
+.tag{{margin-left:auto;font-size:11px;font-weight:800;padding:2px 9px;border-radius:20px;background:var(--paper);border:1px solid var(--grid);color:#453d34}}
+.scores{{display:flex;align-items:center;gap:12px;margin:9px 0 4px;font-size:14px;font-variant-numeric:tabular-nums}}
+.scores b{{font-size:16px}}
+.s281{{color:#453d34}} .arrow{{color:var(--mute);font-size:12px}}
+.dlt{{margin-left:auto;font-weight:800;font-size:13px;padding:2px 9px;border-radius:6px;background:var(--paper);border:1px solid var(--grid)}}
+.chart{{margin:8px 0 6px;border:1px solid var(--grid);border-radius:8px;background:{CARD}}}
+.scroll{{overflow-x:auto}}
+.story{{font-size:13.5px;margin:8px 2px 0;color:#3a332c}}
+.foot{{margin-top:34px;font-size:12px;color:var(--mute);border-top:1px solid var(--grid);padding-top:16px}}
+.foot code{{background:#e7e1d5;padding:1px 5px;border-radius:4px}}
+.legend{{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:var(--mute);margin:2px 2px 0}}
+.legend span b{{color:var(--ink)}}
+@media(prefers-color-scheme:dark){{.paper{{filter:none}}}}
+</style>
+<div class="paper"><div class="wrap">
+<p class="eyebrow">CREON 5년 · 255주 백테스트 · 엔진만 교체</p>
+<h1>리버설을 <span class="neg">더 허용할수록 더 낮아진다</span></h1>
+<p class="lede">기존 <b>281</b>(주간 모멘텀·무손절·금 15:15 청산)에 “보유 중 반대신호가 뜨면
+손절 후 반대로 전환” 규칙을 넣고, 그 <b>허용 범위를 넓혀가며</b>(v1→v3→v2) 세 가지로 실험했다.
+동일 주·종목·신호·F0, 엔진만 교체. 결과는 <b>허용을 넓힐수록 단조롭게 악화</b>.</p>
+
+<div class="verdict">
+  <div class="vc"><div class="k">종목-주 평균 net · 281</div><div class="v">{m0:+.2f}%</div><div class="d">기준 (플립 없음)</div></div>
+  <div class="vc bad"><div class="k">v1 · 월요일 1회</div><div class="v">{m1:+.2f}%</div><div class="d">Δ {m1-m0:+.2f}%p · 플립 {f1:.0f}%</div></div>
+  <div class="vc bad"><div class="k">v3 · 월요일 2회</div><div class="v">{m3:+.2f}%</div><div class="d">Δ {m3-m0:+.2f}%p · 플립 {f3:.0f}%</div></div>
+  <div class="vc bad"><div class="k">v2 · 화 10시·2회</div><div class="v">{m2:+.2f}%</div><div class="d">Δ {m2-m0:+.2f}%p · 플립 {f2:.0f}%</div></div>
+</div>
+
+<h2>네 방법론 비교 <span class="n">281 · v1 · v3 · v2</span></h2>
+<p class="sec-sub">배분규칙별 평균주간 net 수익률(부트스트랩 B=5,000). <b>v1</b>=월·1회 · <b>v3</b>=월·2회 · <b>v2</b>=화10시·2회.
+Δ = v2 − 281. 막대는 손해(빨강) 크기.</p>
+<table>
+<thead><tr><th>배분 규칙</th><th class="num">281</th><th class="num">v1</th><th class="num">v3</th><th class="num">v2</th><th class="num">Δ v2−281</th><th>효과</th></tr></thead>
+<tbody>{rows}</tbody></table>
+<p class="legend"><span>최고 causal(281): <b>{best0} {b0['obs_mean']:+.2f}%</b></span>
+<span>모든 causal 규칙에서 v1&gt;v3&gt;v2 순으로 하락 — <b>허용 범위와 손실이 비례</b></span></p>
+
+<h2>왜 더 낮은가 — 원인 분석</h2>
+<p class="sec-sub">v1(월·1회)에서 플립은 351 종목-주(28.5%)에 발생. 허용을 넓힌 v3(월·2회)·v2(화10시·2회)는
+플립 발생이 {f3:.0f}%·{f2:.0f}%로 늘고 그만큼 더 잃는다. 351건을 해부하면 손실 구조가 드러난다.</p>
+<div class="mech">
+  <div class="mc"><div class="big">65%</div><div class="lab">whipsaw (227/351, v1)</div>
+    <p>전환한 <b>새 포지션마저 손실</b>. 월요일 신저점/신고점은 대개 <b>노이즈</b>였고, 반대로 갈아탄 직후 원래 추세가 재개됐다.</p></div>
+  <div class="mc"><div class="big neg">−1.29%p</div><div class="lab">플립당 평균 손익변화</div>
+    <p>개선 161 / 악화 190으로 <b>건수는 비슷</b>하지만 <b>지는 쪽이 훨씬 크다</b>. 281이 크게 먹던 주(+33%·+26%)를 큰 손실로 뒤집었다.</p></div>
+  <div class="mc"><div class="big">단조</div><div class="lab">허용↑ → 손실↑</div>
+    <p>플립 자체가 <b>음의 기대값</b>이라, 더 오래(화요일)·더 자주(2회) 허용할수록 그 손해를 <b>더 많이 실현</b>한다. v1&gt;v3&gt;v2 순 하락이 그 증거.</p></div>
+</div>
+<div class="mc" style="margin-top:14px">
+<p style="margin:0"><b>한 줄 요약.</b> 281의 엣지는 “선정된 모멘텀 종목은 그 주 <b>원래 방향으로 간다</b>”는 데 있다.
+초반의 반대 움직임은 대부분 <b>노이즈</b>이므로, 무손절로 <b>버티는 것</b>이 통계적으로 옳다.
+리버설 플립은 이 노이즈를 <b>규제 전환 신호로 오인</b>해 추세 반대편에 서게 만든다 — 그래서 지고,
+<b>허용을 넓힐수록 더 진다</b>.</p>
+</div>
+
+<h2>실제 예시 <span class="n">3</span></h2>
+<p class="sec-sub">한국식 캔들(상승=적, 하락=청). <b>E</b>=원 진입 · <span style="color:{ACCENT};font-weight:700">주황 점선/FLIP</span>=리버설 전환 · 검정점=금 15:15 청산.
+가로 스크롤로 월~금 전체. (아래 예시는 v1 플립 — v3·v2는 같은 패턴이 더 자주·더 크게 반복된다.)</p>
+{cards}
+
+<div class="foot">
+데이터 <code>data/data_creon_API</code> (CREON 5분봉, 255주/1,233 종목-주) · 신호·F0 yfinance 일봉 · 부트스트랩 SEED=42, B=5,000.
+엔진 <code>engines/engine_fable</code>(v1/v3/v2 = STRAT_FABLE/_V3/_V2), 재현 <code>back_test/run_all_fable.py</code>. 회귀테스트 16/16(flip-off = 281 일치).<br>
+한계: 같은 255주 재조합(과적합 미해결·walk-forward 병행 필요) · 2020~2026 레짐 조건부 · 시장충격 미반영 · 창 정의 “월”=첫 거래일·“화10시”=둘째 거래일 10:00까지.
+</div>
+</div></div>"""
+
+
+if __name__ == "__main__":
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    open(OUT, "w", encoding="utf-8").write(build())
+    print("wrote", OUT)

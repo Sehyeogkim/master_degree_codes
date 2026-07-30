@@ -1,0 +1,53 @@
+"""
+Fluid mesh-independence: steady 3D POST (case 0, grid size as CLI arg).
+svpost step 500 -> rst_00500.vtp -> extract_wall_data(include_pressure=True)
+Output: mesh_independent_test_fluid/wall/{phase}/wall_{phase}_{grid}.csv
+Usage: mi_steady_post.py <grid>
+NP 는 env NP (기본 24) -- svsolver 를 돌린 값과 반드시 같아야 한다 (<NP>-procs_case 를 읽음).
+"""
+import os
+import sys
+import glob
+from pathlib import Path
+
+sys.path.insert(0, "/home/jeff/repo/master_python/src")
+import utils.utils_lumen.runner as runner
+from utils.utils_lumen.extract_wall_csv import extract_wall_data
+
+ROOT = Path("/home/jeff/project/54_analysis")
+BASE = ROOT / "mesh_independent_test_fluid"
+SVPOST = "/opt/cvbml/repos/svSolverPrivate/build/svSolver-build/bin/svpost"
+NP = int(os.environ.get("NP", "24"))
+STEP = 500
+PHASES = os.environ.get("PHASES", "peak low").split()
+
+
+def main():
+    grid = sys.argv[1]
+    st_dir = BASE / "mesh" / grid / "steady_3d"
+    ok = 0
+    for name in PHASES:
+        folder = st_dir / name
+        procs = folder / f"{NP}-procs_case"
+        out_csv = BASE / "wall" / name / f"wall_{name}_{grid}.csv"
+        if out_csv.exists():
+            print(f"[skip] {grid}/{name}: csv already exists")
+            ok += 1
+            continue
+        if not (procs / f"restart.{STEP}.1").exists():
+            print(f"[ERROR] {grid}/{name}: restart.{STEP}.1 missing in {procs}")
+            continue
+        runner.run_svpost(str(folder), SVPOST, NP, STEP, "rst")
+        vtps = sorted(glob.glob(str(folder / "rst_*.vtp"))) or sorted(glob.glob(str(procs / "rst_*.vtp")))
+        if not vtps:
+            print(f"[ERROR] {grid}/{name}: svpost produced no rst_*.vtp")
+            continue
+        out_csv.parent.mkdir(parents=True, exist_ok=True)
+        extract_wall_data(vtps[-1], str(out_csv), include_pressure=True)
+        print(f"[ok] {grid}/{name}: {os.path.basename(vtps[-1])} -> {out_csv}", flush=True)
+        ok += 1
+    sys.exit(0 if ok == len(PHASES) else 1)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# COPY (never move) one completed fluid case to harvey.
+# Only meshing/, tree.dat, xyzts.dat -- nothing else on harvey is touched.
+set -euo pipefail
+N="$1"
+LOCAL_BASE=/home/jeff/project/65_final_0723/fluid_0723
+REMOTE_BASE=/home/jeff/project/65_final_0723/fluid_0723
+SRC="$LOCAL_BASE/case_$N"; DST="$REMOTE_BASE/case_$N"
+
+for f in "$SRC/tree.dat" "$SRC/xyzts.dat"; do
+  [ -f "$f" ] || { echo "SKIP case_$N: missing $(basename "$f")"; exit 2; }
+done
+[ -d "$SRC/meshing/mesh-complete" ] || { echo "SKIP case_$N: missing meshing/mesh-complete"; exit 2; }
+
+ssh -o BatchMode=yes harvey "mkdir -p '$DST/meshing'"
+# meshing/ first, then tree.dat + xyzts.dat LAST => xyzts.dat is the completeness marker
+rsync -a "$SRC/meshing/" "harvey:$DST/meshing/"
+rsync -a "$SRC/tree.dat" "$SRC/xyzts.dat" "harvey:$DST/"
+echo "COPIED case_$N -> harvey:$DST (meshing/, tree.dat, xyzts.dat)"

@@ -1,0 +1,60 @@
+#!/bin/bash
+# 6 solid solves for the mesh-independence study: 3 meshes x {peak, low}.
+#
+#   mesh   : box recipe, algo2d=6, sizes 0.04 / 0.05 / 0.0625  (only h varies)
+#   solver : ver2 SFE traction (same code path as the ws2 production PEAK pool)
+#   peak BC: post_data/wall_expB_new/peak/wall_peak_case_0.csv        (Tx,Ty,Tz)
+#   low  BC: post_data/wall_no_hyperemia/low/wall_low_case_0.csv      (Tx,Ty,Tz)
+#
+# 2 at a time: ws1 already carries ~77 of 128 cores of another user's jobs.
+R=/mnt/hdd/jeff/mesh_indep_solid
+Q=$HOME/project/54_analysis
+PY=$HOME/miniconda3/envs/ansys_new/bin/python
+NPROC=${NPROC:-20}
+PARN=${PARN:-2}
+LOG=$R/logs/solve.log
+
+cd "$Q" || exit 1
+mkdir -p "$R/results" "$R/ansys"
+
+PEAK_CSV=$Q/post_data/wall_expB_new/peak/wall_peak_case_0.csv
+LOW_CSV=$Q/post_data/wall_no_hyperemia/low/wall_low_case_0.csv
+for f in "$PEAK_CSV" "$LOW_CSV"; do
+  [ -f "$f" ] || { echo "MISSING $f" | tee -a "$LOG"; exit 1; }
+done
+
+port=50400
+run_one() {
+  local label=$1 bc=$2 msh=$3 csv=$4 p=$5
+  local out=$R/results/FC_case_0_${label}_${bc}.vtu
+  local ex=$R/ansys/${label}_${bc}
+  if [ -f "$out" ]; then echo "[skip] $label $bc" >> "$LOG"; return; fi
+  rm -rf "$ex"; mkdir -p "$ex"
+  echo "===== $(date '+%F %T') START $label $bc port=$p =====" >> "$LOG"
+  timeout -k 60 21600 "$PY" -u "$R/scripts/solve_one.py" \
+      0 "$bc" "$msh" "$csv" "$NPROC" "$ex" "$p" "$out" \
+      >> "$R/logs/solve_${label}_${bc}.log" 2>&1
+  local rc=$?          # capture BEFORE $(date) below clobbers $?
+  echo "===== $(date '+%F %T') END   $label $bc exit=$rc =====" >> "$LOG"
+  # keep only the .vtu; ANSYS scratch for a 5M-node quadratic run is tens of GB
+  rm -rf "$ex"
+}
+
+for size in 0.04 0.05 0.0625; do
+  label="a6_${size}"
+  msh=$R/mesh_algo/solid_LAP_0_box_${size}_a6_10.msh
+  [ -f "$msh" ] || { echo "MISSING MESH $msh" >> "$LOG"; continue; }
+  for bc in peak low; do
+    while [ "$(jobs -rp | wc -l)" -ge "$PARN" ]; do sleep 20; done
+    case "$bc" in
+      peak) csv=$PEAK_CSV ;;
+      low)  csv=$LOW_CSV ;;
+    esac
+    run_one "$label" "$bc" "$msh" "$csv" "$port" &
+    port=$((port + 10))
+    sleep 5
+  done
+done
+wait
+echo "ALL SOLVES DONE $(date '+%F %T')" >> "$LOG"
+ls -la "$R/results" >> "$LOG"

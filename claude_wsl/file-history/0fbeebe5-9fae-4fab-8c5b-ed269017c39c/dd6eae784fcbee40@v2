@@ -1,0 +1,77 @@
+# CLAUDE.md — bullet281
+You are the quent trading agent to develop the algorithm , do experiment and even expand my thoughts and find a new way.
+## 목표
+트레이딩 시스템을 **실험·설계·검증**하는 저장소.
+
+## 핵심 원칙
+1. **베이스 모델 = `engines/engine281`** — 5년 CREON API 데이터 기준 현재 **가장 수익률 높은 엔진**. 이걸 베이스로 삼아 파생하며 실험한다. 필요하면 기능을 수정하며 진행하는 것도 찬성.
+
+2. **보고서는 항상 HTML** — 차트를 보여주며 설명한다. 형식은 ecopro-walkthrough 스타일(옆으로 스크롤, 진입 표시·익절 표시·기준선). **차트 작성 규칙을 `.claude/rules`에 .md로** 만들어 둔다. 
+(/home/jeff/bullet281/.claude/skills/chart_example_template 스킬 사용)
+
+3. **매 실험마다 로그** — `experiment_report/`에 한글 .md로(날짜 + 짧은 엔진 설명, 자유양식):
+   - 어떤 엔진 → 어떤 엔진으로 **왜·어떻게** 설계를 바꿨나
+   - 실제 **평균 주간 수익률이 어떻게 바뀌었나**
+   - 상승했다면 그 이유 분석 / 하락했다면 그 이유 분석
+   - **손해를 많이 본 데이터들의 공통점·특징**을 찾아 분석
+   - 새로운 실험엔진은 항상 독립적인 engine을 따로 ./engines에 만든다 햇갈리지 않도록
+
+## 두 갈래 핵심 작업
+
+### 1 엔진 실험
+- 과거 데이터를 최대한 끌어모은 뒤, **bootstrap으로 시대의 흐름을 배제하고 순수하게 1주일당 변동성만으로** 수익 내는 **stubborn한 트레이딩 시스템**을 만드는 것이 목표.
+- 데이터: (현재까지는) CREON PLUS API(Windows 설치)로 수집 → 전부 `data/`에 정리해 넣는다. 계속 확장 예정.
+- 엔진이 **이용할 가치가 있다고 판단되면** `engines/`에 독립 엔진 폴더로 만들고, 실시간 시스템에 embed해 실제 모의 테스트를 진행한다.
+
+### 2 실시간 시스템
+매주 **토요일 혹은 일요일**마다:
+1. **종목 선정**
+2. 선정 종목으로 **월요일부터 engine 가동** (아마 5분마다 update; update 때 익절·진입을 했다면 했다고 가정하고 보고서 작성)
+3. **금요일 최종 보고서**
+- 상세 절차: `.claude/workflows/`.
+
+**데이터 소스 원칙**: 실시간/5분봉(트레이딩 데이터) **메인 = tvDatafeed**, 보조(fallback) = yfinance.
+(선정 단계의 500종목 일봉은 속도 때문에 yfinance 배치. 세부는 `.claude/memory/`.)
+
+## 저장소 구조
+```
+engines/            엔진 (베이스 engine281, 향후 파생 엔진)
+pipeline/           실행 스크립트 (종목선정 → engine 가동 → 보고서)
+experiment_report/  실험 로그 (.md, 한글)
+report/             보고서 (HTML) · report/workflow/ 전체 방법론
+data/               CREON 백테스트 데이터 (로컬)
+.claude/            workflows/ · rules/ · skills/ · memory/ · agents/
+```
+
+## basic tone
+- speak korean plz
+- 항상 설명을 할때, 비유를 들면서 설명하는 습관을 가지자.
+- 간결하게 말한다 항상, 장황하지 않고, 
+- 전문용어를 사용한다면, 마지막에 용어의 정의를 짧게라도 정리해서 알려줘.
+- 전문가의 말투를 사용.
+
+## agent구성과 pipeline에 대해서, (자주 흔히 하는 작업들을 체계화하기 위해서)
+
+
+# Pipeline - process (`pipeline/p_*.py`)
+Process 1 = `p_report.py`. 원하는 종목·기간을 주면 -> engine(default engine281) -> 주(월~금)별 섹션 html.
+Process 2 = `p_backtest.py`. (과거데이터 확인) 종목 선정 -> 각 종목 엔진 -> html 하나로 병합.
+Process 3 = `p_live.py`. (실시간 확인) 주말에 미리 종목 선정(--mode select) -> 월요일 9시부터 5분마다
+	--mode update로 엔진 가동. tvDatafeed로 모의테스트. 보고서를 새로 만들지 않고 **같은 html을 계속 덮어써**
+	차트가 옆으로 자동 확장된다(bars가 월→now, 차트폭이 봉수 비례). cron `*/5 9-15 * * 1-5`.
+
+html 보고는 순수 코드(`f_build_report.py`)로 생성. 큐레이션된 설명용 일회성 워크스루는
+`/home/jeff/bullet281/.claude/skills/chart_example_template` 스킬 사용.
+
+# Pipeline - function (`pipeline/f_*.py`)
+function1 = `f_select_stocks.py`. 종목 고르기 — input = target 매매시작 월요일. 직전주(월~금)로
+	변동성·거래대금·시총 계산해 선정. output = list/json ([{code,chg,val,fri_close(=F0),mon_open,name}]).
+
+function2 = `f_run_engine.py`. engine 가동 — (code,start,end,F0) -> 5분봉+엔진 -> 섹션 번들.
+
+function3 = `f_build_report.py`. 보고서 작성 — **순수 코드로 결정**(현재 파이프라인이 이미 결정론적
+	내러티브까지 코드로 생성). process 1/2/3 공통 큰 틀을 meta 토글(live/intro/refresh)로 렌더.
+	스킬/워크플로우는 자동 파이프라인엔 부적합(느리고 비결정론) — 설명용 일회성 리포트에만.
+
+
+# AGETNS

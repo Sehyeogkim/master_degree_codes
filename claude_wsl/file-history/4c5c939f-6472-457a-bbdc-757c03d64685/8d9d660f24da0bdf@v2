@@ -1,0 +1,57 @@
+# -*- coding: utf-8 -*-
+"""Validation: run PEAK for one case with OUR current pipeline (corrected
+parameter_0728.csv material + /MAP + _save_fc_results_rst), then compare EQV stress
+against the existing expB_new type1 peak reference vtu. Confirms the material fix +
+pipeline reproduce the known-good peak (so our low, same pipeline, is trustworthy).
+
+Usage: peak_check.py <case> <nproc> <port>
+"""
+import sys, pathlib, numpy as np, pyvista as pv, os
+HERE = pathlib.Path("/home/jeff/project/54_analysis")
+sys.path.insert(0, str(HERE))
+import pymapdl_sim_LAP_0728 as P
+
+case = int(sys.argv[1]); nproc = int(sys.argv[2]) if len(sys.argv) > 2 else 20
+port = int(sys.argv[3]) if len(sys.argv) > 3 else 50500
+BC = "peak"; tag = "LAPCHK"
+param = HERE/"pre_data"/"parameter_0728.csv"
+matjson = HERE/"pre_data"/"material.json"
+walldir = HERE/"post_data"/"wall_no_hyperemia"
+wall_csv = walldir/BC/f"wall_{BC}_case_{case}.csv"
+msh = HERE/"LAP_mesh"/f"solid_LAP_{case}.msh"
+ref_vtu = HERE/"solid_data"/f"case_{case}"/"ansys_results_type1_expB_new"/f"FC_case_{case}_peak.vtu"
+exec_dir = HERE/"ansys_LAP_0728"/f"case_{case}"/"_peakchk"
+exec_dir.mkdir(parents=True, exist_ok=True)
+
+print(f"### PEAK CHECK case {case}: our pipeline vs {ref_vtu.name}")
+w = P.PYMAPDL_worker(case, walldir, exec_dir, str(param), port_num=port, nproc=nproc, tag=tag)
+w.cdb_path = w.pymapdl_msh_to_cdb(msh)
+w.pymapdl_launch()
+w.bc_type = BC; w.casename = f"{tag}_case_{case}_{BC}"; w.mapdl.jobname = w.casename
+w.pymapdl_prep_bc(wall_csv)
+w.pymapdl_prep_mat(str(matjson))
+w.pymapdl_solve(solver="PCG")
+out = exec_dir/"FC_our_peak.vtk"
+w._save_fc_results_rst(str(out))
+w.safe_mapdl_exit()
+os.system(f"pkill -9 -f '\\-j {tag}_' 2>/dev/null; true")
+
+def stats(g, key="EQV_stress"):
+    e = np.asarray(g.point_data[key], float); e = e[np.isfinite(e)]
+    d = np.asarray(g.point_data["Displacement"], float)
+    dmag = np.linalg.norm(d, axis=1); dmag = dmag[np.isfinite(dmag)]
+    return dict(pts=g.n_points, mean=e.mean(), median=np.median(e), p95=np.percentile(e,95),
+                mx=e.max(), dmax=dmag.max(), dmean=dmag.mean())
+
+ours = pv.read(str(out)); ref = pv.read(str(ref_vtu))
+so, sr = stats(ours), stats(ref)
+print("\n================ PEAK CHECK case", case, "================")
+print(f"  fields OURS: {list(ours.point_data.keys())}")
+print(f"  fields REF : {list(ref.point_data.keys())}")
+print(f"  {'':8} {'pts':>8} {'eqv_mean':>11} {'eqv_med':>11} {'eqv_p95':>11} {'eqv_max':>11} {'disp_max':>10}")
+print(f"  {'OURS':8} {so['pts']:>8} {so['mean']:>11.3e} {so['median']:>11.3e} {so['p95']:>11.3e} {so['mx']:>11.3e} {so['dmax']:>10.3e}")
+print(f"  {'REF':8} {sr['pts']:>8} {sr['mean']:>11.3e} {sr['median']:>11.3e} {sr['p95']:>11.3e} {sr['mx']:>11.3e} {sr['dmax']:>10.3e}")
+rd = lambda a,b: (a-b)/b*100 if b else float('nan')
+print(f"  {'DIFF%':8} {'':>8} {rd(so['mean'],sr['mean']):>+10.1f}% {rd(so['median'],sr['median']):>+10.1f}% {rd(so['p95'],sr['p95']):>+10.1f}% {rd(so['mx'],sr['mx']):>+10.1f}% {rd(so['dmax'],sr['dmax']):>+9.1f}%")
+print("  NOTE: OURS=resting-systolic /MAP; REF=hyperemia-systolic SFE. systolic load ~2% apart,")
+print("        extraction differs (FC-only avg vs native post) -> mean/median should be close, max may differ (speckle).")

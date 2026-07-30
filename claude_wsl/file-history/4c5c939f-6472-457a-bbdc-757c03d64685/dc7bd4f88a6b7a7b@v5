@@ -1,0 +1,13 @@
+- [Solid mesh env on cv1](solid-mesh-env-cv1.md) — run HXT pipeline via conda `ansys_new`; utils package comes from master_python editable install
+- [Solid mesh two types](solid-mesh-two-types.md) — "2 meshes" = Type 1 (no cal) + Type 2 (cal); scripts and inputs
+- [Focus solid not lumen](focus-solid-not-lumen.md) — 65_final_0723 meshing: solid only, ignore lumen/Simmetrix; user handles copy
+- [ANSYS sim on cvbml02](ansys-sim-cvbml02.md) — pymapdl_simulation_ver5_fibrous.py structural sim; curved Type2 mesh, wall_0723 pressure BC, material.json+parameter.csv
+- [Reporting format for mesh runs](reporting-format-mesh.md) — always report mesh quality, # of mesh, total time
+- [Solid mesh neg-Jacobian fix](solid-mesh-negjacobian-fix.md) — inverted elems live in fc cap; fixed by Smoothing=10 + HighOrder opt; dist(fc) field cuts elem count ~43%
+- [Batch dist meshing 0723](batch-dist-meshing-0723.md) — case 1-383 dist meshing on cvbml01 (4-wide, msh only, resumable) + Notion dashboard cron
+- [Lumen mesh WSL setup](lumen-mesh-wsl-setup.md) — run cvbml01's lumen_meshing_0723.py (stp->vtk->vtp->Simmetrix) in WSL: rsync master_python, pip install gmsh, solver_path.json; case_0 verified
+- [Copy mesh to harvey](copy-mesh-to-harvey.md) — copy completed fluid_0723 cases (≥5) to harvey via rsync (no --delete), then chain q_ramp
+- [Harvey q_ramp pipeline](harvey-qramp-pipeline.md) — sbatch Q_ramp_0723.py per case (QRAMP_CASE env), harvey07/-n96 primary, harvey01/-n72 fallback
+- [Notion Harvey Q ramp monitor](notion-harvey-qramp-monitor.md) — report pipeline status (mesh copy + Q_ramp) to this Notion page, newest on top
+- [cvbml02 quad batch](cvbml02-quad-batch.md) — all 384 geo_0723 cases Type2 quad mesh on cvbml02 (run_type2_0723.py, size 0.06, nproc 20, 3-wide, msh-only, resumable)
+- [Cursor worktree disk](cursor-worktree-disk.md) — cvbml02 ~/.cursor worktrees ate 927GB; git worktree remove to reclaim; also clean ANSYS .DSPtri scratch

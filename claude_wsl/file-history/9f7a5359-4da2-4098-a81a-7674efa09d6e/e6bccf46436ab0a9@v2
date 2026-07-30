@@ -1,0 +1,137 @@
+#!/usr/bin/env python
+"""
+Retry the 61 cases that failed / timed out in the first dist batch, with
+per-group algorithm overrides and a 3-hour per-case cap.
+
+Groups (from batch_progress.jsonl forensics):
+  A timeout (35) -- all were stuck in 2D surface meshing (MeshAdapt on BSpline
+                    surfaces), never reached 3D.  -> 2D Delaunay (5), keep HXT.
+  B HXT 3D failed (9)                             -> 3D Delaunay (1).
+  C crash exit -6 (4)                             -> both switched (5, 1).
+  D boolean / OCC geometry errors (13)            -> both switched (5, 1);
+                                                     these fail before meshing,
+                                                     so they just fail fast.
+
+Same output path as the main batch (solid_0723/case_<c>/dist_run/
+solid_type_1_dist.msh), and the worker skips anything already meshed -- so the
+322 good meshes are never touched.
+"""
+import json
+import time
+import subprocess
+import threading
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+HERE = Path(__file__).resolve().parent
+PY = "/home/jeff/miniconda3/envs/ansys_new/bin/python"
+
+TIMEOUT_CASES = [1, 9, 14, 18, 31, 54, 69, 72, 86, 101, 104, 105, 116, 128, 131,
+                 172, 182, 189, 192, 205, 215, 226, 239, 249, 257, 260, 261,
+                 272, 279, 286, 297, 306, 355, 359, 368]
+HXT3D_CASES = [3, 6, 22, 52, 63, 177, 254, 309, 380]
+CRASH_CASES = [4, 12, 16, 17]
+GEOM_CASES = [10, 27, 65, 114, 127, 151, 231, 240, 250, 287, 305, 343, 376]
+
+PLAN = {}
+for c in TIMEOUT_CASES:
+    PLAN[c] = (5, 10)    # 2D Delaunay + HXT
+for c in HXT3D_CASES:
+    PLAN[c] = (2, 1)     # keep 2D auto (it worked), 3D Delaunay
+for c in CRASH_CASES + GEOM_CASES:
+    PLAN[c] = (5, 1)     # both switched
+
+CASES = sorted(PLAN)
+NPROC = 12
+MESH_SIZE = 0.05
+WORKERS = 4
+PER_CASE_TIMEOUT = 10800  # 3 h (was 40 min)
+
+SOLID = HERE / "solid_0723"
+LOGDIR = SOLID / "logs"; LOGDIR.mkdir(parents=True, exist_ok=True)
+PROG = SOLID / "retry_progress.jsonl"
+STATUS = SOLID / "retry_status.json"
+MARKER = SOLID / "batch_retry.marker"
+
+_lock = threading.Lock()
+counts = {"total": len(CASES), "done": 0, "failed": 0, "timeout": 0, "skipped": 0, "running": 0}
+start_time = time.time()
+
+
+def write_status():
+    with _lock:
+        s = dict(counts)
+        s["start_time"] = start_time
+        s["elapsed"] = round(time.time() - start_time, 1)
+        STATUS.write_text(json.dumps(s, indent=2))
+
+
+def record(entry):
+    entry["ts"] = time.time()
+    with _lock:
+        with open(PROG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+        st = entry.get("status")
+        if st in counts:
+            counts[st] += 1
+    write_status()
+
+
+def run_case(c):
+    a2, a3 = PLAN[c]
+    with _lock:
+        counts["running"] += 1
+    write_status()
+    logf = LOGDIR / f"case{c}_retry.log"
+    entry = {"case": c, "algo2d": a2, "algo3d": a3}
+    try:
+        with open(logf, "w") as lf:
+            p = subprocess.run(
+                [PY, "mesh_one_dist.py", str(c), str(NPROC), str(MESH_SIZE), str(a2), str(a3)],
+                cwd=str(HERE), stdout=lf, stderr=subprocess.STDOUT,
+                timeout=PER_CASE_TIMEOUT,
+            )
+        status = None
+        for line in reversed(logf.read_text(errors="replace").splitlines()):
+            if line.startswith("STATUS "):
+                status = json.loads(line[len("STATUS "):])
+                break
+        if status is None:
+            entry.update({"status": "failed", "error": f"no STATUS line (exit {p.returncode})"})
+        else:
+            entry.update(status)
+            entry["algo2d"], entry["algo3d"] = a2, a3
+    except subprocess.TimeoutExpired:
+        entry.update({"status": "timeout"})
+    except Exception as e:
+        entry.update({"status": "failed", "error": f"{type(e).__name__}: {e}"})
+    finally:
+        with _lock:
+            counts["running"] -= 1
+    record(entry)
+    return entry
+
+
+def main():
+    if MARKER.exists():
+        MARKER.unlink()
+    write_status()
+    print(f"[retry] {len(CASES)} cases, {WORKERS}-wide, nproc={NPROC}, "
+          f"size={MESH_SIZE}, cap={PER_CASE_TIMEOUT//60}min", flush=True)
+    # timeouts first: they are the ones most likely to convert
+    order = TIMEOUT_CASES + HXT3D_CASES + CRASH_CASES + GEOM_CASES
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        futs = [ex.submit(run_case, c) for c in order]
+        for fut in as_completed(futs):
+            e = fut.result()
+            print(f"[case {e.get('case')}] {e.get('status')} "
+                  f"algo=({e.get('algo2d')},{e.get('algo3d')}) "
+                  f"elem={e.get('num_elements')} min_q={e.get('min_quality')} "
+                  f"neg={e.get('neg_jacobian')} {e.get('seconds')}s", flush=True)
+    MARKER.write_text("DONE\n")
+    write_status()
+    print("[retry] COMPLETE")
+
+
+if __name__ == "__main__":
+    main()

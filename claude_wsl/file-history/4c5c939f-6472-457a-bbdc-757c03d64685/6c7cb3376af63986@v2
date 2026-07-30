@@ -1,0 +1,17 @@
+---
+name: copy-mesh-to-harvey
+description: "Copy completed fluid mesh cases from local fluid_0723 to harvey, then chain q_ramp sim"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: 4c5c939f-6472-457a-bbdc-757c03d64685
+  modified: 2026-07-23T03:21:45.932Z
+---
+
+Local meshing writes `fluid_0723/case_0..384/` (see [[focus-solid-not-lumen]] area, but this is the fluid/lumen mesh). A case is COMPLETE when `progress.csv` marks it done AND `case_N/{tree.dat,xyzts.dat}` + `case_N/meshing/mesh-complete/` all exist (= next case started).
+
+**Task:** COPY (never move) each completed case ≥5 to harvey `/home/jeff/project/65_final_0723/fluid_0723/case_N/`: only `meshing/` (whole tree), `tree.dat`, `xyzts.dat`. Cases 0–4 already copied. Use rsync WITHOUT `--delete` — harvey case dir may already hold `q_ramp/`, `steady_3d/`, `wall/`, `pulsatile_1d/` which must NOT be touched.
+
+Copy helper: `scratchpad/copy_case_to_harvey.sh <N>` (idempotent, verifies artifacts first). ~180MB volume_mesh.sms per case → ~1–2 min/copy; run in background.
+
+Then chain q_ramp: [[harvey-qramp-pipeline]]. Driven by a `/loop` (dynamic pacing) that batch-copies newly-done cases and submits q_ramp jobs.

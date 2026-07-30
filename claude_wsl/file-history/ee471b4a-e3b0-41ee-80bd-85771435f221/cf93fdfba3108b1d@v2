@@ -1,0 +1,27 @@
+import ast, sys
+
+p = "/home/jeff/project/65_final_0723/run_type2_0723.py"
+s = open(p).read()
+
+old = 'MESH_SIZE = float(sys.argv[5]) if len(sys.argv) > 5 else 0.06'
+new = old + '\nALGO_ORDER = sys.argv[6] if len(sys.argv) > 6 else "hxt"   # "hxt" -> (10,1), "delaunay" -> (1,10)'
+if 'ALGO_ORDER' in s:
+    print("already patched")
+    sys.exit(0)
+assert old in s, "anchor 1 not found"
+s = s.replace(old, new, 1)
+
+old2 = "for algo in (10, 1):  # 10=HXT, 1=Delaunay"
+new2 = ('_ALGOS = (1, 10) if ALGO_ORDER.lower().startswith("del") else (10, 1)\n'
+        "for algo in _ALGOS:  # 10=HXT, 1=Delaunay")
+assert old2 in s, "anchor 2 not found"
+s = s.replace(old2, new2, 1)
+
+old3 = 'mesh_size={MESH_SIZE}")'
+new3 = 'mesh_size={MESH_SIZE} algo_order={ALGO_ORDER}")'
+assert old3 in s, "anchor 3 not found"
+s = s.replace(old3, new3, 1)
+
+ast.parse(s)
+open(p, "w").write(s)
+print("patched OK")

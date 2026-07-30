@@ -1,0 +1,85 @@
+# Workflow — 라이브 주간 파이프라인 (선정 → engine281 → 보고서)
+
+지난주(월~금) 데이터로 종목을 선정하고, 이번 주 5분봉에 **281 엔진(engine281)** 을 가동해
+진행상황 워크스루 리포트를 만드는 반복 실행 절차.
+
+구조는 **3 함수 + 3 프로세스**로 분리돼 있다 (`.claude/plans/` 리팩터 기준).
+
+- **함수** — `function1.select_stocks(target_monday)` 종목선정 · `function2.run_engine(code,start,end,F0)` 엔진가동 · `function3.build_report(sections,meta)` 보고서(순수코드).
+- **프로세스** — `process1`(임의 종목·기간 → 주별 섹션) · `process2`(과거주 선정+검증) · `process3`(실시간 5분 갱신).
+
+산출물 예: `report/live/live-281-thisweek.html` (종목별 가로스크롤 캔들 + 알고리즘 논리).
+
+---
+
+## 입력 = 파라미터 (하드코딩 아님)
+
+날짜는 이제 **`target_monday`(매매 시작 월요일) 하나**만 주면 `weekcal.py`가 나머지를 유도한다:
+- 선정 기준 주 = 직전 주(월~금), F0 = 직전 금요일 종가 → `weekcal.prior_week(monday)`
+- 가동 주 = 그 주(월~토 반열림) → `weekcal.week_bounds(monday)`
+
+---
+
+## Process 3 — 실시간 (모의운영, cron)
+```bash
+cd /home/jeff/bullet281/pipeline
+# 주말 1회: 다음 주 종목선정 → _top5.json + _live_week.txt
+python3 process3.py --mode select              # [--monday YYYY-MM-DD]
+# 평일 장중 5분마다: 월~now 5분봉으로 엔진 → 같은 report/live/live-281-thisweek.html 덮어씀
+python3 process3.py --mode update
+```
+cron 등록:
+```cron
+0 18 * * 6        python3 /home/jeff/bullet281/pipeline/process3.py --mode select
+*/5 9-15 * * 1-5  python3 /home/jeff/bullet281/pipeline/process3.py --mode update
+```
+- `update`는 파일을 버전화하지 않고 **같은 경로를 덮어쓴다**. `bars_5m`가 월→now를 받고 차트폭이 봉수에 비례 → 캔들이 옆으로 자동 확장. `<meta http-equiv=refresh content=300>`으로 열린 브라우저가 5분마다 새로고침.
+- ⚠️ **주중 15:15 이후 조기청산**: 엔진(`engine.py:244`)은 데이터 마지막 날 15:15에 강제청산한다. 완전한 주(월~금)엔 금요일=마지막날이라 정상이지만, 라이브 주중 15:15~15:30 틱에선 그날을 청산일로 보고 조기청산 표시가 날 수 있다(엔진 레벨 기존 동작, 별도 이슈).
+
+## Process 2 — 과거주 확인
+```bash
+python3 process2.py 2026-06-29 [--out ../report/process2.html]
+```
+그 주를 선정→각 종목 엔진→1 HTML로 병합. 완료된 주라 T/S 마커 + 금 15:15 청산 반영.
+
+## Process 1 — 임의 종목·기간
+```bash
+python3 process1.py 005930 2026-06-01 2026-07-06 [--out ...] [--live]
+```
+기간을 주 단위로 쪼개 주별 섹션(walkthrough). 각 주 F0 = 직전 금종가.
+
+## 선정 규칙 (function1, 3단계)
+1. **시총 5,000억↑** — `tradingview-screener` (`market_cap_basic > 5e11`, market='korea').
+2. **주간 변동율 상승 Top20** — (금 종가 − 월 시가)/월 시가. `yfinance` 직전주 일봉.
+3. **그중 거래대금 Top5** — Σ(일 종가 × 거래량).
+- 결과 `_top5.json`: `[{code, chg, val, fri_close(=F0), mon_open, name}]`.
+
+## 확인
+- 브라우저로 리포트 열어 검토. 스크린샷으로 캔들·마커·요일라벨·스크롤 자체확인 권장.
+
+---
+
+## 데이터 소스
+| 목적 | 도구 | 상태 |
+|---|---|---|
+| 시총/스크리닝·회사명 | **tradingview-screener** | ✅ |
+| 5분봉·F0 (메인) | **tvDatafeed** (KRX, KST 로컬 타임스탬프) | ✅ |
+| 5분봉·일봉 (fallback) | **yfinance** (`{6자리}.KS`, UTC→KST) | ✅ |
+| KRX 일봉/시총 | pykrx | ❌ 이 환경 날짜 오류 |
+
+핵심 팁:
+- 5분봉은 `data_source.bars_5m`가 **tvDatafeed 메인 → 부실 시 yfinance fallback**. 09:00~15:30 필터.
+- tvDatafeed 로그인은 UA 미포함으로 실패하나 **nologin으로도 충분**(5000봉+당일). `.tv_creds`는 gitignore.
+- 회사명은 스크리너 `description` 필드(영문).
+- 거래대금은 Σ(종가×거래량) **근사** — 정밀 필요시 공식 API 교차검증.
+- **F0 = 직전 금요일 종가**(tvDatafeed 일봉 기준, yfinance fallback).
+
+## 주의
+- 라이브 가격은 tvDatafeed/yfinance 기준 — 공식 API와 미세차 가능. 운영 전 교차검증 권장.
+- 주 중간 실행 시 마지막 봉은 진행 중일 수 있음 → 리포트는 스냅샷.
+
+## 파일
+- `engines/engine281/{engine,strategy281,chart}.py` — 281 엔진(불변).
+- `pipeline/weekcal.py` · `function{1,2,3}.py` · `process{1,2,3}.py` — 이 워크플로우.
+- `pipeline/{select_stocks,run_live_report}.py` — 옛 CLI 보존 shim.
+- 전체 방법론: `report/workflows/engine_281/workflow-overall.md`.

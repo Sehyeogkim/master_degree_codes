@@ -1,0 +1,63 @@
+"""
+Steady 3D POST for 54_analysis -- peak & low, NON-hyperemia.  Single case (CLI arg).
+Per {peak, low}:
+  1) svpost step 500 in 96-procs_case -> rst_00500.vtp
+  2) extract_wall_data(rst_vtp, csv, include_pressure=True) -> wall traction+pressure CSV
+Output: post_data/wall_no_hyperemia/{peak,low}/wall_{name}_case_{i}.csv
+Exit 0 only if BOTH peak & low csv produced.
+"""
+import os
+import sys
+import glob
+from pathlib import Path
+
+sys.path.insert(0, "/home/jeff/repo/master_python/src")
+import utils.utils_lumen.runner as runner
+from utils.utils_lumen.extract_wall_csv import extract_wall_data
+
+ROOT = Path("/home/jeff/project/54_analysis")
+POST = ROOT / "post_data"
+WALL_DIR = POST / "wall_no_hyperemia"
+SVPOST = "/opt/cvbml/repos/svSolverPrivate/build/svSolver-build/bin/svpost"
+NP = 96
+STEP = 500
+NAMES = ["peak", "low"]
+
+
+def fluid_dir(i):
+    return ROOT / ("fluid_data" if i < 500 else "fluid_data_500")
+
+
+def process_case(i):
+    st = fluid_dir(i) / f"case_{i}" / "steady_3d_no_hyperemia"
+    done = []
+    for name in NAMES:
+        folder = st / name
+        procs = folder / f"{NP}-procs_case"
+        out_csv = WALL_DIR / name / f"wall_{name}_case_{i}.csv"
+        if out_csv.exists():
+            print(f"[skip] case_{i}/{name}: csv already exists")
+            done.append(name)
+            continue
+        if not (procs / f"restart.{STEP}.1").exists():
+            print(f"[skip] case_{i}/{name}: restart.{STEP} missing in {procs}")
+            continue
+        try:
+            runner.run_svpost(str(folder), SVPOST, NP, STEP, "rst")
+            vtps = sorted(glob.glob(str(folder / "rst_*.vtp"))) or sorted(glob.glob(str(procs / "rst_*.vtp")))
+            if not vtps:
+                print(f"[ERROR] case_{i}/{name}: svpost produced no rst_*.vtp")
+                continue
+            out_csv.parent.mkdir(parents=True, exist_ok=True)
+            extract_wall_data(vtps[-1], str(out_csv), include_pressure=True)
+            print(f"[ok] case_{i}/{name}: {os.path.basename(vtps[-1])} -> {out_csv}", flush=True)
+            done.append(name)
+        except Exception as e:
+            print(f"[ERROR] case_{i}/{name}: {e}", flush=True)
+    return done
+
+
+if __name__ == "__main__":
+    i = int(sys.argv[1])
+    done = process_case(i)
+    sys.exit(0 if len(done) == 2 else 1)

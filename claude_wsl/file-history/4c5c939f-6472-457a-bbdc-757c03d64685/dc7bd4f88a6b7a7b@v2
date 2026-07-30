@@ -1,0 +1,7 @@
+- [Solid mesh env on cv1](solid-mesh-env-cv1.md) — run HXT pipeline via conda `ansys_new`; utils package comes from master_python editable install
+- [Solid mesh two types](solid-mesh-two-types.md) — "2 meshes" = Type 1 (no cal) + Type 2 (cal); scripts and inputs
+- [Focus solid not lumen](focus-solid-not-lumen.md) — 65_final_0723 meshing: solid only, ignore lumen/Simmetrix; user handles copy
+- [Reporting format for mesh runs](reporting-format-mesh.md) — always report mesh quality, # of mesh, total time
+- [Lumen mesh WSL setup](lumen-mesh-wsl-setup.md) — run cvbml01's lumen_meshing_0723.py (stp->vtk->vtp->Simmetrix) in WSL: rsync master_python, pip install gmsh, solver_path.json; case_0 verified
+- [Copy mesh to harvey](copy-mesh-to-harvey.md) — copy completed fluid_0723 cases (≥5) to harvey via rsync (no --delete), then chain q_ramp
+- [Harvey q_ramp pipeline](harvey-qramp-pipeline.md) — sbatch Q_ramp_0723.py per case (QRAMP_CASE env), harvey07/-n96 primary, harvey01/-n72 fallback

@@ -1,0 +1,177 @@
+"""v3 보고서 — tp_gate × tp_reset_pct 2차원 조합 스윕 취합.
+입력: sweep_v3_a/b/c_results.json (병렬 에이전트 샤드)
+출력: report/backtest_fable2_v3_gate.artifact.html
+사용: python3 make_v3_report.py"""
+import os, json, random, html
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+OUT = os.path.join(ROOT, "report", "backtest_fable2_v3_gate.artifact.html")
+
+PAPER, INK, ACCENT, GRID = "#F0EEE6", "#211D18", "#CC785C", "#D9D3C7"
+MUTE, CARD = "#6B5E54", "#FBFAF6"
+POS, NEG, NEUT = "#2E7D32", "#C25744", "#EDE8DD"
+esc = html.escape
+RULE = "square"
+
+GATES = [0.04, 0.05, 0.06, 0.08, 0.10, 0.12]
+RESETS = [None, 0.01, 0.02, 0.03, 0.05, 0.08]
+
+
+def load_all():
+    cfgs = []
+    for s in ("a", "b", "c"):
+        p = os.path.join(HERE, f"sweep_v3_{s}_results.json")
+        cfgs += json.load(open(p, encoding="utf-8"))
+    return cfgs
+
+
+def paired(w1, w0, B=5000, seed=42):
+    d = [a - b for a, b in zip(w1, w0)]
+    n = len(d); rng = random.Random(seed)
+    means = sorted(sum(d[rng.randrange(n)] for _ in range(n)) / n for _ in range(B))
+    return dict(delta=sum(d) / n * 100, lo=means[int(B*.025)] * 100,
+                hi=means[int(B*.975)] * 100, p_pos=sum(1 for m in means if m > 0) / B)
+
+
+def heatmap(cfgs, base):
+    """행=리셋 임계, 열=게이트. 셀=Δ square vs baseline(g8·rnone)."""
+    by = {(round(c["gate"], 4), c["pct"]): c for c in cfgs}
+    b0 = base["rules_mean"][RULE] if "rules_mean" in base else base["square"]
+    cw, ch = 84, 40
+    labL, labT = 64, 40
+    W = labL + len(GATES) * cw + 10
+    H = labT + len(RESETS) * ch + 30
+    el = [f'<svg viewBox="0 0 {W} {H}" width="{W}" font-family="ui-sans-serif,system-ui,sans-serif">']
+    el.append(f'<text x="{labL + len(GATES)*cw/2:.0f}" y="14" font-size="11" fill="{MUTE}" text-anchor="middle" font-weight="700">익절 게이트 tp_gate</text>')
+    for j, g in enumerate(GATES):
+        el.append(f'<text x="{labL + j*cw + cw/2:.0f}" y="{labT-8}" font-size="10.5" fill="{INK}" font-weight="700" text-anchor="middle">{g*100:g}%</text>')
+    for i, r in enumerate(RESETS):
+        lab = "리셋X" if r is None else f"r{r*100:g}%"
+        el.append(f'<text x="{labL-6}" y="{labT + i*ch + ch/2 + 3:.0f}" font-size="10" fill="{INK}" text-anchor="end" font-weight="600">{lab}</text>')
+        for j, g in enumerate(GATES):
+            c = by.get((round(g, 4), r))
+            if not c:
+                continue
+            sq = c["rules_mean"][RULE] if "rules_mean" in c else c["square"]
+            dv = sq - b0
+            if abs(dv) < 0.015:
+                fill, alpha = NEUT, 1.0
+            else:
+                fill = POS if dv > 0 else NEG
+                alpha = 0.16 + min(1.0, abs(dv) / 0.35) * 0.74
+            x, y = labL + j * cw, labT + i * ch
+            isbase = (r is None and abs(g - 0.08) < 1e-9)
+            stroke = f' stroke="{INK}" stroke-width="1.6"' if isbase else ""
+            tip = f'{c["label"]} · square {sq:+.3f}%/주 (base 대비 {dv:+.3f}%p) · 리셋발생 {c.get("reset_rate",0):.1f}%'
+            el.append(f'<g><title>{esc(tip)}</title>'
+                      f'<rect x="{x+1}" y="{y+1}" width="{cw-4}" height="{ch-4}" rx="5" fill="{fill}" fill-opacity="{alpha:.2f}"{stroke}/>'
+                      f'<text x="{x+(cw-2)/2:.0f}" y="{y+ch/2-2:.0f}" font-size="10.5" font-weight="700" fill="{INK}" text-anchor="middle">{sq:+.2f}</text>'
+                      f'<text x="{x+(cw-2)/2:.0f}" y="{y+ch/2+11:.0f}" font-size="8.5" fill="{MUTE}" text-anchor="middle">{dv:+.2f}p</text></g>')
+    el.append(f'<text x="{labL}" y="{H-8}" font-size="9.5" fill="{MUTE}">테두리 = 현행 base(g8·rnone) · 셀 위 커서 = 상세</text>')
+    el.append('</svg>')
+    return "".join(el)
+
+
+def build():
+    cfgs = load_all()
+    base = next(c for c in cfgs if c["pct"] is None and abs(c["gate"] - 0.08) < 1e-9)
+    b0 = base["rules_mean"][RULE]
+    ranked = sorted(cfgs, key=lambda c: -c["rules_mean"][RULE])
+    top = ranked[:8]
+    prs = {c["label"]: paired(c["weekly"][RULE], base["weekly"][RULE]) for c in top if c["label"] != base["label"]}
+    best = ranked[0]
+    bpr = prs.get(best["label"])
+    n_beat = sum(1 for c in cfgs if c["rules_mean"][RULE] > b0 + 0.005)
+
+    # gate 곡선 (reset None 고정) 텍스트 요약용
+    gate_none = sorted((c for c in cfgs if c["pct"] is None), key=lambda c: c["gate"])
+    gate_line = " · ".join(f'g{c["gate"]*100:g}% {c["rules_mean"][RULE]:+.2f}%' for c in gate_none)
+
+    rows = []
+    for c in ranked[:10]:
+        pr = prs.get(c["label"])
+        isbase = c["label"] == base["label"]
+        prtxt = "—" if isbase or pr is None else f'{pr["delta"]:+.3f}%p / {pr["p_pos"]*100:.0f}%'
+        cls = ' class="basehl"' if isbase else ""
+        rows.append(f'<tr{cls}><td><b>{esc(c["label"])}</b></td>'
+                    f'<td class="num">{c["rules_mean"]["equal"]:+.2f}%</td>'
+                    f'<td class="num"><b>{c["rules_mean"]["square"]:+.2f}%</b></td>'
+                    f'<td class="num">{c["rules_mean"]["quartic"]:+.2f}%</td>'
+                    f'<td class="num">{c["sw_mean"]:+.2f}%</td>'
+                    f'<td class="num">{c.get("reset_rate",0):.1f}%</td>'
+                    f'<td class="num">{prtxt}</td></tr>')
+    rows = "".join(rows)
+
+    win = best["rules_mean"][RULE] > b0 + 0.005
+    head = (f'{esc(best["label"])}이 base를 넘는다' if win and best["label"] != base["label"]
+            else "현행 g8·리셋없음이 이미 정점이다")
+
+    return f"""<title>v3 — 게이트×리셋 조합 최적화</title>
+<style>
+.paper{{--paper:{PAPER};--ink:{INK};--acc:{ACCENT};--grid:{GRID};--mute:{MUTE};--pos:{POS};--neg:{NEG};--card:{CARD};
+background:var(--paper);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+line-height:1.62;-webkit-font-smoothing:antialiased;margin:0}}
+.paper *{{box-sizing:border-box}}
+.wrap{{max-width:1020px;margin:0 auto;padding:44px 24px 90px}}
+.eyebrow{{font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--acc);font-weight:800;margin:0 0 10px}}
+h1{{font-size:31px;line-height:1.15;margin:0 0 12px;font-weight:800;letter-spacing:-.02em;text-wrap:balance;max-width:26ch}}
+.lede{{font-size:15.5px;color:#453d34;max-width:66ch;margin:0 0 6px}}
+h2{{font-size:19px;margin:42px 0 4px;font-weight:800}}
+.sec-sub{{color:var(--mute);font-size:13px;margin:0 0 14px;max-width:80ch}}
+.pos{{color:var(--pos)}} .neg{{color:var(--neg)}}
+.verdict{{display:flex;flex-wrap:wrap;gap:14px;margin:28px 0 8px}}
+.vc{{flex:1 1 220px;background:var(--card);border:1px solid var(--grid);border-radius:12px;padding:15px 17px}}
+.vc .k{{font-size:11.5px;color:var(--mute);font-weight:700}}
+.vc .v{{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:3px}}
+.vc .d{{font-size:12.5px;color:var(--mute);margin-top:2px}}
+.vc.ok{{border-color:{POS}}} .vc.ok .v{{color:{POS}}}
+.vc.bad{{border-color:{NEG}}} .vc.bad .v{{color:{NEG}}}
+.card{{background:var(--card);border:1px solid var(--grid);border-radius:12px;padding:16px 18px;margin:12px 0}}
+.scrollx{{overflow-x:auto}}
+table{{border-collapse:collapse;width:100%;font-size:12.5px}}
+th,td{{border-bottom:1px solid var(--grid);padding:7px 9px;text-align:left}}
+th{{font-size:10.5px;color:var(--mute);text-transform:uppercase;letter-spacing:.05em;font-weight:800}}
+td.num{{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}}
+tr.basehl{{background:#EDE8DD66}} tr.basehl td{{font-weight:700}}
+ul{{margin:6px 0;padding-left:20px}} li{{margin:5px 0}}
+.foot{{margin-top:34px;font-size:12px;color:var(--mute);border-top:1px solid var(--grid);padding-top:16px}}
+.foot code{{background:#e7e1d5;padding:1px 5px;border-radius:4px}}
+</style>
+<div class="paper"><div class="wrap">
+<p class="eyebrow">CREON 5년 · 255주 · 베이스 = 플립 d1~09:30x1 · 3에이전트 병렬 스윕</p>
+<h1>v3 게이트×리셋 36조합 — {head}</h1>
+<p class="lede">익절 활성화 게이트(tp_gate, 현행 8%)와 피보 사다리 리셋 임계(tp_reset_pct, v1의 3%)를
+6×6 전 조합으로 스윕했다. 두 레버의 상호작용 표면에서 최적점을 찾는다. square 배분 주간평균 기준.</p>
+
+<div class="verdict">
+  <div class="vc"><div class="k">현행 base · g8%·리셋없음</div><div class="v">{b0:+.2f}%</div><div class="d">square 주간평균</div></div>
+  <div class="vc {'ok' if win and best['label']!=base['label'] else 'bad'}"><div class="k">전 조합 최고 {esc(best['label'])}</div>
+    <div class="v">{best['rules_mean'][RULE]:+.2f}%</div>
+    <div class="d">{('paired Δ%+.3f%%p · P(Δ>0)=%.0f%%' % (bpr['delta'], bpr['p_pos']*100)) if bpr else '= base'}</div></div>
+  <div class="vc {'ok' if n_beat else 'bad'}"><div class="k">base를 넘은 조합</div><div class="v">{n_beat}</div><div class="d">전 36조합 중 (+0.005%p 초과)</div></div>
+</div>
+
+<h2>조합 히트맵 <span style="color:{ACCENT}">square 주간평균</span></h2>
+<p class="sec-sub">셀 위 = 절대값(%/주), 아래 = base 대비 Δ(%p). 초록=상회·빨강=하회·회색≈동일.</p>
+<div class="card scrollx">{heatmap(cfgs, base)}</div>
+<p class="sec-sub">리셋 없음 행의 게이트 곡선: {gate_line}</p>
+
+<h2>순위 top 10</h2>
+<div class="card scrollx"><table>
+<thead><tr><th>조합</th><th class="num">equal</th><th class="num">square</th><th class="num">quartic</th><th class="num">종목-주</th><th class="num">리셋발생</th><th class="num">paired Δ / P</th></tr></thead>
+<tbody>{rows}</tbody></table></div>
+
+<div class="foot">
+엔진 <code>engines/engine_fable2</code> · 스윕 <code>back_test/sweep_v3_a/b/c.py</code>(병렬 에이전트 샤드) ·
+paired 부트스트랩 vs base(g8·rnone) SEED=42·B=5,000 · net 비용·정수주 포함 ·
+베이스 = 281 + 플립 d1~09:30x1.<br>
+한계: 동일 255주 재표집 · 36조합 다중비교 선택편향 · walk-forward/OOS 미실시 — 최고 조합도 OOS 통과 전 채택 금지.
+</div>
+</div></div>"""
+
+
+if __name__ == "__main__":
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    open(OUT, "w", encoding="utf-8").write(build())
+    print("wrote", OUT)

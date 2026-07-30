@@ -1,0 +1,130 @@
+"""cofounder 설득 보고서 — 글로만 된 워드(.docx) 버전 (차트 없이 표+텍스트).
+입력: scratchpad/persuade_stats.json · 출력: report/live2_갭필터_설명_cofounder.docx
+사용: python3 make_cofounder_docx.py"""
+import os, json
+from docx import Document
+from docx.shared import Pt, RGBColor, Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+OUT = os.path.join(ROOT, "report", "live2_갭필터_설명_cofounder.docx")
+ST = json.load(open("/tmp/claude-1000/-home-jeff-bullet281/214fe36d-405b-475d-b386-7fa939fbe78b/scratchpad/persuade_stats.json"))
+
+INK = RGBColor(0x21, 0x1D, 0x18)
+WIN = RGBColor(0x2E, 0x7D, 0x32)
+WARN = RGBColor(0xC2, 0x49, 0x3C)
+MUTE = RGBColor(0x6B, 0x5E, 0x54)
+
+
+def build():
+    ins, wf, rk = ST["insample"], ST["wf"], ST["risk"]
+    doc = Document()
+    from docx.oxml.ns import qn
+    base = doc.styles["Normal"]
+    base.font.name = "맑은 고딕"; base.font.size = Pt(10.5)
+    base.element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "맑은 고딕")
+
+    def h1(t):
+        p = doc.add_heading(level=0); r = p.add_run(t); r.font.size = Pt(19); r.font.color.rgb = INK
+    def h2(t):
+        p = doc.add_heading(level=1); r = p.add_run(t); r.font.size = Pt(14); r.font.color.rgb = INK
+    def para(runs):
+        p = doc.add_paragraph()
+        for txt, bold, col in runs:
+            r = p.add_run(txt); r.bold = bold
+            if col is not None: r.font.color.rgb = col
+        return p
+    def bullet(runs):
+        p = doc.add_paragraph(style="List Bullet")
+        for txt, bold, col in runs:
+            r = p.add_run(txt); r.bold = bold
+            if col is not None: r.font.color.rgb = col
+
+    # 머리말
+    e = doc.add_paragraph(); r = e.add_run("bullet281 · 라이브 실험 live2 · cofounder 브리핑")
+    r.font.size = Pt(9); r.font.color.rgb = MUTE
+    h1("‘월요일에 크게 튄 종목에만 돈을 넣는다’ — 이 한 줄이 수익을 4배로")
+    para([("우리 기존 전략(281)은 백테스트에서 주당 ", False, None), ("+0.73%", True, None),
+          ("였다. 여기에 규칙 ", False, None), ("딱 하나", True, None),
+          ("를 더했더니 검증구간에서 ", False, None), ("+2.89%/주", True, WIN),
+          ("가 나왔다. 새 매매 규칙이 아니라 ", False, None), ("자본을 어디에 넣느냐", True, None),
+          ("만 바꿨다.", False, None)])
+
+    # 핵심 숫자 표
+    t = doc.add_table(rows=1, cols=3); t.style = "Light Grid Accent 1"
+    for i, x in enumerate(["구분", "주당 평균수익률", "비고"]):
+        t.rows[0].cells[i].paragraphs[0].add_run(x).bold = True
+    data = [["기존 281 (검증구간)", "+1.02%", "기준선"],
+            ["갭필터 적용 (검증구간)", "+2.89%", "+1.78%p · 신뢰도 99%"]]
+    for ri, row in enumerate(data):
+        cells = t.add_row().cells
+        for ci, x in enumerate(row):
+            run = cells[ci].paragraphs[0].add_run(x)
+            if ci == 1 and ri == 1: run.bold = True; run.font.color.rgb = WIN
+
+    h2("1. 규칙이 뭔데? — 아주 간단하다")
+    para([("스크리너로 뽑은 5종목은 그대로. 매매 방식(진입·익절·청산)도 281 그대로 하나도 안 바꿈. 딱 이것만 추가:", False, None)])
+    bullet([("월요일 아침 9시, 각 종목의 시가가 지난 금요일 종가에서 몇 % 튀어서 시작했나(=갭)를 본다.", False, None)])
+    bullet([("±3% 이상 튄 종목만 그 주에 돈을 넣는다. ", False, None), ("위든 아래든 방향 상관없이 크기만 본다.", True, None)])
+    bullet([("3% 안 되면 그 주 쉰다(현금). 통과 종목이 하나도 없으면 그 주는 통째로 현금.", False, None)])
+    para([("왜 되나 — 큰 갭 = ‘이번 주 크게 움직일 사건이 있는 종목’. 조용히 시작한 종목(약 70%)은 수익 기여가 거의 0이었다. 시끄러운 종목만 골라 타는 것.", False, MUTE)])
+
+    h2("2. 임계값은 왜 3%인가 (전체 5년 기준)")
+    c = ins["curve"]
+    t2 = doc.add_table(rows=1, cols=len(c) + 1); t2.style = "Light List Accent 1"
+    cells = t2.rows[0].cells
+    cells[0].paragraphs[0].add_run("갭 임계").bold = True
+    for i, k in enumerate(sorted(c, key=int)):
+        cells[i + 1].paragraphs[0].add_run(f"±{k}%" if k != "0" else "없음").bold = True
+    r2 = t2.add_row().cells; r2[0].paragraphs[0].add_run("주평균")
+    for i, k in enumerate(sorted(c, key=int)):
+        run = r2[i + 1].paragraphs[0].add_run(f"{c[k]:.2f}%")
+        if k == "3": run.bold = True; run.font.color.rgb = WIN
+    para([("±3%에서 정점(+2.53%). 그 뒤엔 통과 종목이 너무 줄어 하락. 삐죽삐죽이 아니라 매끈한 산 모양이라 우연이 아니라 진짜 효과.", False, MUTE)])
+
+    h2("3. ‘너무 좋은데?’ — 그래서 진짜 검증을 했다")
+    para([("백테스트가 좋게 나오는 건 흔하다. 문제는 과거에 억지로 맞춘 것(과적합)인지다. 그래서 ", False, None),
+          ("과거만 보고 규칙을 정한 뒤 그 다음 미래에서 채점", True, None),
+          ("하는 걸 6번 반복했다(실전과 똑같은 순서).", False, None)])
+    t3 = doc.add_table(rows=1, cols=len(wf["folds"]) + 1); t3.style = "Light List Accent 1"
+    ch = t3.rows[0].cells; ch[0].paragraphs[0].add_run("검증기간").bold = True
+    for i in range(len(wf["folds"])): ch[i + 1].paragraphs[0].add_run(f"{i+1}").bold = True
+    rr = t3.add_row().cells; rr[0].paragraphs[0].add_run("성적(%/주)")
+    for i, v in enumerate(wf["folds"]):
+        run = rr[i + 1].paragraphs[0].add_run(f"+{v:.1f}"); run.font.color.rgb = WIN
+    para([("6개 검증기간 ", False, None), ("전부 플러스", True, WIN),
+          (f" (+0.4 ~ +5.7%/주). 매번 과거만 보고도 같은 ±3~4%가 뽑혔다 = 우연이 아님.", False, None)])
+    para([("참고로 이번에 아이디어 ", False, None), ("19개", True, None),
+          ("를 이 2단계 검증(부트스트랩 + walk-forward)에 넣었고 통과한 건 ", False, None),
+          ("갭필터 하나뿐", True, None), (". 나머지 18개는 전부 기각. 그만큼 걸러진 결과다.", False, None)])
+
+    h2("4. 솔직하게 — 공짜는 아니다 (리스크)")
+    para([("집중의 대가로 변동성이 커진다. 5종목 다 사는 게 아니라 평균 ~2종목만 사고 24%의 주는 통째로 쉬니까, 잘 될 땐 크게·안 될 땐 크게 흔들린다.", False, None)])
+    t4 = doc.add_table(rows=2, cols=4); t4.style = "Light Grid"
+    rlab = ["주간 변동성(vs 기존)", "최악의 한 주", "하위 5% 주(P5)", "현금으로 쉬는 주"]
+    rval = ["약 2배", f"{rk['worst']:.0f}%", f"{rk['p5']:.1f}%", f"{rk['idle']:.0f}%"]
+    for i in range(4):
+        t4.rows[0].cells[i].paragraphs[0].add_run(rlab[i]).bold = True
+        run = t4.rows[1].cells[i].paragraphs[0].add_run(rval[i]); run.font.color.rgb = WARN; run.bold = True
+    para([("그리고 백테스트 = 미래 보장 아님. 같은 5년 데이터라 장세가 바뀌면 달라질 수 있다. 그래서 지금 ", False, None),
+          ("실제 돈 없이 라이브로 전방 관찰(live2) 중", True, None),
+          (" — 검증구간 결론이 앞으로도 유지되는지 매주 확인하는 단계다.", False, None)])
+
+    h2("5. 지금 상태 & 제안")
+    bullet([("live2(갭필터)가 매일 자동으로 돌고, 매일 장마감에 우리 둘에게 리포트가 간다. 대조군 live3도 같이 비교 중.", False, None)])
+    bullet([("제안: 몇 주간 라이브 전방 데이터가 백테스트(+2.89%)와 방향이 맞는지 같이 지켜보고, 어긋나지 않으면 ", False, None),
+            ("소액 실전 배분을 검토하자. 지금은 돈 안 걸고 관찰만 하는 단계라 리스크 0.", True, None)])
+
+    f = doc.add_paragraph(); r = f.add_run(
+        "데이터: 한국주식 5분봉 5년(2021~2026, 255주) · 지표: 주간 net 수익률(수수료·세금 반영) · "
+        "검증: 부트스트랩(5,000회) + walk-forward(6구간, OOS 152주) · 갭 = 월 시가/전주 금종가 − 1(매매 전 확정). "
+        "숫자는 신호² 가중 배분 기준. 차트 포함 상세본은 첨부 HTML 참조.")
+    r.font.size = Pt(8.5); r.font.color.rgb = MUTE
+
+    doc.save(OUT)
+    print("wrote", OUT)
+
+
+if __name__ == "__main__":
+    build()

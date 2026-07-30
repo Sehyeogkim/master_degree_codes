@@ -1,0 +1,84 @@
+"""live_config — 라이브 프로젝트 설정 로더.
+
+각 라이브 실험은 report/live/{project}/ 폴더 1개다.
+config.yaml(순수 YAML)이 그 실험의 설정. desc: 필드가 사람용 실험 취지.
+
+  engine: engine281
+  cap_min: 500000000000
+  top_change: 20
+  top_value: 5
+  direction: up            # up=상승 롱 / down=하락 숏
+  emails: [a@x.com, b@y.com]
+  desc: |
+    사람이 읽는 실험 설명 (토요일 선정 agent가 서술에 활용)
+
+- 5분 update(순수 코드)는 yaml.safe_load로 결정론적 파싱.
+- desc는 토요일 선정 agent가 읽어 선정보고서 서술에 반영.
+"""
+import os, glob, yaml
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+LIVE_ROOT = os.path.abspath(os.path.join(HERE, "..", "report", "live"))
+
+DEFAULTS = dict(
+    engine="engine281",
+    screener="momentum_v1",
+    cap_min=500_000_000_000,
+    top_change=20,
+    top_value=5,
+    direction="up",
+    emails=[],
+    gap_theta=None,     # [실험19] 갭 크기 자본 필터 임계(%). None=미사용.
+                        # |월요일 첫봉 시가/F0 − 1|×100 ≥ θ 종목만 자본 배분, 미달=현금.
+    strat={},           # 엔진 파라미터 오버라이드 (281 기본값 위에 merge).
+                        # 예: {tp_gate: 0.10, flip_monday: true, flip_cutoff_hm: "09:30"}
+    enabled=True,       # False면 cron 자동 순회(전체 대상)에서 제외.
+                        # --project 로 명시하면 여전히 수동 실행 가능(과거 데이터 보존).
+)
+
+
+def load_project(project_dir):
+    """project_dir/config.yaml → 설정 dict (DEFAULTS + yaml + 파생 경로)."""
+    cfgpath = os.path.join(project_dir, "config.yaml")
+    with open(cfgpath, encoding="utf-8") as f:
+        meta = yaml.safe_load(f) or {}
+    cfg = dict(DEFAULTS)
+    cfg.update(meta)
+    cfg["name"] = os.path.basename(os.path.normpath(project_dir))
+    cfg["dir"] = os.path.abspath(project_dir)          # 프로젝트 루트 (config.yaml 위치)
+    cfg["desc"] = (meta.get("desc") or "").strip()
+    return cfg
+
+
+def week_paths(cfg, monday):
+    """그 주(가동 월요일=monday) 산출물 경로. 폴더명 = 월요일 날짜라 주별로 히스토리가 쌓인다.
+
+      report/live/{project}/{monday}/  _top5.json · selection.html · live.html
+    """
+    wd = os.path.join(cfg["dir"], monday)
+    return dict(
+        week_dir=wd,
+        top5=os.path.join(wd, "_top5.json"),
+        selection=os.path.join(wd, "selection.html"),
+        live=os.path.join(wd, "live.html"),
+        bars_dir=os.path.join(wd, "bars"),          # 종목별 5분봉 원본 CSV (백테스터 재사용 포맷)
+        results=os.path.join(wd, "results.json"),   # 엔진 결과 스냅샷 (매 틱 갱신)
+    )
+
+
+def all_projects(only_enabled=False):
+    """report/live/*/config.yaml 를 가진 모든 프로젝트 설정 리스트 (이름순).
+
+    only_enabled=True 면 enabled: false 인 프로젝트를 제외한다 (cron 자동 순회용).
+    명시적 --project 지정 시에는 전체 목록에서 찾으므로 비활성 프로젝트도 수동 실행 가능."""
+    projs = [load_project(os.path.dirname(p))
+             for p in sorted(glob.glob(os.path.join(LIVE_ROOT, "*", "config.yaml")))]
+    return [p for p in projs if p.get("enabled", True)] if only_enabled else projs
+
+
+if __name__ == "__main__":
+    for c in all_projects():
+        print(f"[{c['name']}] engine={c['engine']} direction={c['direction']} "
+              f"cap≥{c['cap_min']/1e8:,.0f}억 top{c['top_change']}→{c['top_value']} "
+              f"emails={c['emails']}")
+        print("  desc:", (c["desc"][:60].replace(chr(10), " ") + "…") if c["desc"] else "(없음)")

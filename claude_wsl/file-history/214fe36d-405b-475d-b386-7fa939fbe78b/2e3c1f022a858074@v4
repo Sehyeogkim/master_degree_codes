@@ -1,0 +1,40 @@
+"""fable 정식 전략 정의 — engine_fable 위에서 "fable"이 정확히 무엇인지 못박음.
+
+fable = 281 + 월요일 1회 리버설(플립). 281과 동일한 진입·익절·비용·청산 규칙에
+'그 주 첫 거래일(월요일)에 한해, 보유 포지션이 반대방향 트레일 진입신호를 만나면
+전량 손절 후 즉시 반대방향으로 최대 1회 전환' 규칙만 추가한다.
+
+STRAT281 값과 동일하게 유지하되 flip_monday=True 만 켠다 (import 충돌 회피 위해 값 인라인).
+F0 = 전주 마지막 거래일(금) 종가.
+"""
+from engine_fable import run
+
+# ── 엔진 레벨 fable 설정 (종목-주 1건 실행) ─────────────────────────
+# 주의: 아래 값은 engine281/strategy281.STRAT281 과 반드시 동일해야 한다
+#       (flip_monday 만 차이). 281 변경 시 여기도 함께 맞출 것.
+STRAT_FABLE = dict(
+    tp_gate=0.08,               # 익절 활성화 게이트: 고점이익 진입가 대비 +8%
+    entries=("trail",),         # 신고점 돌파(모멘텀)만 — 첫봉즉시·cross 미사용
+    stop_mode="none",           # 무손절 (금요일 청산 + 월요일 플립만)
+    fee=0.00015, slip=0.0005, tax=0.0015,   # 편도 비용
+    round_shares=True,          # 정수주 매수
+    flip_monday=True,           # ★ fable 차별점: 월요일 1회 리버설
+    flip_days=1, flip_cutoff_hm=None, flip_max=1,   # v1: 월요일 종일 · 최대 1회
+)
+
+# v2 확장: 플립 허용창을 화요일 오전 10:00까지 · 최대 2회로 확장
+STRAT_FABLE_V2 = dict(STRAT_FABLE, flip_days=2, flip_cutoff_hm="10:00", flip_max=2)
+
+# v3: 월요일 한정(창 확장 없음) · 최대 2회 — 'flip_max=2'만의 효과 분리
+STRAT_FABLE_V3 = dict(STRAT_FABLE, flip_days=1, flip_cutoff_hm=None, flip_max=2)
+
+# 포트폴리오 배분 파라미터는 281과 동일 (back_test 파이프라인이 자체 규칙 사용).
+GAP_MIN = 0.03
+POWER = 4
+DIV_FLOOR = 1
+FALLBACK = True
+
+
+def run_fable(bars, F0, capital=10_000_000.0):
+    """종목-주 1건에 fable 엔진 적용 → (events, ctx). ctx['weekly_return']=net 주간수익률."""
+    return run(bars, F0, capital=capital, **STRAT_FABLE)

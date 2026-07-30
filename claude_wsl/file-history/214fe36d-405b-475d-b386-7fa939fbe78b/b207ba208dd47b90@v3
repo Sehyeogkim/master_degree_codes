@@ -1,0 +1,211 @@
+"""engine_fable 테스트 — 실행: python3 engines/engine_fable/test_flip.py
+
+1) 회귀: flip_monday=False → engine281 과 실데이터 전 종목-주 수치 완전 일치 (복사 정확성).
+2) 골든: 합성 주(월 롱진입 → 오후 신저점 붕괴 → 숏 전환) 손검증.
+3) 엣지: 화요일 신호(플립X) · 최대 1회(2번째 반대신호 무시).
+"""
+import os, sys, glob
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # bullet281/
+sys.path.insert(0, os.path.join(ROOT, "engines", "engine_fable"))
+sys.path.insert(0, os.path.join(ROOT, "engines", "engine281"))
+
+import engine_fable                 # 모듈명 분리 → 충돌 없음
+import engine as engine281          # engine281/engine.py
+
+# 281 정식 엔진설정 (strategy281.STRAT281 과 동일; import 경로 단순화 위해 인라인)
+STRAT281 = dict(tp_gate=0.08, entries=("trail",), stop_mode="none",
+                fee=0.00015, slip=0.0005, tax=0.0015, round_shares=True)
+# 골든/엣지용 무비용 설정(수학 단순화)
+CLEAN = dict(tp_gate=0.08, entries=("trail",), stop_mode="none",
+             fee=0.0, slip=0.0, tax=0.0, round_shares=False)
+
+DATA = os.path.join(ROOT, "data", "data_creon_API", "intraday_5m_by_week")
+PASS, FAIL = 0, 0
+
+
+def check(name, cond, extra=""):
+    global PASS, FAIL
+    if cond:
+        PASS += 1
+        # print(f"  ok  {name}")
+    else:
+        FAIL += 1
+        print(f"  FAIL {name}  {extra}")
+
+
+def B(dt, o, h, l, c):
+    return engine_fable.Bar(dt, o, h, l, c, 0.0)
+
+
+# ── 1) 회귀: 복사본(flip off) == engine281 ─────────────────────────
+def test_regression():
+    csvs = []
+    for wk in sorted(os.listdir(DATA)):
+        d = os.path.join(DATA, wk)
+        if not os.path.isdir(d):
+            continue
+        for f in sorted(os.listdir(d)):
+            if f.endswith("_5m.csv") and os.path.getsize(os.path.join(d, f)) > 100:
+                csvs.append(os.path.join(d, f))
+    check("회귀: 실데이터 CSV 존재", len(csvs) > 0, f"n={len(csvs)}")
+    mismatches = 0
+    tested = 0
+    for path in csvs:
+        bars = engine_fable.load_bars(path)
+        if not bars:
+            continue
+        F0 = bars[0].o                      # 임의 F0 — 두 엔진에 동일하면 결과도 동일해야
+        e281, c281 = engine281.run(bars, F0, **STRAT281)
+        efab, cfab = engine_fable.run(bars, F0, **STRAT281)   # flip_monday 기본 False
+        tested += 1
+        if abs(c281["weekly_return"] - cfab["weekly_return"]) > 1e-12 or len(e281) != len(efab):
+            mismatches += 1
+            if mismatches <= 3:
+                print(f"    diff {os.path.basename(path)}: 281={c281['weekly_return']:.10f} "
+                      f"fable={cfab['weekly_return']:.10f} ev {len(e281)}/{len(efab)}")
+    check(f"회귀: {tested}건 전부 281과 일치", mismatches == 0, f"불일치 {mismatches}")
+
+
+# ── 2) 골든: 월요일 롱→숏 플립 손검증 ──────────────────────────────
+def golden_bars():
+    # F0=100. entries=("trail",)라 첫봉 즉시진입 없음. bar1에서 신고점(104) 돌파 → 롱@105.
+    # long_gate=max(longL=[104,101])=104, short_gate=min(shortL=[100])=100.
+    return [
+        B("2026-01-05 09:05", 101, 105, 100, 104),  # 진입 없음(trail: run_high 미설정)
+        B("2026-01-05 09:10", 104, 106, 103, 105),  # 신고점 104 돌파 → 롱 진입 @105
+        B("2026-01-05 09:15", 104, 104,  94,  95),  # 음봉·종가95<run_low·<short_gate100 → 플립 숏@95
+        B("2026-01-05 09:20",  95,  95,  91,  92),  # 숏 유지
+        B("2026-01-09 15:15",  92,  92,  89,  90),  # 금 15:15 강제청산 @90
+    ]
+
+
+def test_golden_flip():
+    bars = golden_bars()
+    F0 = 100.0
+    ev, ctx = engine_fable.run(bars, F0, capital=1_000_000.0, flip_monday=True, **CLEAN)
+    entries = [e for e in ev if e.kind == "ENTRY"]
+    check("골든: 플립 1회", ctx["flips_used"] == 1)
+    check("골든: 진입 2회(롱→숏)", len(entries) == 2
+          and entries[0].direction == +1 and entries[1].direction == -1,
+          f"entries={[(e.direction,e.price) for e in entries]}")
+    # 손검증: 롱@105 → 95 청산 후 숏@95 → 90 청산 → 최종현금 = C*100/105
+    exp = 100.0 / 105.0 - 1.0
+    check("골든: weekly_return ≈ 100/105-1", abs(ctx["weekly_return"] - exp) < 1e-9,
+          f"got={ctx['weekly_return']:.8f} exp={exp:.8f}")
+
+    # 플립 off (=281) 이면 롱@105 → 금 90 홀드 → C*90/105
+    ev0, ctx0 = engine_fable.run(bars, F0, capital=1_000_000.0, flip_monday=False, **CLEAN)
+    exp0 = 90.0 / 105.0 - 1.0
+    check("골든: flip off = 롱 홀드 90/105-1", abs(ctx0["weekly_return"] - exp0) < 1e-9,
+          f"got={ctx0['weekly_return']:.8f} exp={exp0:.8f}")
+    check("골든: flip off flips_used=0", ctx0["flips_used"] == 0)
+
+
+# ── 3) 엣지: 화요일 신호는 플립 안됨 ───────────────────────────────
+def test_tuesday_no_flip():
+    # 붕괴봉을 화요일로 이동 → b.day != monday → 플립 없음, 롱 홀드
+    bars = [
+        B("2026-01-05 09:05", 101, 105, 100, 104),
+        B("2026-01-05 09:10", 104, 106, 103, 105),
+        B("2026-01-06 09:15", 104, 104,  94,  95),  # 화요일 붕괴 — 플립 불가
+        B("2026-01-06 09:20",  95,  95,  91,  92),
+        B("2026-01-09 15:15",  92,  92,  89,  90),
+    ]
+    ev, ctx = engine_fable.run(bars, 100.0, capital=1_000_000.0, flip_monday=True, **CLEAN)
+    entries = [e for e in ev if e.kind == "ENTRY"]
+    check("엣지: 화요일 신호 플립 안됨", ctx["flips_used"] == 0 and len(entries) == 1,
+          f"flips={ctx['flips_used']} entries={len(entries)}")
+    check("엣지: 롱 홀드 90/105-1", abs(ctx["weekly_return"] - (90.0/105.0 - 1.0)) < 1e-9)
+
+
+# ── 3b) 엣지: 최대 1회 — 플립 후 2번째 반대신호 무시 ───────────────
+def test_max_one_flip():
+    # 롱@104 → 붕괴 숏 전환@95 → 같은 월요일 신고점 재돌파(롱신호)해도 무시
+    bars = [
+        B("2026-01-05 09:05", 101, 105, 100, 104),  # 롱@104
+        B("2026-01-05 09:10", 104, 106, 103, 105),  # 신고점 105 (long_gate=104)
+        B("2026-01-05 09:15", 104, 104,  94,  95),  # 붕괴 → 숏 전환@95 (flips_used=1)
+        B("2026-01-05 09:20",  95, 120, 95,  110),  # 양봉·종가110>run_high·>long_gate → 롱신호지만 무시
+        B("2026-01-09 15:15", 110, 112, 108, 109),  # 금 청산
+    ]
+    ev, ctx = engine_fable.run(bars, 100.0, capital=1_000_000.0, flip_monday=True, **CLEAN)
+    entries = [e for e in ev if e.kind == "ENTRY"]
+    check("엣지: 최대 1회(2번째 무시)", ctx["flips_used"] == 1 and len(entries) == 2
+          and entries[-1].direction == -1,
+          f"flips={ctx['flips_used']} entries={[(e.direction) for e in entries]}")
+
+
+# ── 4) v2: 화요일 10:00까지 창 · 최대 2회 ──────────────────────────
+V2 = dict(flip_monday=True, flip_days=2, flip_cutoff_hm="10:00", flip_max=2)
+
+
+def test_v2_tuesday_before_cutoff():
+    # 월요일 롱@105, 화요일 09:15(≤10:00) 신저점 붕괴 → 창 안이므로 플립 숏
+    bars = [
+        B("2026-01-05 09:05", 101, 105, 100, 104),
+        B("2026-01-05 09:10", 104, 106, 103, 105),  # 롱@105
+        B("2026-01-06 09:15", 104, 104,  94,  95),  # 화 09:15 붕괴 → 플립 숏
+        B("2026-01-06 09:20",  95,  95,  91,  92),
+        B("2026-01-09 15:15",  92,  92,  89,  90),
+    ]
+    ev, ctx = engine_fable.run(bars, 100.0, capital=1_000_000.0, **V2, **CLEAN)
+    entries = [e for e in ev if e.kind == "ENTRY"]
+    check("v2: 화요일 10시 이전 플립됨", ctx["flips_used"] == 1 and len(entries) == 2
+          and entries[1].direction == -1, f"flips={ctx['flips_used']} n={len(entries)}")
+    check("v2: 화전 플립 수익 = 100/105-1", abs(ctx["weekly_return"] - (100.0/105.0 - 1.0)) < 1e-9)
+
+
+def test_v2_tuesday_after_cutoff():
+    # 붕괴가 화요일 10:05(>10:00) → 창 밖, 플립 없음
+    bars = [
+        B("2026-01-05 09:05", 101, 105, 100, 104),
+        B("2026-01-05 09:10", 104, 106, 103, 105),  # 롱@105
+        B("2026-01-06 10:05", 104, 104,  94,  95),  # 화 10:05 붕괴 — 창 밖
+        B("2026-01-06 10:10",  95,  95,  91,  92),
+        B("2026-01-09 15:15",  92,  92,  89,  90),
+    ]
+    ev, ctx = engine_fable.run(bars, 100.0, capital=1_000_000.0, **V2, **CLEAN)
+    entries = [e for e in ev if e.kind == "ENTRY"]
+    check("v2: 화요일 10시 이후 플립 안됨", ctx["flips_used"] == 0 and len(entries) == 1,
+          f"flips={ctx['flips_used']} n={len(entries)}")
+    check("v2: 창밖 → 롱 홀드 90/105-1", abs(ctx["weekly_return"] - (90.0/105.0 - 1.0)) < 1e-9)
+
+
+def test_v2_max_two_flips():
+    # 롱@105 → 붕괴 숏@95(#1) → 급반등 롱@120(#2) → 3번째는 없음
+    bars = [
+        B("2026-01-05 09:05", 101, 105, 100, 104),
+        B("2026-01-05 09:10", 104, 106, 103, 105),  # 롱@105
+        B("2026-01-05 09:15", 104, 104,  94,  95),  # 붕괴 → 숏@95 (#1)
+        B("2026-01-05 09:20",  95, 130,  95, 120),  # 급반등(>run_high105,>long_gate104) → 롱@120 (#2)
+        B("2026-01-05 09:25", 120, 122, 118, 121),  # 유지 (3번째 반대신호 없음)
+        B("2026-01-09 15:15", 121, 122, 118, 119),  # 금 청산
+    ]
+    ev, ctx = engine_fable.run(bars, 100.0, capital=1_000_000.0, **V2, **CLEAN)
+    entries = [e for e in ev if e.kind == "ENTRY"]
+    dirs = [e.direction for e in entries]
+    check("v2: 최대 2회(롱→숏→롱)", ctx["flips_used"] == 2 and dirs == [1, -1, 1],
+          f"flips={ctx['flips_used']} dirs={dirs}")
+
+
+def test_v2_regression_v1_unchanged():
+    # V2 코드 추가 후에도 v1 기본값(flip_days=1,max1)이 기존 골든과 동일해야
+    bars = golden_bars()
+    ev, ctx = engine_fable.run(bars, 100.0, capital=1_000_000.0, flip_monday=True, **CLEAN)
+    check("v2코드: v1 기본 골든 불변", abs(ctx["weekly_return"] - (100.0/105.0 - 1.0)) < 1e-9
+          and ctx["flips_used"] == 1)
+
+
+if __name__ == "__main__":
+    print("engine_fable 테스트")
+    test_regression()
+    test_golden_flip()
+    test_tuesday_no_flip()
+    test_max_one_flip()
+    test_v2_tuesday_before_cutoff()
+    test_v2_tuesday_after_cutoff()
+    test_v2_max_two_flips()
+    test_v2_regression_v1_unchanged()
+    print(f"\n결과: {PASS} pass, {FAIL} fail")
+    sys.exit(1 if FAIL else 0)

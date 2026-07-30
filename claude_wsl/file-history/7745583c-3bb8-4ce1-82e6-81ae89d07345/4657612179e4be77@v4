@@ -1,0 +1,53 @@
+#!/bin/bash
+# Per-node sequential steady-3D (non-hyperemia) runner for 54_analysis.
+# For each case in [START,END]:  PRE -> (solve each PHASE) -> POST(wall csv) -> next.
+# PHASES env (default "peak low"); set PHASES="low" for low-only.
+# Resumable: skips a case whose required-phase wall csv already exist.
+# Params via --export=ALL,START=<a>,END=<b>,PHASES=<...>. node/partition/name/-o on sbatch cmdline.
+#SBATCH -N 1
+#SBATCH -n 96
+#SBATCH --ntasks-per-node=96
+#SBATCH -c 1
+
+source /HL8/HMod/modules/5.1.1/init/bash
+module purge
+module load cmake/3.25.2 gcc/11.3.0 mpi/gcc-11.3.0/openmpi-4.1.5
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib64/:/home/jkim/repos/svSolverPrivate/build/svSolver-build/bin/:/home/jkim/repos/svSolverPrivate/build/svSolver-build/lib/:/opt/cvbml/libraries/VTK-8.2.0/lib64/
+
+BASE=/home/jeff/project/54_analysis
+PY=/home/jeff/miniconda3/bin/python3
+SV=/opt/cvbml/repos/svSolverPrivate/build/svSolver-build/bin/svsolver
+WALL=$BASE/post_data/wall_no_hyperemia
+NP=${SLURM_NTASKS:-96}
+export PHASES="${PHASES:-peak low}"
+
+: "${START:?need START}"; : "${END:?need END}"
+echo "NODE=$SLURM_JOB_NODELIST range=$START..$END PHASES='$PHASES' NP=$NP start=$(date)"
+
+for i in $(seq $START $END); do
+  # resumable: skip only if EVERY requested phase's wall csv exists
+  need=0
+  for ph in $PHASES; do [ -f "$WALL/$ph/wall_${ph}_case_${i}.csv" ] || need=1; done
+  if [ $need -eq 0 ]; then echo "[$i] already done ($PHASES), skip"; continue; fi
+
+  echo "==== [$i] PRE $(date) ===="
+  $PY $BASE/steady_3D_pre_no_hyperemia.py $i
+  if [ $? -ne 0 ]; then echo "[$i] pre failed/skipped -> next case"; continue; fi
+
+  if [ $i -lt 500 ]; then FD=fluid_data; else FD=fluid_data_500; fi
+
+  for ph in $PHASES; do
+    CD="$BASE/$FD/case_${i}/steady_3d_no_hyperemia/$ph"
+    if [ ! -f "$CD/solver.inp" ]; then echo "[$i/$ph] no solver.inp, skip"; continue; fi
+    [ -d "$CD/${NP}-procs_case" ] && rm -rf "$CD/${NP}-procs_case"
+    cd "$CD"
+    echo "==== [$i/$ph] SOLVE $(date) ===="
+    mpirun -np $NP $SV solver.inp
+  done
+
+  echo "==== [$i] POST $(date) ===="
+  $PY $BASE/steady_3D_post_no_hyperemia.py $i
+  if [ $? -eq 0 ]; then echo "[$i] DONE wall csv ($PHASES)"; else echo "[$i] POST incomplete"; fi
+done
+
+echo "range $START..$END FINISHED $(date)"

@@ -1,0 +1,5 @@
+{
+    "simmetrix": {
+    "meshing": "/home/jeff/repo/SyntheticTreeGenerator/build/apps/MeshGenerator/mesh_generator",
+    "license": "/home/jeff/repo/SyntheticTreeGenerator/apps/MeshGenerator/floating.lic"}
+}

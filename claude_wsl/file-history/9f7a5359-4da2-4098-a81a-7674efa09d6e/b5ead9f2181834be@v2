@@ -1,0 +1,73 @@
+# Plan — LAP geometry re-gen → WSL re-mesh (resume 2026-07-28 ~4pm)
+
+## Goal
+Fill the LAP (Type-1 solid) mesh gaps for **id < 500** by **re-generating the failed
+geometry** in Autodesk Inventor, then **re-meshing in WSL** to verify the boolean/
+surface defect is fixed. (id ≥ 500 is a separate effort on cvbml02/ws2.)
+
+## Where things stand
+- LAP mesh `54_analysis/LAP_mesh/solid_LAP_<id>.msh` (on **ws1 / cvbml01**): **441 / 500 done**.
+- **59 still missing (id<500)**, split by cause:
+  - **[A] geometry defect → re-gen needed: 46** (+2 likely: 291, 427) — see `mesh_failed.md`.
+  - **[B] timeout/heavy (geometry FINE, re-mesh coarser, NO re-gen): 9** = 30, 40, 176, 189, 196, 223, 246, 379, 443.
+  - **[C] other: 195, 204** (exit-120 crash, retry), 291 (1D mesh), 427 (periodic).
+- Full breakdown + per-case failure reason: **`mesh_failed.md`** (this dir).
+
+## The workflow (this session's plan)
+```
+Windows/Inventor:  python run_0728_LAP.py   →  geo_0728_LAP\case_<id>\*.stp
+        ↓  (copy to WSL)
+WSL (local, 16 cores, NOT ws1/ws2 — those run ANSYS):  batch LAP mesh  →  pass/fail + quality
+        ↓
+Failed-to-mesh cases  →  inspect one-by-one (which boolean STEP still breaks)
+```
+
+## Geometry generation — `run_0728_LAP.py` (created, in this dir)
+Combo the user chose (differs from `main_CAD.py` which uses centerline):
+- **lumen = guideline** (`utils.lumen_guideline.lumen_step`, rail-based, robust)
+- **solid = guideline** (`utils.solid_guideline.solid_step`)
+- **lipid = lipid_main** (`utils.lipid_main.lipid_step`) — twist cases fixed MANUALLY in Inventor after
+- **fc / fc_offset = usual** (`utils.fc`)
+- Output: **`geo_0728_LAP\case_<id>\`** {lumen,solid,fc,fc_offset,lipid}.{ipt,stp}
+- CASES = the 48 (id<500 [A]+291,427). `RUN = CASES[:1]` currently = **TEST case 3 only**;
+  set `RUN = CASES` for the full 48.
+
+### HOW TO RUN (must be Windows — COM needs it; WSL cannot)
+- Open **Autodesk Inventor** first.
+- In **PowerShell / CMD / Anaconda Prompt** (same Windows Python you use for `main_CAD.py`, has pywin32):
+  ```powershell
+  cd C:\Users\jeff\project_inventor\33_0605_final_analysis
+  python run_0728_LAP.py
+  ```
+- All import symbols verified to exist. If `geo_0728_LAP` isn't created at all → the run
+  didn't start / errored at import (wrong Python env or not run yet), not a code bug.
+
+## WSL meshing — ready (set up this session)
+- Located at **`~/lap_wsl/`** (WSL home): `HXT_meshing_I_dist.py`, `mesh_one_LAP.py`,
+  `utils/` (copied from ws1 `master_python/src`), and **`wsl_lap_check.py`**.
+- Run env: `PYTHONPATH=~/lap_wsl/src`, python = `/home/jeff/miniconda3/bin/python3` (gmsh 4.14.1, meshio, pandas OK).
+- **Check one case (validation mode — meshes, records verdict+quality, deletes the .msh):**
+  ```bash
+  cd ~/lap_wsl && PYTHONPATH=~/lap_wsl/src python3 wsl_lap_check.py \
+     "/mnt/c/Users/jeff/project_inventor/33_0605_final_analysis/geo_0728_LAP" 3 4 0.055
+  ```
+  → prints `STATUS {...}` : status done/failed, num_elements, min_quality, neg_jacobian.
+- lesion_length read from `parameter_0728.csv` (row index == case_id).
+- Batch (once many cases exist): 4 workers × nproc 3 on the 16 cores; discard meshes,
+  keep only pass/fail + quality report. (Batch script not yet written — build on resume.)
+
+## Immediate next step (where we paused)
+- **Testing case 3.** `run_0728_LAP.py` set to `RUN = CASES[:1]`.
+- User is running it in Inventor; `geo_0728_LAP\case_3` not yet produced.
+- Once `geo_0728_LAP\case_3\*.stp` (4 files) appears → run the WSL check above →
+  if it MESHES clean (STEP4/overlapping gone, neg_jac 0) the guideline combo works →
+  flip to `RUN = CASES` for all 48, generate, transfer, batch-mesh in WSL.
+
+## Key facts / gotchas
+- Geometry gen is **Windows-only** (Inventor COM). Meshing is **WSL-only** here (ws1/ws2 busy with ANSYS — don't touch).
+- `main_CAD.py` currently loops `for i in [438]` with centerline generators — leave it; use `run_0728_LAP.py`.
+- Meshing recipe = distance-field off fc surfaces (`HXT_meshing_I_dist.py`); hardcoded volume tags
+  lipid=(3,3)/solid=(3,6) and the boolean pipeline must NOT be edited.
+- fc_offset.stp is generated too → will be reused later for **CP (Type-2) meshing** (needs fc_offset + input_0605.csv).
+- Disk on ws1 blew up earlier today (ANSYS CP SPARSE scratch filled it, crashed meshing twice);
+  that's why meshing moved to WSL and we discard .msh in validation mode.

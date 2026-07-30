@@ -1,0 +1,43 @@
+"""순수 날짜 계산 — 주(월~금) 단위 경계. I/O·네트워크 없음.
+
+엔진은 F0=직전 금 종가 + 금요일 강제청산이라 본질적으로 '주 단위'. 여기서 그 경계를 계산한다.
+"""
+import datetime
+
+
+def to_monday(d):
+    """date | 'YYYY-MM-DD' → 그 주 월요일 date (월요일 아니면 그 주 월요일로 snap)."""
+    if isinstance(d, str):
+        d = datetime.date(*map(int, d.split("-")))
+    return d - datetime.timedelta(days=d.weekday())
+
+
+def _s(d):
+    return d.strftime("%Y-%m-%d")
+
+
+def week_bounds(monday):
+    """(start, end) — bars_5m용 반열림 [월, 토). end=월+5일(토)라 금요일 포함."""
+    m = to_monday(monday)
+    return _s(m), _s(m + datetime.timedelta(days=5))
+
+
+def prior_week(monday):
+    """target_monday 직전 주. (prior_mon, prior_fri, dl_start, dl_end).
+
+    prior_mon=월-7d, prior_fri=월-3d(직전 금·F0기준일), dl_start=prior_mon-2d, dl_end=prior_fri+2d(yf 여유).
+    """
+    m = to_monday(monday)
+    pm = m - datetime.timedelta(days=7)
+    pf = m - datetime.timedelta(days=3)
+    return _s(pm), _s(pf), _s(pm - datetime.timedelta(days=2)), _s(pf + datetime.timedelta(days=2))
+
+
+def weeks_in_range(start, end):
+    """기간에 걸치는 모든 주의 월요일 리스트 (오름차순, 중복 없음)."""
+    cur, last = to_monday(start), to_monday(end)
+    out = []
+    while cur <= last:
+        out.append(_s(cur))
+        cur += datetime.timedelta(days=7)
+    return out

@@ -1,0 +1,76 @@
+#!/bin/bash
+# Case 961 solid mesh-independence solves on ws2.
+#   ladder : box recipe, algo2d=6, sizes 0.032 / 0.04 / 0.05 / 0.0625  (only h varies)
+#   control: the PRODUCTION mesh (LAP_mesh/solid_LAP_961.msh) with the peak BC, so the
+#            result can be checked against the stored FC_case_961_peak.vtu
+#   solver : ver2 SFE traction, PCG 1e-5 -- production settings untouched
+#   peak BC: post_data/wall_expB_new/peak/wall_peak_case_961.csv        (Tx,Ty,Tz)
+#   low  BC: post_data/wall_no_hyperemia/low/wall_low_case_961.csv      (Tx,Ty,Tz)
+#
+# ws2's utils_bc.py is already the correct vector form, so solve_one.py's override is a
+# no-op here; it is kept so the same script runs on either host.
+#
+# Meshes and results live in the project dir; ANSYS scratch goes to /mnt/hdd because a
+# 6.8M-element out-of-core run churns tens of GB and the system disk should not absorb it.
+W=$HOME/project/54_analysis/mesh_independent_test_solid
+Q=$HOME/project/54_analysis
+PY=$HOME/miniconda3/envs/ansys_new/bin/python
+SCRATCH=/mnt/hdd/jeff/ansys_scratch_961
+CASE=961
+NPROC=${NPROC:-24}
+PARN=${PARN:-2}
+LOG=$W/logs/solve.log
+
+cd "$Q" || exit 1
+mkdir -p "$W/results" "$W/logs" "$SCRATCH"
+
+PEAK_CSV=$Q/post_data/wall_expB_new/peak/wall_peak_case_$CASE.csv
+LOW_CSV=$Q/post_data/wall_no_hyperemia/low/wall_low_case_$CASE.csv
+for f in "$PEAK_CSV" "$LOW_CSV"; do
+  [ -f "$f" ] || { echo "MISSING $f" | tee -a "$LOG"; exit 1; }
+done
+
+run_one() {
+  local label=$1 bc=$2 msh=$3 csv=$4 p=$5
+  local out=$W/results/FC_case_${CASE}_${label}_${bc}.vtu
+  local ex=$SCRATCH/${label}_${bc}
+  if [ -f "$out" ]; then echo "[skip] $label $bc" >> "$LOG"; return; fi
+  rm -rf "$ex"; mkdir -p "$ex"
+  echo "===== $(date '+%F %T') START $label $bc port=$p =====" >> "$LOG"
+  timeout -k 60 28800 "$PY" -u "$W/scripts/solve_one.py" \
+      "$CASE" "$bc" "$msh" "$csv" "$NPROC" "$ex" "$p" "$out" \
+      >> "$W/logs/solve_${label}_${bc}.log" 2>&1
+  local rc=$?          # capture BEFORE $(date) below clobbers $?
+  echo "===== $(date '+%F %T') END   $label $bc exit=$rc =====" >> "$LOG"
+  rm -rf "$ex"
+}
+
+port=50800
+
+# control first: cheapest way to find out whether this host reproduces production
+PRODMSH=$Q/LAP_mesh/solid_LAP_${CASE}.msh
+if [ -f "$PRODMSH" ]; then
+  run_one "prod" "peak" "$PRODMSH" "$PEAK_CSV" "$port" &
+  port=$((port + 10))
+  sleep 5
+fi
+
+for size in 0.0625 0.05 0.04 0.032; do
+  label="a6_${size}"
+  msh=$W/mesh/solid_LAP_${CASE}_box_${size}_a6_10.msh
+  [ -f "$msh" ] || { echo "MISSING MESH $msh" >> "$LOG"; continue; }
+  for bc in peak low; do
+    while [ "$(jobs -rp | wc -l)" -ge "$PARN" ]; do sleep 20; done
+    case "$bc" in
+      peak) csv=$PEAK_CSV ;;
+      low)  csv=$LOW_CSV ;;
+    esac
+    run_one "$label" "$bc" "$msh" "$csv" "$port" &
+    port=$((port + 10))
+    sleep 5
+  done
+done
+wait
+echo "ALL SOLVES DONE $(date '+%F %T')" >> "$LOG"
+ls -la "$W/results" >> "$LOG"
+rmdir "$SCRATCH" 2>/dev/null

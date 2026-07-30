@@ -1,0 +1,177 @@
+#!/usr/bin/env python
+"""
+Retry pass 2 — bounded time AND bounded element count.
+
+Policy (decided 2026-07-24):
+  * per-case cap 20 min (was 3 h).  1st-batch data: median 6.3 min, p90 15.3 min,
+    max 29.7 min -> a 20-min cap costs ~5% of meshes at the base size, and those
+    are exactly the oversized ones we do not want anyway.
+  * element budget 3.0 M.  Time and element count correlate at r = 0.815, so
+    long runs ARE big meshes; they blow up the downstream ANSYS solve.
+  * ladder: base size 0.05 -> if timeout or >3.0 M elements, redo at 0.06
+    (elements scale ~ (1/h)^3, so 0.05->0.06 is ~58% of the original count).
+    A case that still times out at 0.06 is given up on.
+
+Cases coarsened to 0.06 have a DIFFERENT discretisation from the other 300+
+cases (which are all 0.05).  They are recorded in solid_0723/coarsened_cases.json
+so the parameter study can flag them.
+"""
+import json
+import time
+import subprocess
+import threading
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+HERE = Path(__file__).resolve().parent
+PY = "/home/jeff/miniconda3/envs/ansys_new/bin/python"
+
+BASE_SIZE = 0.05
+COARSE_SIZE = 0.06
+ELEM_BUDGET = 3_000_000
+PER_CASE_TIMEOUT = 1200          # 20 min
+NPROC = 12
+WORKERS = 5
+
+# still missing after retry pass 1
+MISSING = [1, 3, 4, 6, 10, 12, 16, 17, 22, 27, 52, 54, 63, 65, 72, 86, 114, 127,
+           151, 177, 182, 189, 192, 205, 215, 226, 231, 239, 240, 249, 250, 254,
+           257, 260, 261, 272, 279, 286, 287, 297, 305, 306, 309, 343, 355, 359,
+           368, 376, 380]
+# already meshed but over the element budget -> regenerate at 0.06
+OVERSIZED = [14, 24, 202, 268, 366]
+
+# 2D/3D algorithm per failure mode (see retry pass 1)
+HXT3D_CASES = {3, 6, 22, 52, 63, 177, 254, 309, 380}   # 2D was fine, 3D failed
+ALGO = {c: ((2, 1) if c in HXT3D_CASES else (5, 10)) for c in MISSING + OVERSIZED}
+
+CASES = OVERSIZED + MISSING      # shrink the oversized ones first, they are known-good geometry
+
+SOLID = HERE / "solid_0723"
+LOGDIR = SOLID / "logs"; LOGDIR.mkdir(parents=True, exist_ok=True)
+PROG = SOLID / "retry_progress.jsonl"
+STATUS = SOLID / "retry_status.json"
+MARKER = SOLID / "batch_retry.marker"
+COARSE_LOG = SOLID / "coarsened_cases.json"
+
+_lock = threading.Lock()
+counts = {"total": len(CASES), "done": 0, "failed": 0, "timeout": 0, "skipped": 0,
+          "running": 0, "coarsened": 0}
+coarsened = {}
+start_time = time.time()
+
+
+def msh_path(c):
+    return SOLID / f"case_{c}" / "dist_run" / "solid_type_1_dist.msh"
+
+
+def write_status():
+    with _lock:
+        s = dict(counts)
+        s["start_time"] = start_time
+        s["elapsed"] = round(time.time() - start_time, 1)
+        STATUS.write_text(json.dumps(s, indent=2))
+        COARSE_LOG.write_text(json.dumps(coarsened, indent=2))
+
+
+def record(entry):
+    entry["ts"] = time.time()
+    with _lock:
+        with open(PROG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+        st = entry.get("status")
+        if st in counts:
+            counts[st] += 1
+        if entry.get("mesh_size") == COARSE_SIZE and st == "done":
+            counts["coarsened"] += 1
+            coarsened[str(entry["case"])] = COARSE_SIZE
+    write_status()
+
+
+def attempt(c, size, a2, a3, tag):
+    """One meshing attempt. Returns (status_dict, elapsed)."""
+    logf = LOGDIR / f"case{c}_{tag}.log"
+    t0 = time.time()
+    try:
+        with open(logf, "w") as lf:
+            p = subprocess.run(
+                [PY, "mesh_one_dist.py", str(c), str(NPROC), str(size), str(a2), str(a3)],
+                cwd=str(HERE), stdout=lf, stderr=subprocess.STDOUT,
+                timeout=PER_CASE_TIMEOUT,
+            )
+        for line in reversed(logf.read_text(errors="replace").splitlines()):
+            if line.startswith("STATUS "):
+                return json.loads(line[len("STATUS "):]), time.time() - t0
+        return {"status": "failed", "error": f"no STATUS line (exit {p.returncode})"}, time.time() - t0
+    except subprocess.TimeoutExpired:
+        return {"status": "timeout"}, time.time() - t0
+    except Exception as e:
+        return {"status": "failed", "error": f"{type(e).__name__}: {e}"}, time.time() - t0
+
+
+def run_case(c):
+    a2, a3 = ALGO[c]
+    with _lock:
+        counts["running"] += 1
+    write_status()
+    entry = {"case": c, "algo2d": a2, "algo3d": a3}
+    try:
+        oversized_start = c in OVERSIZED
+        if oversized_start:
+            # park the too-big mesh; restore it if the coarse attempt fails
+            p = msh_path(c)
+            if p.exists():
+                p.replace(p.with_suffix(".msh.toobig"))
+            st, el = attempt(c, COARSE_SIZE, a2, a3, "coarse")
+            st["mesh_size"] = COARSE_SIZE
+            if st.get("status") != "done":
+                bak = msh_path(c).with_suffix(".msh.toobig")
+                if bak.exists():
+                    bak.replace(msh_path(c))      # keep the oversized mesh rather than nothing
+                st["note"] = "coarse attempt failed; oversized mesh restored"
+            entry.update(st)
+        else:
+            st, el = attempt(c, BASE_SIZE, a2, a3, "r2")
+            st["mesh_size"] = BASE_SIZE
+            need_coarse = (st.get("status") == "timeout"
+                           or (st.get("status") == "done"
+                               and (st.get("num_elements") or 0) > ELEM_BUDGET))
+            if need_coarse:
+                why = "timeout" if st.get("status") == "timeout" else f"{st.get('num_elements'):,} elem > budget"
+                if st.get("status") == "done":
+                    msh_path(c).unlink(missing_ok=True)
+                st2, el2 = attempt(c, COARSE_SIZE, a2, a3, "coarse")
+                st2["mesh_size"] = COARSE_SIZE
+                st2["coarsened_because"] = why
+                entry.update(st2)
+            else:
+                entry.update(st)
+    finally:
+        with _lock:
+            counts["running"] -= 1
+    record(entry)
+    return entry
+
+
+def main():
+    if MARKER.exists():
+        MARKER.unlink()
+    write_status()
+    print(f"[retry2] {len(CASES)} cases, {WORKERS}-wide, nproc={NPROC}, "
+          f"cap={PER_CASE_TIMEOUT//60}min, size {BASE_SIZE}->{COARSE_SIZE}, "
+          f"elem budget {ELEM_BUDGET:,}", flush=True)
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        futs = [ex.submit(run_case, c) for c in CASES]
+        for fut in as_completed(futs):
+            e = fut.result()
+            print(f"[case {e.get('case')}] {e.get('status')} size={e.get('mesh_size')} "
+                  f"elem={e.get('num_elements')} min_q={e.get('min_quality')} "
+                  f"neg={e.get('neg_jacobian')} {e.get('seconds')}s "
+                  f"{e.get('coarsened_because','')}", flush=True)
+    MARKER.write_text("DONE\n")
+    write_status()
+    print("[retry2] COMPLETE")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,209 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>bullet281 · 시스템 아키텍처 (3 시뮬레이터)</title>
+<style>
+:root{
+  --bg:#F0EEE6; --ink:#1A1A1A; --accent:#CC785C; --border:#D4C5B0; --muted:#6B5E54;
+  --codebg:#E6E0D4; --pos:#2E7D32; --neg:#C25744; --card:#fff;
+  --code:#2E6E8E; --agent:#B5654A;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:#2D2D2D;line-height:1.6;
+  font-family:-apple-system,"Apple SD Gothic Neo","Segoe UI",sans-serif}
+main{max-width:1080px;margin:0 auto;padding:40px 22px 100px}
+h1{font-size:27px;margin:0 0 4px;letter-spacing:-.4px}
+.sub{color:var(--muted);font-size:14.5px;margin:0 0 26px}
+h2{font-size:19px;margin:38px 0 12px;padding-left:11px;border-left:4px solid var(--accent)}
+h3{font-size:15px;margin:0 0 8px}
+p{font-size:14px;margin:8px 0}
+.lead{font-size:14.5px;background:#fff;border:1px solid var(--border);border-radius:12px;padding:14px 18px}
+.lead b{color:var(--accent)}
+
+/* 3 시뮬레이터 카드 */
+.sims{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:14px 0}
+.sim{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px 17px;position:relative}
+.sim .no{position:absolute;top:-11px;left:15px;background:var(--accent);color:#fff;font-weight:700;
+  font-size:12.5px;padding:2px 10px;border-radius:20px}
+.sim h3{margin-top:6px;font-size:15.5px;color:var(--ink)}
+.sim .tag{display:inline-block;font-size:11px;font-weight:700;border-radius:5px;padding:2px 7px;margin-bottom:7px}
+.tag.cron{background:#e3eff5;color:var(--code)}
+.tag.demand{background:#f3e5df;color:var(--agent)}
+.sim ul{margin:6px 0 0;padding-left:17px}.sim li{font-size:12.8px;margin:4px 0}
+
+/* 레이어 다이어그램 */
+.warehouse{background:#fbf9f3;border:2px dashed var(--code);border-radius:14px;padding:14px 16px 18px;margin:8px 0}
+.warehouse .wh-title{font-weight:700;color:var(--code);font-size:13.5px;margin-bottom:10px}
+.tools{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.tool{background:#eaf2f7;border:1px solid #bcd6e3;border-radius:9px;padding:10px 11px}
+.tool .n{font-weight:700;font-size:13px;color:var(--code)}
+.tool .d{font-size:11.5px;color:var(--muted);margin-top:3px}
+.tool code{background:#dfeaf0;border-radius:4px;padding:0 4px;font-size:10.8px}
+.connect{text-align:center;color:var(--muted);font-size:20px;margin:4px 0 2px;letter-spacing:30px}
+
+.skills{background:#fbf5f2;border:2px dashed var(--agent);border-radius:14px;padding:12px 16px;margin:12px 0}
+.skills .wh-title{font-weight:700;color:var(--agent);font-size:13.5px;margin-bottom:8px}
+.skills .row{display:flex;gap:10px;flex-wrap:wrap}
+.chip{background:#f3e2db;border:1px solid #e0c3b7;border-radius:8px;padding:8px 12px;font-size:12.5px}
+.chip b{color:var(--agent)}
+
+/* 원칙 박스 */
+.principle{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:12px 0}
+.pbox{border-radius:12px;padding:14px 16px}
+.pcode{background:#eaf2f7;border:1px solid #bcd6e3}
+.pagent{background:#fbf5f2;border:1px solid #e0c3b7}
+.pbox h3{font-size:14px}.pcode h3{color:var(--code)}.pagent h3{color:var(--agent)}
+.pbox ul{margin:6px 0 0;padding-left:16px}.pbox li{font-size:12.8px;margin:3px 0}
+
+/* 타임라인 */
+.tl{background:#fff;border:1px solid var(--border);border-radius:12px;padding:6px 4px;margin:12px 0}
+.tl .day{display:grid;grid-template-columns:88px 1fr;border-bottom:1px solid #efe9dd;align-items:center}
+.tl .day:last-child{border-bottom:none}
+.tl .dname{font-weight:700;font-size:13px;padding:11px 14px;color:var(--ink)}
+.tl .acts{padding:9px 12px;display:flex;gap:8px;flex-wrap:wrap}
+.act{font-size:12px;border-radius:7px;padding:5px 10px;border:1px solid transparent}
+.act.c{background:#eaf2f7;border-color:#bcd6e3;color:var(--code)}
+.act.a{background:#f6e7e0;border-color:#e0c3b7;color:var(--agent)}
+.act b{font-weight:700}
+
+/* 책임 표 */
+table{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0;background:#fff;border-radius:10px;overflow:hidden}
+th,td{border-bottom:1px solid var(--border);padding:9px 12px;text-align:left;vertical-align:top}
+th{background:var(--codebg);font-size:12.5px}
+td.who{white-space:nowrap;font-weight:700}
+.who.c{color:var(--code)}.who.a{color:var(--agent)}
+.legend{font-size:12.5px;color:var(--muted);background:var(--codebg);border-radius:10px;padding:12px 16px;margin-top:26px}
+.legend b{color:var(--ink)}
+.k{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:middle;margin-right:5px}
+.k.c{background:#2E6E8E}.k.a{background:#B5654A}
+@media(max-width:760px){.sims,.tools,.principle{grid-template-columns:1fr}.connect{letter-spacing:10px}}
+</style></head><body><main>
+
+<h1>bullet281 · 시스템 아키텍처</h1>
+<p class="sub">공용 부품창고(코드) 위에 3개의 시뮬레이터를 올린다 · 하이브리드(코드 틱 + 에이전트 판단) 설계</p>
+
+<div class="lead">
+핵심 원칙 한 줄: <b>반복·기계 작업은 코드(headless)</b>, <b>판단·작문은 에이전트(Claude)</b>.
+엔진·규칙이 자주 바뀌어도 <b>부품창고(fetch·engine·render)는 고정 인터페이스</b>로 두고,
+바뀌는 부분은 위에서 갈아끼운다. — 컨베이어벨트는 24시간 자동, 검사관은 하루 몇 번만.
+</div>
+
+<h2>3 시뮬레이터 (사용자가 만나는 것)</h2>
+<div class="sims">
+  <div class="sim"><span class="no">①</span>
+    <h3>실시간 자동매매</h3>
+    <span class="tag cron">cron · 자동</span>
+    <div style="font-size:12.5px;color:var(--muted)">엔진을 실시간 검증하며 데이터 축적</div>
+    <ul>
+      <li><b>input</b>: 선정기준, 사용할 엔진</li>
+      <li>토 09시 종목선정 → json+보고서</li>
+      <li>월~금 5분마다 fetch→engine→같은 html/json 갱신</li>
+      <li>월~목 장마감 이메일 · 금 최종보고서</li>
+    </ul>
+  </div>
+  <div class="sim"><span class="no">②</span>
+    <h3>백테스터</h3>
+    <span class="tag demand">on-demand</span>
+    <div style="font-size:12.5px;color:var(--muted)">엔진 성과 지표 점검 · 엔진 개발용</div>
+    <ul>
+      <li><b>input</b>: 테스트할 데이터, 엔진, 날짜들</li>
+      <li>데이터는 <b>이미 준비됨 가정</b>(로컬 CREON/증권사)</li>
+      <li>주간 수익률·승률·성과 지표 계산</li>
+      <li>결과 html (이메일 없음)</li>
+    </ul>
+  </div>
+  <div class="sim"><span class="no">③</span>
+    <h3>단일종목 시뮬</h3>
+    <span class="tag demand">on-demand</span>
+    <div style="font-size:12.5px;color:var(--muted)">특정 종목·특정 주 결과 확인</div>
+    <ul>
+      <li><b>input</b>: 종목(번호/이름), 월요일, 엔진</li>
+      <li>직전주 주봉→F0·변동성, 거래대금·시총 fetch</li>
+      <li>target 엔진 가동</li>
+      <li>보고서 html</li>
+    </ul>
+  </div>
+</div>
+
+<h2>공용 부품창고 (모두 코드 · headless 호출 가능)</h2>
+<div class="warehouse">
+  <div class="wh-title">◇ CODE LAYER — cron·스크립트가 사람/LLM 없이 그대로 호출</div>
+  <div class="tools">
+    <div class="tool"><div class="n">fetch (online)</div><div class="d">yfinance·tvDatafeed 실시간/최근<br><code>data_source.py</code></div></div>
+    <div class="tool"><div class="n">data_read (offline)</div><div class="d">준비된 로컬 CSV(CREON 등) 읽기<br>백테스터 전용</div></div>
+    <div class="tool"><div class="n">engine</div><div class="d">엔진 <b>이름으로 로드</b>+가동<br><code>engines/&lt;name&gt;</code></div></div>
+    <div class="tool"><div class="n">render</div><div class="d">차트+템플릿→html/json<br>결정론 <code>f_build_report</code></div></div>
+  </div>
+</div>
+<div class="connect">▲&nbsp;&nbsp;&nbsp;&nbsp;▲&nbsp;&nbsp;&nbsp;&nbsp;▲</div>
+<p style="text-align:center;font-size:12.5px;color:var(--muted);margin-top:0">3 시뮬레이터가 이 부품들을 조합해서 만들어진다</p>
+
+<h2>공용 스킬 (Claude · 판단·작문·전송)</h2>
+<div class="skills">
+  <div class="wh-title">◆ AGENT LAYER — 사람 같은 판단이 필요한 부분만</div>
+  <div class="row">
+    <div class="chip"><b>report-author</b> · 고정 템플릿에 해석·서술 채움 (엔진별 내러티브)</div>
+    <div class="chip"><b>gmail 전송</b> · MCP로 2명에게 이메일 (나 + cofounder)</div>
+    <div class="chip"><b>종목선정 판단</b> · 규칙 적용 + 선정보고서 작문</div>
+  </div>
+</div>
+
+<h2>왜 이렇게 나누나 — 코드 vs 에이전트</h2>
+<div class="principle">
+  <div class="pbox pcode">
+    <h3>◇ 코드가 맡는 것</h3>
+    <ul>
+      <li>5분 틱 데이터 fetch (하루 60회+)</li>
+      <li>엔진 가동 (결정론적 규칙 실행)</li>
+      <li>차트·기계적 html/json 렌더</li>
+      <li>지표 계산 (수익률·승률)</li>
+      <li>→ <b>빠르고·싸고·재현가능·헤드리스</b></li>
+    </ul>
+  </div>
+  <div class="pbox pagent">
+    <h3>◆ 에이전트가 맡는 것</h3>
+    <ul>
+      <li>"이번 주 왜 이렇게 됐나" 해석·작문</li>
+      <li>종목선정 판단 + 선정보고서</li>
+      <li>이메일 구성·전송</li>
+      <li>이상징후·예외 대응</li>
+      <li>→ <b>유연·맥락이해, 대신 느리고 비쌈</b></li>
+    </ul>
+  </div>
+</div>
+
+<h2>① 실시간 시뮬 — 한 주 타임라인</h2>
+<div class="tl">
+  <div class="day"><div class="dname">토 09:00</div><div class="acts">
+    <span class="act a"><b>◆에이전트</b> 종목선정+선정보고서</span>
+    <span class="act c"><b>◇코드</b> _top5.json 저장</span></div></div>
+  <div class="day"><div class="dname">월~목<br><span style="font-weight:400;font-size:11px;color:var(--muted)">09:00~15:30</span></div><div class="acts">
+    <span class="act c"><b>◇코드/cron</b> 5분마다 fetch→engine→같은 html·json 덮어쓰기</span>
+    <span class="act a"><b>◆에이전트</b> 장마감 시 이메일 1회</span></div></div>
+  <div class="day"><div class="dname">금 15:30</div><div class="acts">
+    <span class="act c"><b>◇코드</b> 최종 틱(차트 완성)</span>
+    <span class="act a"><b>◆에이전트</b> 최종 주간보고서(차트 포함)+이메일</span></div></div>
+</div>
+<p style="font-size:12.5px;color:var(--muted)">틱 리포트는 <b>버전 안 쌓고 같은 파일 덮어씀</b> → 캔들이 옆으로 자동 확장. 이메일은 장마감/금요일만.</p>
+
+<h2>책임 분담 요약</h2>
+<table>
+  <thead><tr><th>작업</th><th style="width:130px">담당</th><th>실행 방식</th></tr></thead>
+  <tbody>
+    <tr><td>온라인 데이터 fetch</td><td class="who c">◇ 코드</td><td>data_source (yfinance/tvDatafeed)</td></tr>
+    <tr><td>로컬 데이터 읽기(백테스트)</td><td class="who c">◇ 코드</td><td>준비된 CSV 로드</td></tr>
+    <tr><td>엔진 가동</td><td class="who c">◇ 코드</td><td>이름으로 엔진 로드 + run()</td></tr>
+    <tr><td>기계적 리포트(틱)</td><td class="who c">◇ 코드</td><td>f_build_report → html/json 덮어쓰기</td></tr>
+    <tr><td>백테스트 지표 계산</td><td class="who c">◇ 코드</td><td>수익률·승률·성과 집계 → html</td></tr>
+    <tr><td>종목 선정 + 선정보고서</td><td class="who a">◆ 에이전트</td><td>규칙 적용 + 작문 (토 09시)</td></tr>
+    <tr><td>주간 해석·최종보고서</td><td class="who a">◆ 에이전트</td><td>템플릿에 서술 (금요일)</td></tr>
+    <tr><td>이메일 전송</td><td class="who a">◆ 에이전트</td><td>gmail MCP → 2명</td></tr>
+  </tbody>
+</table>
+
+<div class="legend">
+  <b>범례</b> &nbsp; <span class="k c"></span>코드(headless·결정론) &nbsp;&nbsp; <span class="k a"></span>에이전트(Claude·판단/작문)<br>
+  <b>용어</b> — <b>headless</b>: 사람·LLM·화면 없이 백그라운드 자동 실행 / <b>on-demand</b>: 사용자가 호출할 때만 실행 /
+  <b>cron</b>: 정해진 시각에 자동 실행하는 리눅스 스케줄러 / <b>MCP</b>: Claude가 외부도구(Gmail 등)를 쓰게 해주는 연결 규격 /
+  <b>F0</b>: 직전 금요일 종가(수익률 기준점).
+</div>
+
+</main></body></html>

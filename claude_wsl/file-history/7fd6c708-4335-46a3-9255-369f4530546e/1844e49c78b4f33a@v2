@@ -1,0 +1,47 @@
+"""One-off: add backward-compatible include_pressure to extract_wall_data + update post script."""
+
+EXTRACT = "/home/jeff/repo/master_python/src/utils/utils_lumen/extract_wall_csv.py"
+POST = "/home/jeff/project/65_final_0723/steady_3D_post_0723.py"
+
+s = open(EXTRACT).read()
+
+old_sig = "                      exclude_face_ids=[2,3]) -> str:"
+new_sig = ("                      exclude_face_ids=[2,3],\n"
+           "                      include_pressure: bool = False) -> str:")
+assert s.count(old_sig) == 1, ("sig", s.count(old_sig))
+s = s.replace(old_sig, new_sig)
+
+old_df = (
+    '    df = pd.DataFrame({\n'
+    '        "x": xyz[:, 0],\n'
+    '        "y": xyz[:, 1],\n'
+    '        "z": xyz[:, 2],\n'
+    '        "Tx": total_trac[:, 0],\n'
+    '        "Ty": total_trac[:, 1],\n'
+    '        "Tz": total_trac[:, 2],\n'
+    '    })'
+)
+new_df = (
+    '    data = {\n'
+    '        "x": xyz[:, 0],\n'
+    '        "y": xyz[:, 1],\n'
+    '        "z": xyz[:, 2],\n'
+    '        "Tx": total_trac[:, 0],\n'
+    '        "Ty": total_trac[:, 1],\n'
+    '        "Tz": total_trac[:, 2],\n'
+    '    }\n'
+    '    if include_pressure:\n'
+    '        data["Pressure"] = pressure\n'
+    '    df = pd.DataFrame(data)'
+)
+assert s.count(old_df) == 1, ("df", s.count(old_df))
+s = s.replace(old_df, new_df)
+open(EXTRACT, "w").write(s)
+print("extract_wall_data: include_pressure param added (default False)")
+
+t = open(POST).read()
+o = "extract_wall_data(vtps[-1], str(out_csv))"
+n = "extract_wall_data(vtps[-1], str(out_csv), include_pressure=True)"
+assert t.count(o) == 1, ("post", t.count(o))
+open(POST, "w").write(t.replace(o, n))
+print("post script -> include_pressure=True")

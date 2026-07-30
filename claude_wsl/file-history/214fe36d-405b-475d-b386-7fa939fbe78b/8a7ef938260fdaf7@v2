@@ -1,0 +1,181 @@
+"""walk-forward / OOS 검증 — 플립×게이트 스택의 선택 절차를 fold 안에서 재현.
+
+절차
+  1) 설정 그리드(플립 9 × 게이트 4 = 36)를 전 255주에 대해 주별 수익 행렬로 사전계산.
+     (설정별 주간 수익은 다른 주와 무관 → 사전계산은 순수 캐시. 선택은 train 주만 사용.)
+  2) expanding walk-forward: train 최초 TRAIN0주 → test TEST주씩 전진.
+     각 fold 에서 train 의 square 주간평균 최고 설정 선택 → 직후 test 에 적용.
+  3) OOS 연결 시계열(WF-선택)을 281(g8·무플립)·고정스택(d1~09:30x1+g10)과 같은 주에서 비교.
+     고정스택은 전체 데이터로 고른 것이라 낙관 편향 — 참고용. 판정은 WF-선택 기준.
+
+사용: python3 walkforward.py   → wf_results.json (+ 콘솔 요약)
+"""
+import os, sys, json, time, random
+import multiprocessing as mp
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "engines", "engine_fable2"))
+import engine_fable2
+import allocation
+
+DATA = os.path.join(ROOT, "data", "data_creon_API", "intraday_5m_by_week")
+OUT = os.path.join(HERE, "wf_results.json")
+
+BASE = dict(entries=("trail",), stop_mode="none",
+            fee=0.00015, slip=0.0005, tax=0.0015, round_shares=True)
+
+# ── 설정 그리드 (선택 공간 = 그동안 실제로 탐색한 축) ──────────────
+FLIPS = [("noflip", None)] + [("d1~" + c + "x1" if c else "d1x1", c)
+                              for c in ("09:15", "09:20", "09:25", "09:30",
+                                        "09:35", "09:40", "10:00", None)]
+GATES = [0.06, 0.08, 0.10, 0.12]
+GRID = []
+for fl_lab, cut in FLIPS:
+    for g in GATES:
+        GRID.append((f"{fl_lab}·g{g*100:g}", fl_lab != "noflip", cut, g))
+
+LBL_281 = "noflip·g8"                 # 기준선
+LBL_FIX = "d1~09:30x1·g10"            # 고정 스택(전체데이터 선택 — 낙관 참고용)
+
+TRAIN0, TEST = 103, 26                # expanding: 최초 train 103주(~2년), test 26주씩
+
+RULE = "square"
+DS = None
+
+
+def load_dataset():
+    wr = json.load(open(os.path.join(HERE, "weekly_records.json"), encoding="utf-8"))["weeks"]
+    ds = []
+    for w in sorted(wr):
+        d = os.path.join(DATA, w)
+        files = {}
+        for f in os.listdir(d):
+            if f.endswith("_5m.csv") and os.path.getsize(os.path.join(d, f)) > 100:
+                files[f.split("_")[0]] = os.path.join(d, f)
+        for s in wr[w]:
+            p = files.get(s["code"])
+            if not p:
+                continue
+            bars = engine_fable2.load_bars(p)
+            if bars:
+                ds.append((w, s["code"], s["signal"], s["F0"], bars))
+    return ds
+
+
+def run_config(cfg):
+    """설정 1개 → {week: 규칙별 포트폴리오 수익}. square·equal만 유지."""
+    label, flip_on, cut, gate = cfg
+    recs = {}
+    for w, code, sig, F0, bars in DS:
+        kw = dict(BASE, tp_gate=gate)
+        if flip_on:
+            kw.update(flip_monday=True, flip_days=1, flip_cutoff_hm=cut, flip_max=1)
+        ev, ctx = engine_fable2.run(bars, F0, **kw)
+        gap = None
+        for e in ev:
+            if e.kind == "ENTRY":
+                gap = e.direction * (e.price / F0 - 1)
+                break
+        recs.setdefault(w, []).append(dict(signal=sig, r=ctx["weekly_return"], gap=gap))
+    weeks = sorted(recs)
+    out = {}
+    for key in ("square", "equal"):
+        fn = dict((k, f) for k, _l, f in allocation.RULES)[key]
+        out[key] = [fn(recs[w]) for w in weeks]
+    return dict(label=label, weeks=weeks, weekly=out)
+
+
+def walk_forward(matrix, weeks):
+    """expanding fold: train으로 선택 → test 기록."""
+    folds = []
+    oos_wf, oos_weeks = [], []
+    start = TRAIN0
+    n = len(weeks)
+    while start < n:
+        end = min(start + TEST, n)
+        train_idx = range(0, start)
+        test_idx = range(start, end)
+        # train square 평균 최고 설정
+        best = max(matrix, key=lambda lab: sum(matrix[lab][RULE][i] for i in train_idx) / start)
+        tr_mean = sum(matrix[best][RULE][i] for i in train_idx) / start * 100
+        te = [matrix[best][RULE][i] for i in test_idx]
+        folds.append(dict(fold=len(folds) + 1,
+                          train_n=start, test_n=end - start,
+                          test_from=weeks[start], test_to=weeks[end - 1],
+                          selected=best, train_mean=tr_mean,
+                          test_mean=sum(te) / len(te) * 100))
+        oos_wf += te
+        oos_weeks += [weeks[i] for i in test_idx]
+        start = end
+    return folds, oos_wf, oos_weeks
+
+
+def boot_mean(v, B=5000, seed=42):
+    n = len(v); rng = random.Random(seed)
+    ms = sorted(sum(v[rng.randrange(n)] for _ in range(n)) / n for _ in range(B))
+    return dict(mean=sum(v) / n * 100, lo=ms[int(B*.025)] * 100, hi=ms[int(B*.975)] * 100,
+                p_pos=sum(1 for m in ms if m > 0) / B)
+
+
+def paired(v1, v0, B=5000, seed=42):
+    d = [a - b for a, b in zip(v1, v0)]
+    n = len(d); rng = random.Random(seed)
+    ms = sorted(sum(d[rng.randrange(n)] for _ in range(n)) / n for _ in range(B))
+    return dict(delta=sum(d) / n * 100, lo=ms[int(B*.025)] * 100, hi=ms[int(B*.975)] * 100,
+                p_pos=sum(1 for m in ms if m > 0) / B)
+
+
+def main():
+    global DS
+    t0 = time.time()
+    DS = load_dataset()
+    print(f"{len(DS)} 종목-주 로드 {time.time()-t0:.0f}s · 그리드 {len(GRID)}설정 사전계산 …", flush=True)
+    t1 = time.time()
+    with mp.Pool(8) as pool:
+        results = pool.map(run_config, GRID)
+    print(f"행렬 완료 {time.time()-t1:.0f}s", flush=True)
+    weeks = results[0]["weeks"]
+    matrix = {r["label"]: r["weekly"] for r in results}
+
+    folds, oos_wf, oos_weeks = walk_forward(matrix, weeks)
+    oos_idx = [weeks.index(w) for w in oos_weeks]
+    oos_281 = [matrix[LBL_281][RULE][i] for i in oos_idx]
+    oos_fix = [matrix[LBL_FIX][RULE][i] for i in oos_idx]
+    # 기여 분해(참고): 게이트만 / 플립만 — 역시 전체데이터 선택이라 낙관 편향 있음
+    oos_g10 = [matrix["noflip·g10"][RULE][i] for i in oos_idx]
+    oos_flip = [matrix["d1~09:30x1·g8"][RULE][i] for i in oos_idx]
+
+    summary = dict(
+        oos_n=len(oos_wf),
+        wf=boot_mean(oos_wf), b281=boot_mean(oos_281), fix=boot_mean(oos_fix),
+        g10=boot_mean(oos_g10), flip=boot_mean(oos_flip),
+        wf_vs_281=paired(oos_wf, oos_281), fix_vs_281=paired(oos_fix, oos_281),
+        g10_vs_281=paired(oos_g10, oos_281), flip_vs_281=paired(oos_flip, oos_281),
+        # 전체표본(255주) 인샘플 평균 참고
+        insample_281=sum(matrix[LBL_281][RULE]) / len(weeks) * 100,
+        insample_fix=sum(matrix[LBL_FIX][RULE]) / len(weeks) * 100,
+    )
+    json.dump(dict(grid=[g[0] for g in GRID], folds=folds,
+                   oos_weeks=oos_weeks, oos_wf=oos_wf, oos_281=oos_281, oos_fix=oos_fix,
+                   oos_g10=oos_g10, oos_flip=oos_flip,
+                   summary=summary, train0=TRAIN0, test=TEST, rule=RULE),
+              open(OUT, "w", encoding="utf-8"), ensure_ascii=False)
+
+    print(f"\n=== fold별 선택 (train→test, square) ===")
+    for f in folds:
+        print(f"  F{f['fold']}: train {f['train_n']:3}주 → 선택 {f['selected']:20} "
+              f"(train {f['train_mean']:+.2f}%) → test {f['test_from']}~{f['test_to']} "
+              f"({f['test_n']}주) {f['test_mean']:+.2f}%")
+    s = summary
+    print(f"\n=== OOS {s['oos_n']}주 (연결) ===")
+    print(f"  WF-선택   {s['wf']['mean']:+.3f}%  CI[{s['wf']['lo']:+.2f},{s['wf']['hi']:+.2f}]")
+    print(f"  281 기준  {s['b281']['mean']:+.3f}%  CI[{s['b281']['lo']:+.2f},{s['b281']['hi']:+.2f}]")
+    print(f"  고정스택  {s['fix']['mean']:+.3f}%  (낙관 참고)")
+    print(f"  WF vs 281: Δ{s['wf_vs_281']['delta']:+.3f}%p CI[{s['wf_vs_281']['lo']:+.3f},{s['wf_vs_281']['hi']:+.3f}] P={s['wf_vs_281']['p_pos']*100:.0f}%")
+    print(f"  (인샘플 255주: 281 {s['insample_281']:+.3f}% / 고정스택 {s['insample_fix']:+.3f}%)")
+    print("saved →", OUT)
+
+
+if __name__ == "__main__":
+    main()

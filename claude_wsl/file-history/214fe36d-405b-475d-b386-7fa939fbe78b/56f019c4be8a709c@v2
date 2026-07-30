@@ -1,0 +1,228 @@
+"""fable2 익절 방법론 보고서 — v1(리셋)·v2-A(스킵)·v2-B(재장전)·v2-C(부분홀드) 통합.
+입력: sweep_reset_results.json(v1) + sweep_v2a/b/c_results.json(에이전트 산출)
+출력: report/backtest_fable2_tp.artifact.html (body-only)
+사용: python3 make_fable2_report.py"""
+import os, json, math, random, html
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+
+OUT = os.path.join(ROOT, "report", "backtest_fable2_tp.artifact.html")
+PAPER, INK, ACCENT, GRID = "#F0EEE6", "#211D18", "#CC785C", "#D9D3C7"
+MUTE, CARD = "#6B5E54", "#FBFAF6"
+POS, NEG = "#2E7D32", "#C25744"
+esc = html.escape
+RULE = "square"
+
+
+def _load(name):
+    p = os.path.join(HERE, name)
+    return json.load(open(p, encoding="utf-8")) if os.path.exists(p) else None
+
+
+def paired(w1, w0, B=5000, seed=42):
+    d = [a - b for a, b in zip(w1, w0)]
+    n = len(d); rng = random.Random(seed)
+    means = sorted(sum(d[rng.randrange(n)] for _ in range(n)) / n for _ in range(B))
+    return dict(delta=sum(d) / n * 100, lo=means[int(B*.025)] * 100,
+                hi=means[int(B*.975)] * 100, p_pos=sum(1 for m in means if m > 0) / B)
+
+
+def norm_v1(raw):
+    """sweep_reset_results.json(flip 베이스만) → 표준 형태."""
+    base = next(r for r in raw if r["flip"] and r["pct"] is None)
+    cfgs = []
+    for r in raw:
+        if not r["flip"] or r["pct"] is None:
+            continue
+        cfgs.append(dict(label=f"v1·r{r['pct']*100:g}%", x=r["pct"] * 100,
+                         square=r["rules_mean"]["square"], quartic=r["rules_mean"]["quartic"],
+                         equal=r["rules_mean"]["equal"], sw=r["sw_mean"],
+                         rate=r["reset_rate"],
+                         pr=paired(r["weekly"]["square"], base["weekly"]["square"])))
+    return dict(name="v1 · 사다리 리셋", key="v1",
+                desc="첫 익절 시점 극값 대비 임계 이상 추가 갱신 시 익절 순서 초기화(잔량 재분할)",
+                base=dict(square=base["rules_mean"]["square"], quartic=base["rules_mean"]["quartic"],
+                          equal=base["rules_mean"]["equal"], sw=base["sw_mean"]),
+                xlab="리셋 임계(%)", cfgs=cfgs)
+
+
+def norm_v2(raw, key, name, desc, xlab):
+    """에이전트 산출 sweep_v2*_results.json → 표준 형태. (base 라벨 포함 리스트)"""
+    base = next(r for r in raw if r["label"] == "base")
+    cfgs = []
+    for r in raw:
+        if r["label"] == "base":
+            continue
+        x = (r.get("pct") or r.get("tp_frac") or 0)
+        x = x * 100 if key != "v2C" else x
+        cfgs.append(dict(label=r["label"], x=x,
+                         square=r["rules_mean"]["square"], quartic=r["rules_mean"]["quartic"],
+                         equal=r["rules_mean"]["equal"], sw=r["sw_mean"],
+                         rate=r.get("reset_rate", 0),
+                         pr=paired(r["weekly"]["square"], base["weekly"]["square"])))
+    return dict(name=name, key=key, desc=desc,
+                base=dict(square=base["rules_mean"]["square"], quartic=base["rules_mean"]["quartic"],
+                          equal=base["rules_mean"]["equal"], sw=base["sw_mean"]),
+                xlab=xlab, cfgs=cfgs)
+
+
+def panel(v, W=420, H=230):
+    """변형 1개 곡선 패널 — square 주간평균 vs 파라미터, 기준선=base."""
+    b0 = v["base"]["square"]
+    padL, padR, padT, padB = 50, 14, 30, 40
+    pw, ph = W - padL - padR, H - padT - padB
+    vals = [c["square"] for c in v["cfgs"]] + [b0]
+    lo, hi = min(vals) - 0.06, max(vals) + 0.08
+    n = len(v["cfgs"])
+    X = lambda i: padL + pw * (i + 0.5) / n
+    Y = lambda val: padT + ph * (hi - val) / (hi - lo)
+    el = [f'<svg viewBox="0 0 {W} {H}" width="{W}" font-family="ui-sans-serif,system-ui,sans-serif">']
+    el.append(f'<text x="{padL}" y="16" font-size="12" font-weight="800" fill="{INK}">{esc(v["name"])}</text>')
+    for tv in (0.7, 0.8, 0.9, 1.0):
+        if lo <= tv <= hi:
+            el.append(f'<line x1="{padL}" y1="{Y(tv):.0f}" x2="{W-padR}" y2="{Y(tv):.0f}" stroke="{GRID}" stroke-width="1"/>')
+            el.append(f'<text x="{padL-5}" y="{Y(tv)+3:.0f}" font-size="9.5" fill="{MUTE}" text-anchor="end">{tv:+.1f}</text>')
+    el.append(f'<line x1="{padL}" y1="{Y(b0):.0f}" x2="{W-padR}" y2="{Y(b0):.0f}" stroke="{ACCENT}" stroke-width="1.4" stroke-dasharray="4 3"/>')
+    el.append(f'<text x="{W-padR-2}" y="{Y(b0)-4:.0f}" font-size="9.5" font-weight="700" fill="{ACCENT}" text-anchor="end">base {b0:+.2f}%</text>')
+    path = " ".join(f'{"M" if i==0 else "L"} {X(i):.0f} {Y(c["square"]):.0f}' for i, c in enumerate(v["cfgs"]))
+    el.append(f'<path d="{path}" fill="none" stroke="{INK}" stroke-width="1.8"/>')
+    for i, c in enumerate(v["cfgs"]):
+        col = POS if c["square"] >= b0 else NEG
+        tip = (f'{c["label"]} · square {c["square"]:+.3f}% · quartic {c["quartic"]:+.3f}% · '
+               f'paired Δ{c["pr"]["delta"]:+.3f}%p [CI {c["pr"]["lo"]:+.2f},{c["pr"]["hi"]:+.2f}] '
+               f'P(Δ>0)={c["pr"]["p_pos"]*100:.0f}%')
+        el.append(f'<g><title>{esc(tip)}</title>'
+                  f'<circle cx="{X(i):.0f}" cy="{Y(c["square"]):.0f}" r="4.5" fill="{col}" stroke="{CARD}" stroke-width="1.6"/></g>')
+        el.append(f'<text x="{X(i):.0f}" y="{Y(c["square"])-9:.0f}" font-size="9.5" font-weight="700" fill="{INK}" text-anchor="middle">{c["square"]:+.2f}</text>')
+        xl = f'{c["x"]:g}' + ("%" if v["key"] != "v2C" else "")
+        el.append(f'<text x="{X(i):.0f}" y="{H-22}" font-size="9.5" fill="{MUTE}" text-anchor="middle">{xl}</text>')
+    el.append(f'<text x="{(padL+W-padR)/2:.0f}" y="{H-6}" font-size="9.5" fill="{MUTE}" text-anchor="middle">{esc(v["xlab"])}</text>')
+    el.append('</svg>')
+    return f'<div class="facet">{"".join(el)}</div>'
+
+
+def table_rows(variants):
+    rows = []
+    b = variants[0]["base"]
+    rows.append(f'<tr class="basehl"><td><b>base</b> — 플립 d1~09:30x1 · 리셋 없음 · 1/3 사다리</td>'
+                f'<td class="num">{b["equal"]:+.2f}%</td><td class="num"><b>{b["square"]:+.2f}%</b></td>'
+                f'<td class="num">{b["quartic"]:+.2f}%</td><td class="num">{b["sw"]:+.2f}%</td>'
+                f'<td class="num">—</td><td class="num">—</td></tr>')
+    for v in variants:
+        for c in v["cfgs"]:
+            d = c["pr"]
+            col = "pos" if d["delta"] > 0.005 else ("neg" if d["delta"] < -0.005 else "")
+            rows.append(f'<tr><td>{esc(c["label"])} <span class="sub">{esc(v["name"].split("·")[1].strip())}</span></td>'
+                        f'<td class="num">{c["equal"]:+.2f}%</td><td class="num"><b>{c["square"]:+.2f}%</b></td>'
+                        f'<td class="num">{c["quartic"]:+.2f}%</td><td class="num">{c["sw"]:+.2f}%</td>'
+                        f'<td class="num {col}">{d["delta"]:+.3f}%p</td>'
+                        f'<td class="num sub">{d["p_pos"]*100:.0f}%</td></tr>')
+    return "".join(rows)
+
+
+def build():
+    v1 = norm_v1(_load("sweep_reset_results.json"))
+    v2a = norm_v2(_load("sweep_v2a_results.json"), "v2A", "v2-A · 리셋+1단계 스킵",
+                  "리셋된 새 사다리의 1단계 익절을 건너뛰어 분할익절 지연", "리셋 임계(%)")
+    v2b = norm_v2(_load("sweep_v2b_results.json"), "v2B", "v2-B · 리셋+게이트 재장전",
+                  "리셋 시 익절 게이트를 새 극값 기준 +8%로 재장전(그 전까지 홀드)", "리셋 임계(%)")
+    v2c = norm_v2(_load("sweep_v2c_results.json"), "v2C", "v2-C · 익절 단위 축소",
+                  "단계당 익절 비율 1/3→f — 완주해도 (1−3f) 잔량을 금요일까지 홀드", "익절 단위 f")
+    variants = [v1, v2a, v2b, v2c]
+    b0 = v1["base"]["square"]
+
+    # 전 설정 중 최고 (square)
+    allc = [(v, c) for v in variants for c in v["cfgs"]]
+    bestv, bestc = max(allc, key=lambda t: t[1]["square"])
+    any_win = bestc["square"] > b0 + 0.005
+    n_beat = sum(1 for _, c in allc if c["square"] > b0 + 0.005)
+
+    panels = "".join(panel(v) for v in variants)
+    rows = table_rows(variants)
+
+    verdict_head = (f'최고 변형 {esc(bestc["label"])}도 base를 못 넘는다' if not any_win else
+                    f'{esc(bestc["label"])}만 base를 근소하게 넘는다')
+
+    return f"""<title>fable2 익절 방법론 — v1·v2A·v2B·v2C</title>
+<style>
+.paper{{--paper:{PAPER};--ink:{INK};--acc:{ACCENT};--grid:{GRID};--mute:{MUTE};--pos:{POS};--neg:{NEG};--card:{CARD};
+background:var(--paper);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+line-height:1.62;-webkit-font-smoothing:antialiased;margin:0}}
+.paper *{{box-sizing:border-box}}
+.wrap{{max-width:1080px;margin:0 auto;padding:44px 24px 90px}}
+.eyebrow{{font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--acc);font-weight:800;margin:0 0 10px}}
+h1{{font-size:32px;line-height:1.14;margin:0 0 12px;font-weight:800;letter-spacing:-.02em;text-wrap:balance;max-width:26ch}}
+.lede{{font-size:15.5px;color:#453d34;max-width:66ch;margin:0 0 6px}}
+h2{{font-size:19px;margin:44px 0 4px;font-weight:800}}
+.sec-sub{{color:var(--mute);font-size:13px;margin:0 0 14px;max-width:80ch}}
+.pos{{color:var(--pos)}} .neg{{color:var(--neg)}}
+.verdict{{display:flex;flex-wrap:wrap;gap:14px;margin:28px 0 8px}}
+.vc{{flex:1 1 210px;background:var(--card);border:1px solid var(--grid);border-radius:12px;padding:15px 17px}}
+.vc .k{{font-size:11.5px;color:var(--mute);font-weight:700}}
+.vc .v{{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:3px}}
+.vc .d{{font-size:12.5px;color:var(--mute);margin-top:2px}}
+.vc.bad{{border-color:{NEG}}} .vc.bad .v{{color:{NEG}}}
+.vc.ok{{border-color:{POS}}} .vc.ok .v{{color:{POS}}}
+.facets{{display:flex;flex-wrap:wrap;gap:14px}}
+.facet{{flex:0 0 auto;background:var(--card);border:1px solid var(--grid);border-radius:10px;padding:8px 6px 2px}}
+table{{border-collapse:collapse;width:100%;font-size:12.5px}}
+th,td{{border-bottom:1px solid var(--grid);padding:7px 9px;text-align:left}}
+th{{font-size:10.5px;color:var(--mute);text-transform:uppercase;letter-spacing:.05em;font-weight:800}}
+td.num{{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}}
+tr.basehl{{background:#EDE8DD66}} tr.basehl td{{font-weight:600}}
+.sub{{color:var(--mute);font-size:10.5px}}
+.card{{background:var(--card);border:1px solid var(--grid);border-radius:12px;padding:16px 18px;margin:12px 0}}
+.scrollx{{overflow-x:auto}}
+ul{{margin:6px 0;padding-left:20px}} li{{margin:5px 0}}
+.foot{{margin-top:34px;font-size:12px;color:var(--mute);border-top:1px solid var(--grid);padding-top:16px}}
+.foot code{{background:#e7e1d5;padding:1px 5px;border-radius:4px}}
+</style>
+<div class="paper"><div class="wrap">
+<p class="eyebrow">CREON 5년 · 255주 · 베이스 = 플립 채택안 d1~09:30x1 · 병렬 스윕</p>
+<h1>익절 규칙 4변형 — {verdict_head}</h1>
+<p class="lede">수익 극대화를 위해 281 익절(피보 사다리 1/3 분할·순서 누적)을 네 방향으로 변형했다:
+<b>v1</b> 임계 이상 신고점 갱신 시 사다리 리셋 · <b>v2-A</b> 리셋+1단계 스킵 ·
+<b>v2-B</b> 리셋+게이트 재장전 · <b>v2-C</b> 익절 단위 축소(잔량 홀드).
+전부 동일 데이터·엔진, base(리셋 없음·1/3)와 paired 비교.</p>
+
+<div class="verdict">
+  <div class="vc"><div class="k">base · square 주간평균</div><div class="v">{b0:+.2f}%</div><div class="d">플립 d1~09:30x1 · 익절 281 그대로</div></div>
+  <div class="vc {'ok' if any_win else 'bad'}"><div class="k">전 설정 최고 {esc(bestc['label'])}</div><div class="v">{bestc['square']:+.2f}%</div>
+    <div class="d">paired Δ{bestc['pr']['delta']:+.3f}%p · P(Δ&gt;0)={bestc['pr']['p_pos']*100:.0f}%</div></div>
+  <div class="vc {'ok' if n_beat else 'bad'}"><div class="k">base를 넘은 설정 수</div><div class="v">{n_beat}</div>
+    <div class="d">전 {len(allc)}개 변형 설정 중 (+0.005%p 초과 기준)</div></div>
+</div>
+
+<h2>변형별 곡선 <span style="color:{ACCENT}">square 주간평균</span></h2>
+<p class="sec-sub">각 패널: 파라미터를 움직일 때의 square 주간평균. 주황 점선 = base. 점 색 = base 대비 상/하회. 점에 커서를 올리면 paired 통계.</p>
+<div class="facets">{panels}</div>
+
+<h2>전 설정 표</h2>
+<div class="card scrollx"><table>
+<thead><tr><th>설정</th><th class="num">equal</th><th class="num">square</th><th class="num">quartic</th><th class="num">종목-주</th><th class="num">paired Δ(sq)</th><th class="num">P(Δ&gt;0)</th></tr></thead>
+<tbody>{rows}</tbody></table></div>
+
+<h2>해석</h2>
+<div class="card"><ul>
+<li><b>v1(리셋)</b>: 작은 임계일수록 상승 중 추가 분할매도 → 승자 꼬리 절단. 큰 임계는 무작동 수렴. 전 구간 base 이하 (Δ−0.04~−0.05%p).</li>
+<li><b>v2-A(스킵)</b>: 리셋의 손해를 1단계만큼 줄일 뿐 — 방향은 여전히 "더 팔기". 전 임계 base 이하 (Δ−0.04~−0.10%p).</li>
+<li><b>v2-B(재장전)</b>: <b>넷 중 최악</b> (Δ−0.07~−0.17%p). 재장전이 리셋된 종목-주의 익절을 통째로 꺼버려, 급등 후 되돌림 주에서 피보 사다리의 <b>이익 보호까지 잃는다</b> — 무손절 전략에서 익절은 유일한 방어선이었던 것.</li>
+<li><b>v2-C(단위 축소)</b>: square·equal은 소폭 열위지만, <b>quartic(초집중)에선 f15가 +1.11%로 base(+1.05%)를 상회</b> — 최강 모멘텀 종목일수록 잔량 홀드가 통한다는 미세 신호. 단 노이즈 범위(P=50%)이고 다른 규칙에선 손해라 채택 근거 부족.</li>
+<li><b>구조적 결론</b>: 281의 "1/3 사다리·순서 누적·금요일 홀드"는 이 네 방향의 국소 변형에 대해 사실상 최적점. 익절은 무손절 전략의 방어선이라 줄여도(C)·늦춰도(B)·다시 팔아도(v1/A) 순손해. 수익 극대화 여지는 익절 미세조정이 아니라 <b>진입·선정·배분</b> 쪽에 있다는 신호.</li>
+</ul></div>
+
+<div class="foot">
+베이스 = 281 + 플립 d1~09:30x1(실험 15 채택후보). 엔진 <code>engines/engine_fable2</code>
+(파라미터: tp_reset_pct · tp_reset_skip1 · tp_regate · tp_frac, 테스트 18/18) ·
+스윕 <code>back_test/sweep_reset.py</code>·<code>sweep_v2a/b/c.py</code>(병렬 에이전트 산출) ·
+paired 부트스트랩 SEED=42·B=5,000 · net 비용·정수주 포함.<br>
+한계: 동일 255주 재표집(과적합 미해결) · 다중비교 선택편향 · walk-forward/OOS 미실시.
+</div>
+</div></div>"""
+
+
+if __name__ == "__main__":
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    open(OUT, "w", encoding="utf-8").write(build())
+    print("wrote", OUT)

@@ -1,0 +1,76 @@
+# -*- coding: utf-8 -*-
+"""tvDatafeed 실패 원인 계측 — 유형 분류 + 동시성 유발/단독 재시도."""
+import time, threading, warnings, logging, io, contextlib
+import concurrent.futures as cf
+warnings.filterwarnings("ignore")
+
+CODES = ["005930","000660","373220","207940","005380","000270","068270","005490",
+         "035420","051910","006400","105560","055550","035720","012330","028260",
+         "066570","003670","096770","034730","015760","032830","003550","017670",
+         "030200","009150","011200","086790","316140","259960"]
+PM, PF = "2026-07-06", "2026-07-10"
+
+from tvDatafeed import TvDatafeed, Interval
+tl = threading.local()
+def client():
+    if not hasattr(tl, "c"):
+        # 생성 로그도 캡쳐
+        with contextlib.redirect_stderr(io.StringIO()):
+            tl.c = TvDatafeed()
+    return tl.c
+
+def probe(c):
+    """반환 (code, category, detail). category: OK/EXC/None/empty_df/no_week."""
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            df = client().get_hist(symbol=c, exchange="KRX",
+                                   interval=Interval.in_daily, n_bars=20)
+        logtxt = buf.getvalue().strip().replace("\n", " ")[:60]
+        if df is None:
+            return c, "None", logtxt
+        if len(df) == 0:
+            return c, "empty_df", logtxt
+        wk = [str(ix)[:10] for ix in df.index if PM <= str(ix)[:10] <= PF]
+        if not wk:
+            return c, "no_week", f"rows={len(df)} last={str(df.index[-1])[:10]}"
+        return c, "OK", f"rows={len(df)}"
+    except Exception as e:
+        return c, "EXC", f"{type(e).__name__}: {str(e)[:50]}"
+
+# --- 1) 고동시성(x16)으로 실패 유발 + 유형 분류 ---
+print(f"[1] tvDatafeed x16 동시 — {len(CODES)}종목 (실패 유발)")
+cats = {}; fails = []
+t0 = time.time()
+with cf.ThreadPoolExecutor(max_workers=16) as ex:
+    for c, cat, det in ex.map(probe, CODES):
+        cats.setdefault(cat, []).append(c)
+        if cat != "OK":
+            fails.append((c, cat, det))
+dt = time.time() - t0
+print(f"    {dt:.1f}s · " + " · ".join(f"{k}:{len(v)}" for k, v in cats.items()))
+print("    실패 상세:")
+for c, cat, det in fails[:12]:
+    print(f"      {c} [{cat}] {det}")
+
+# --- 2) 실패분을 단독(순차)으로 재시도 → 동시성 탓인지 확인 ---
+if fails:
+    print(f"\n[2] 실패 {len(fails)}종목 단독 순차 재시도 (스레드1, 새 클라이언트)")
+    # 새 스레드-로컬 초기화 위해 메인에서 직접
+    import importlib
+    time.sleep(1.0)
+    recov = 0
+    for c, _, _ in fails:
+        # 각자 새 클라이언트로
+        with contextlib.redirect_stderr(io.StringIO()):
+            cc = TvDatafeed()
+            try:
+                df = cc.get_hist(symbol=c, exchange="KRX", interval=Interval.in_daily, n_bars=20)
+            except Exception as e:
+                df = None
+        ok = df is not None and len(df) > 0
+        recov += ok
+        print(f"      {c}: {'복구 OK rows='+str(len(df)) if ok else '여전히 실패'}")
+        time.sleep(0.3)
+    print(f"    → 단독 재시도 복구: {recov}/{len(fails)}  "
+          f"({'대부분 복구=동시성 탓' if recov > len(fails)/2 else '복구 안됨=종목/데이터 탓'})")

@@ -1,0 +1,12 @@
+# Solid mesh independence, case 0, Box recipe, algo2d=6, ver2 SFE traction (Trap-A-corrected).
+# Stresses in dyne/cm^2 (CGS). Multiply by 0.1 for Pa, by 1e-4 for kPa.
+# "production" is LAP_mesh/solid_LAP_0.msh (box 0.055, algo2d=5) re-solved with the same
+# script as a control; it reproduced the stored FC_case_0_peak.vtu exactly.
+# PSS/delPSS are the r=0.01 cm neighbourhood-mean definition of post_processing_0727.py.
+# delta = peak - low, full cyclic range (no /2).
+level,nominal_size,algo2d,tets,nodes,min_minSICN,poor_count,cap_nodes,peak_raw_max,peak_p999,peak_p99,delta_raw_max,delta_p999,PSS_r001,delPSS_r001,PSS_n_sphere,PSS_crit_x,PSS_crit_y,PSS_crit_z
+finest,0.032,6,5949098,,0.30645,0,73097,1.1547e6,1.1395e6,1.1065e6,5.1521e5,5.0254e5,3.0273e5,1.3306e5,148,-0.022738,0.027739,-0.049092
+fine,0.04,6,3156195,4567767,0.30485,0,47071,1.1552e6,1.1396e6,1.1069e6,5.1545e5,5.0268e5,3.1800e5,1.3712e5,95,-0.010918,0.036826,-0.104438
+medium,0.05,6,1721620,2560116,0.28383,1,30428,1.1570e6,1.1406e6,1.1069e6,5.1622e5,5.0382e5,3.5167e5,1.5570e5,61,-0.020146,0.030191,-0.063006
+coarse,0.0625,6,947190,1461883,0.24441,2,19335,1.1441e6,1.1299e6,1.0987e6,5.0616e5,4.9581e5,3.4487e5,1.4859e5,42,-0.022170,0.023623,-0.011253
+production,0.055,5,1525026,2293357,0.19697,10,28145,1.1541e6,1.1406e6,1.1059e6,,,,,,,,

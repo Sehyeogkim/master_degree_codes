@@ -1,0 +1,594 @@
+# -*- coding: utf-8 -*-
+from tkinter.constants import FALSE
+import ansys.mapdl.core as pymapdl
+import os
+import numpy as np
+import pyvista as pv
+import time
+from ansys.mapdl.reader import save_as_archive, read_binary
+import meshio
+from pathlib import Path
+import pandas as pd
+from utils.utils_geo_mesh.main_CAD import CAD_instance_from_idx
+import utils.utils_ansys.utils_prep as utils_prep
+import utils.utils_ansys.utils_bc as utils_bc
+
+
+'''
+2026 04 29 jeff
+
+ver4: replace Python-IDW SFE loop with ANSYS /MAP processor
+  - SURF154 creation (esurf) identical to ver3
+  - CSV x,y,z,Pressure -> preprocess to x,y,z,Pressure
+  - /MAP: TARGET SURF154_FACES -> FTYPE CSV -> READ -> MAP -> WRITEMAP
+  - SFE applied in /SOLU via INPUT(mapped.sfe)
+'''
+
+class PYMAPDL_worker():
+
+    def __init__(self, case_index: int, wall_folder_path: str, ansys_exec_dir: str, 
+                parameter_csv_path: str, port_num: int = 50052, nproc: int = 10):
+        
+        self.case_index = case_index # case id, should be int.
+        self.wall_folder_path = wall_folder_path
+        self.ansys_exec_dir = ansys_exec_dir
+        self.parameter_csv_path = parameter_csv_path
+        self.port_num = port_num
+        self.nproc = nproc
+
+        #will be defined further.
+        self.bc_type = ""
+        self.casename = ""
+        self.cdb_path = ""
+        self.mapped_dat = ""
+
+        #Create a CAD instance from the parameter csv file and the case index.
+        self.vessel_model =  CAD_instance_from_idx(self.case_index, self.parameter_csv_path)
+        
+    def pymapdl_launch(self, display_info = True):
+    
+        #Launch MAPDL
+        self.mapdl = pymapdl.launch_mapdl(
+                jobname = f"{self.case_index}",
+                exec_file="/opt/cvbml/softwares/ansys_inc/v251/ansys/bin/ansys251",
+                run_location = self.ansys_exec_dir,
+                loglevel="ERROR", #Print out only ERROR
+                override = True,
+                port = None,
+                nproc = self.nproc
+            )
+        print(f"New MAPDL launched successfully on port {self.mapdl.port}")
+        self.mapdl.units("CGS")
+        
+        #MAPDL INFO
+        if display_info:
+            utils_prep.section_title(f"ANSYS MAPDL VER: {self.mapdl.version}")
+            print(self.mapdl)
+            print("current direcotry:", self.mapdl.directory)
+            print(f"Number of CPU: {self.mapdl.get_value('ACTIVE', 0, 'NUMCPU')}")
+            print("mapdl ip:", self.mapdl.ip)
+            print("mapdl port:", self.mapdl.port)
+            utils_prep.slash_lines()
+        
+        return None
+    
+    def pymapdl_msh_to_cdb(self, gmsh_path: Path, type: int = 1):
+        '''
+            Convert .msh file to .cdb file.
+
+            @jeff 0708
+            if self.macro_cal is True, the macro calcification will be applied to the mesh.
+        '''
+
+
+        print("======= .msh to .cdb ========")
+        if not gmsh_path.exists() or gmsh_path.stat().st_size == 0:
+            raise ValueError(f"Invalid mesh file: {gmsh_path} is missing or empty")
+
+        try:
+            gmsh_mesh = meshio.read(gmsh_path, file_format="gmsh")
+        except Exception as e:
+            raise ValueError(f"Failed to read gmsh mesh {gmsh_path}: {e}") from e
+
+        # cell_sets can carry a malformed gmsh:bounding_entities set that breaks
+        # meshio cell_sets_to_data (IndexError); physical tags survive via
+        # cell_data["gmsh:physical"], so blanking cell_sets is safe. (2026-07-28)
+        gmsh_mesh.cell_sets = {}
+        mesh = pv.from_meshio(gmsh_mesh)
+        tags = np.array(mesh.cell_data["gmsh:physical"])
+        print("gmsh:physical tags:", set(tags))
+
+        mesh.points *= 0.1 #scale down cuz of inventor.
+        self.nodes_by_tag, _ = utils_prep.surface_nid_dic(mesh, Linear = False, Terminal_display = False)
+
+        cdb_path = self.ansys_exec_dir / f"total_solid{type}.cdb"
+        if cdb_path.exists():
+            print(f"CDB file already exists: {cdb_path}. pass")
+            return str(cdb_path)
+
+        save_as_archive(cdb_path, mesh)
+        return cdb_path
+
+    def safe_mapdl_exit(self):
+        if not hasattr(self, "mapdl"):
+            return
+
+        try:
+            self.mapdl.clear()
+        except Exception as e:
+            print(f"MAPDL clear failed: {e}")
+
+        try:
+            self.mapdl.exit()
+        except Exception as e:
+            print(f"MAPDL exit failed: {e}")
+
+    def pymapdl_prep_bc(self, wall_csv_path: Path):
+
+        #start the prep7 read the .cdb file.
+        self.mapdl.prep7()
+        from pathlib import Path
+        cdb_path_obj = Path(self.cdb_path)
+        cdb_name = str(cdb_path_obj.name)
+        self.mapdl.cdread("db", cdb_name)
+
+        ###DEBUGGING CODE### remove unused ET types that add spurious rotational DOF
+        print("[DEBUG] ET types BEFORE etdele:", set(self.mapdl.mesh.etype))
+        for et in [1, 3, 4]:   # SOLID186, SOLID185, SHELL181 — all 0-element types from save_as_archive
+            self.mapdl.etdele(et)
+        print("[DEBUG] ET types AFTER  etdele:", set(self.mapdl.mesh.etype))
+        print("[DEBUG] ETLIST after cleanup:\n", self.mapdl.etlist())
+        ###DEBUGGING CODE###
+
+        self.mapdl.nlgeom("OFF")
+        self.mapdl.shpp("OFF")
+
+        #check geo and mesh info.
+        utils_prep.section_title("Geo and Mesh info")
+        print(self.mapdl.mesh)
+        self.mapdl.allsel()
+
+        print("set(self.mapdl.mesh.material_type):", set(self.mapdl.mesh.material_type))
+        print("set(self.mapdl.mesh.etype):", set(self.mapdl.mesh.etype))
+
+        wall_in_vessel_tag = 4
+        wall_in_fc_tag = 5
+        sides_tag = 6
+
+        #Fixed support BC on the two sides which were tagged as 6. (0.15s)
+        fix_time = time.time()
+        utils_prep.fix_bc_from_nid_list(self.mapdl, self.nodes_by_tag[sides_tag])
+        print(f"Fixed support BC time: {time.time() - fix_time:.2f} seconds")
+
+
+        #generate Component block for each surface.
+        cm_display = False
+        cm_time = time.time()
+        utils_prep.Create_cm_from_nid_list(self.mapdl, self.nodes_by_tag[wall_in_vessel_tag], "WALL_IN_VESSEL", cm_display)
+        utils_prep.Create_cm_from_nid_list(self.mapdl, self.nodes_by_tag[wall_in_fc_tag], "WALL_IN_FC", cm_display)
+        print(f"Create CM for wall_in_vessel time: {time.time() - cm_time:.2f} seconds")
+        
+        #Define Element type 7 for Total Traction.
+        self.mapdl.et(7,"SURF154")
+        self.mapdl.keyopt(7,2,0) ### important, https://www.mm.bme.hu/~gyebro/files/ans_help_v182/ans_elem/Hlp_E_SURF154.html
+        self.mapdl.keyopt(7,4,0) # 8 nodes.
+        self.mapdl.keyopt(7,7,1) # 0 - use new area, 1 - use original area
+        self.mapdl.keyopt(7,11,2)
+
+        #Generate ETYPE 7 surface Mesh in order to apply Total traction.
+        walls = ["WALL_IN_FC", "WALL_IN_VESSEL"]
+        for wall in walls:
+            self.mapdl.cmsel(type_= 'S', name = wall, entity = 'NODE')
+            self.mapdl.type(7)
+            self.mapdl.esurf()
+        
+
+        self.mapdl.esel('S', 'TYPE', '', 7)
+        n_elem_surf154 = len(self.mapdl.mesh.enum)
+        print(f"[/MAP] SURF154_FACES: {n_elem_surf154} elements")
+
+        self.mapdl.nsle()
+        self.mapdl.cm('TARGET_NODES','NODE')
+        self.mapdl.allsel()
+        self.mapdl.finish()   # exit PREP7 before entering /MAP
+
+        #Starting Mapping process in here
+        # /MAP processor
+        print(f"\nApplying {self.bc_type} BC via /MAP processor...")
+        print(f"wall_csv_path: {wall_csv_path}")
+        map_time = time.time()
+        # /MAP processor
+        self.mapdl.run('/MAP')
+        self.mapdl.target('TARGET_NODES')
+        self.mapdl.ftype('CSV', 0)               # CSV, real-only
+        self.mapdl.read(str(wall_csv_path), 1, '', 1, 2, 3, 7)   # NSKIP=1, x=col1, y=2, z=3, p=col7 (Pressure in wall_0723 csv)
+        self.mapdl.run('PLGEOM')                  # optional
+        self.mapdl.run('MAP,,2,,0,20')       # kDIM=2, kOUT=0, LIMIT=20
+        self.mapdl.run('PLMAP')
+        self.mapdl.run("WRITEMAP,'mapped.sfe'") # SFE data are save on the ansys execution direcotry.
+        self.mapdl.finish()
+        print(f"/MAP interpolation + WRITEMAP time: {time.time() - map_time:.2f} seconds")
+        return
+    
+    def pymapdl_prep_mat(self, material_json_path: str):
+    
+        '''
+        Step6. Define Material Properties
+        - read the material.json file and allocate the material properties.
+        - E must be got from the parameter csv file.
+        '''
+        self.mapdl.prep7() #Must restart the prep7 after defining new jobname.
+        self.mapdl.nlgeom("OFF")
+        self.mapdl.shpp("OFF")
+
+        import json
+        with open(material_json_path, 'r') as f:
+            material_dict = json.load(f)
+
+        df = pd.read_csv(self.parameter_csv_path)
+        E_vessel = df.loc[self.case_index, 'E_vessel']
+        E_lipid = df.loc[self.case_index, 'E_lipid']
+        E_fc = df.loc[self.case_index, 'E_fc']
+        E_cal = df.loc[self.case_index, 'E_cal']
+        for name, mat_dict in material_dict.items():
+
+            #Aloocate the E value.
+            if name == "vessel":
+                E = E_vessel
+            elif name == "lipid":
+                E = E_lipid
+            elif name == "fc":
+                E = E_fc
+            elif name == "cal":
+                E = E_cal
+            else:
+                raise ValueError(f"Invalid material name: {name}")
+
+            mat_id = mat_dict["mat_id"]
+            #E = mat_dict["E"] 
+            rho = mat_dict["rho"]
+            v = mat_dict["v"]
+
+            self.mapdl.mp('DENS', mat_id, rho)  # Density in g/cm³
+            self.mapdl.mp('EX', mat_id, E)  # Elastic modulus in dynes/cm² (e.g., 1 MPa = 10^6 dynes/cm²)
+            self.mapdl.mp('NUXY', mat_id, v)  # Poisson's ratio
+
+            print(f"mat_id: {mat_id}, mat_name: {name}, E: {E}, rho: {rho}, v: {v}")
+
+
+
+        #Check the material properties.
+        self.mapdl.allsel()
+        utils_prep.section_title(f"Material ID of {self.casename}")
+        print(self.mapdl.mplist())
+        self.mapdl.finish() #finish the prep
+        return
+    
+    def pymapdl_solve(self):
+        '''
+        static solver.
+        '''
+        start_solver_time = time.time()
+        utils_prep.section_title(f"Solve {self.casename}") #self.casename = case_{index}_{bc_type}
+        
+        self.mapdl.allsel()
+        self.mapdl.slashsolu()
+        self.mapdl.input("mapped.sfe")
+        print(f"[/MAP] Applied mapped traction on the surface from mapped.sfe file")
+        self.mapdl.antype("STATIC")
+        self.mapdl.nlgeom("OFF") #turm off the non-linear
+        
+        # Set out-of-core mode for sparse solver to reduce memory usage
+        # This is important because if PCG fails, ANSYS will automatically switch to sparse solver
+        # Required memory: ~84GB (out-of-core) vs ~285GB (in-core)        
+        # PCG solver: tries to converge with less memory
+        # If PCG fails, ANSYS automatically switches to sparse direct solver (LU decomposition)
+        # The sparse solver will then use out-of-core mode (set above) to reduce memory usage
+        # Relaxed tolerance (1e-6 instead of 1e-8) to improve convergence chance
+        self.mapdl.eqslv(lab = 'PCG')
+        self.mapdl.bcsoption('OUTOFCORE')  # out-of-core sparse (~84GB RAM) -- changed from INCORE 20260725
+        #self.mapdl.eqslv(lab = 'SPARSE')
+        
+        self.mapdl.time(1) # set the end_time
+        self.mapdl.autots("ON") #auto time stepping.
+        self.mapdl.nsubst(nsbstp = 1, nsdbmn = 1, nsbmx = 10, carry = "OFF")
+        self.mapdl.kbc(0) #ramped Load
+        self.mapdl.allsel()
+
+        self.mapdl.solve(verbose = True)
+        self.mapdl.finish()
+
+        print(f"Total simulation time: {time.time() - start_solver_time:.2f} seconds")
+        
+        try: 
+            self.mapdl.db.save(f'{self.casename}.db')
+        except Exception as e:
+            try:
+                self.mapdl.db.save(f'{self.casename}.db')
+            except Exception as e:
+                print(f"Failed to save .db file: {e}")
+                raise Exception(f"Failed to save .db file: {e}")
+
+        #clean up the useless data.
+#DISABLED_20260725         utils_prep.wipe_out_useless_data(self.ansys_exec_dir)
+    
+    #Post processing for all domains.
+    def _save_results_rst(self, output_path: str):
+        '''
+        Read results directly from the RST file (bypasses gRPC post_processing).
+        Writes a legacy binary .vtk using pyvista (6x faster write than .vtu).
+
+        Fields saved:
+          point: Displacement (3-comp), EQV_stress (SEQV), Principal_stress (S1),
+                 EQV_strain, Stress_SX
+          cell:  Material_ID
+        '''
+        t0 = time.time()
+
+        rst_path = self.ansys_exec_dir / f"{self.casename}.rst"
+        if not rst_path.exists():
+            raise FileNotFoundError(f"RST file not found: {rst_path}")
+
+        t = time.time()
+        rst = read_binary(str(rst_path))
+        grid = rst.grid                             # PyVista mesh, zero extra I/O
+        print(f"  RST open + grid:    {time.time()-t:.2f}s  ({grid.n_points:,} pts, {grid.n_cells:,} cells)")
+
+        t = time.time()
+        _, disp = rst.nodal_displacement(0)         # (N, 3): UX UY UZ
+        print(f"  nodal_displacement: {time.time()-t:.3f}s")
+
+        t = time.time()
+        _, stress6 = rst.nodal_stress(0)            # (N, 6): SX SY SZ SXY SYZ SXZ
+        print(f"  nodal_stress 6c:    {time.time()-t:.2f}s")
+
+        t = time.time()
+        _, strain = rst.nodal_elastic_strain(0)     # (N, 7): last col = EQV
+        print(f"  elastic_strain:     {time.time()-t:.2f}s")
+
+        # SEQV from 6 stress components (avoids separate principal_nodal_stress call)
+        t = time.time()
+        sx, sy, sz    = stress6[:, 0], stress6[:, 1], stress6[:, 2]
+        sxy, syz, sxz = stress6[:, 3], stress6[:, 4], stress6[:, 5]
+        seqv = np.sqrt(0.5 * ((sx-sy)**2 + (sy-sz)**2 + (sz-sx)**2
+                               + 6.0*(sxy**2 + syz**2 + sxz**2)))
+
+        # S1: largest eigenvalue of 3x3 symmetric stress tensor (vectorized)
+        # Some nodes (SURF154 boundary) have NaN stress → mask them out first
+        n = len(sx)
+        valid = ~np.isnan(stress6).any(axis=1)
+        s1 = np.full(n, np.nan, dtype=np.float64)
+        if valid.any():
+            T = np.zeros((valid.sum(), 3, 3), dtype=np.float64)
+            T[:, 0, 0] = sx[valid];   T[:, 1, 1] = sy[valid];   T[:, 2, 2] = sz[valid]
+            T[:, 0, 1] = T[:, 1, 0] = sxy[valid]
+            T[:, 1, 2] = T[:, 2, 1] = syz[valid]
+            T[:, 0, 2] = T[:, 2, 0] = sxz[valid]
+            s1[valid] = np.linalg.eigvalsh(T)[:, 2]    # ascending → last col = S1
+        print(f"  SEQV + S1 compute:  {time.time()-t:.2f}s  (valid nodes: {valid.sum():,}/{n:,})")
+
+        # Attach to rst.grid (index already aligned with RST node order)
+        grid.point_data["Displacement"]     = disp.astype(np.float32)
+        grid.point_data["EQV_stress"]       = seqv.astype(np.float32)
+        grid.point_data["Principal_stress"] = s1.astype(np.float32)
+        grid.point_data["EQV_strain"]       = strain[:, 6].astype(np.float32)
+        grid.point_data["Stress_SX"]        = sx.astype(np.float32)
+
+        t = time.time()
+        grid.save(output_path)                      # legacy binary .vtk
+        print(f"  vtk write:          {time.time()-t:.2f}s  -> {output_path}")
+        print(f"  TOTAL post-proc:    {time.time()-t0:.2f}s")
+
+    def _save_fc_results_rst(self, output_path: str):
+        '''
+        Same as _save_results_rst but extracts only the fibrous cap domain (mat_id=3).
+        Saves a legacy binary .vtk containing only FC cells with the same point arrays.
+        '''
+        FC_MAT_ID = 3
+        t0 = time.time()
+
+        rst_path = self.ansys_exec_dir / f"{self.casename}.rst"
+        if not rst_path.exists():
+            raise FileNotFoundError(f"RST file not found: {rst_path}")
+
+        rst  = read_binary(str(rst_path))
+        grid = rst.grid
+        print(f"  [FC] grid: {grid.n_points:,} pts, {grid.n_cells:,} cells")
+
+        # Filter to FC cells only
+        mat_ids = grid.cell_data["ansys_material_type"]
+        fc_mask = mat_ids == FC_MAT_ID
+        fc_grid = grid.extract_cells(fc_mask)   # adds "vtkOriginalPointIds" to point_data
+        orig_ids = fc_grid.point_data["vtkOriginalPointIds"]
+        print(f"  [FC] fc_grid: {fc_grid.n_points:,} pts, {fc_grid.n_cells:,} cells")
+
+        # Displacement: nodal solution (fine; 3-DOF after etdele of the SHELL181)
+        _, disp = rst.nodal_displacement(0)          # (N,3)
+        disp_fc = np.asarray(disp)[orig_ids]
+
+        # --- Stress / strain: FC-only element averaging (no cross-material smear) ---
+        # rst.nodal_stress() averages over ALL elements at a node, including the
+        # neighbouring lipid/vessel/cal; since the FC is a thin cap almost every FC
+        # node is on a material interface -> spurious principal-stress spikes
+        # ("speckles"). Instead scatter each element's per-corner stress onto its
+        # own nodes using FC elements ONLY (ANSYS AVRES,2 equivalent), then average.
+        # Works for SOLID185 (constant per tet) and SOLID187 (per-corner) alike; for
+        # SOLID187 this also populates the corner nodes that nodal_stress leaves NaN.
+        t = time.time()
+        all_nodenum = np.asarray(grid.point_data["ansys_node_num"])
+        fc_nodenum  = np.asarray(fc_grid.point_data["ansys_node_num"])
+        maxn = int(all_nodenum.max()) + 1
+        fc_aen = np.asarray(fc_grid.cell_data["ansys_elem_num"])
+
+        enum_s, edata_s, enode_s = rst.element_stress(0)
+        enum_s = np.asarray(enum_s)
+        fc_eidx = np.where(np.isin(enum_s, fc_aen))[0]
+
+        acc = np.zeros((maxn, 6)); cnt = np.zeros(maxn)
+        for e in fc_eidx:
+            s = np.asarray(edata_s[e]); nds = np.asarray(enode_s[e]).astype(int)
+            k = min(len(s), len(nds))
+            np.add.at(acc, nds[:k], s[:k]); np.add.at(cnt, nds[:k], 1.0)
+        have = cnt[fc_nodenum] > 0
+        favg = np.zeros((maxn, 6)); m = cnt > 0; favg[m] = acc[m] / cnt[m, None]
+        stress_fc = favg[fc_nodenum]
+
+        # elastic strain EQV (col 6), same FC-only scatter
+        try:
+            enum_e, edata_e, enode_e = rst.element_solution_data(0, "EEL")
+            enum_e = np.asarray(enum_e)
+            fc_eidx_e = np.where(np.isin(enum_e, fc_aen))[0]
+            sacc = np.zeros(maxn); scnt = np.zeros(maxn)
+            for e in fc_eidx_e:
+                arr = np.asarray(edata_e[e]).reshape(-1, 7)
+                nds = np.asarray(enode_e[e]).astype(int)
+                k = min(len(arr), len(nds))
+                np.add.at(sacc, nds[:k], arr[:k, 6]); np.add.at(scnt, nds[:k], 1.0)
+            seqv_strain = np.zeros(maxn); ms = scnt > 0; seqv_strain[ms] = sacc[ms] / scnt[ms]
+            eqv_strain_fc = seqv_strain[fc_nodenum]
+        except Exception as ex:
+            print(f"  [FC] EEL strain skipped: {ex}")
+            eqv_strain_fc = np.zeros(len(fc_nodenum))
+        print(f"  [FC] FC-only element average: {time.time()-t:.2f}s "
+              f"(corner nodes with stress {int(have.sum()):,}/{len(have):,})")
+
+        sx, sy, sz    = stress_fc[:, 0], stress_fc[:, 1], stress_fc[:, 2]
+        sxy, syz, sxz = stress_fc[:, 3], stress_fc[:, 4], stress_fc[:, 5]
+        seqv = np.sqrt(0.5 * ((sx-sy)**2 + (sy-sz)**2 + (sz-sx)**2
+                               + 6.0*(sxy**2 + syz**2 + sxz**2)))
+
+        n  = len(sx)
+        s1 = np.full(n, np.nan, dtype=np.float64)
+        if have.any():
+            T = np.zeros((int(have.sum()), 3, 3), dtype=np.float64)
+            T[:, 0, 0] = sx[have];   T[:, 1, 1] = sy[have];   T[:, 2, 2] = sz[have]
+            T[:, 0, 1] = T[:, 1, 0] = sxy[have]
+            T[:, 1, 2] = T[:, 2, 1] = syz[have]
+            T[:, 0, 2] = T[:, 2, 0] = sxz[have]
+            s1[have] = np.linalg.eigvalsh(T)[:, 2]
+        # NaN-out the seqv/sx at nodes that received no stress (orphan mid-side nodes)
+        seqv = np.where(have, seqv, np.nan)
+        sx_out = np.where(have, sx, np.nan)
+
+        fc_grid.point_data["Displacement"]     = disp_fc.astype(np.float32)
+        fc_grid.point_data["EQV_stress"]       = seqv.astype(np.float32)
+        fc_grid.point_data["Principal_stress"] = s1.astype(np.float32)
+        fc_grid.point_data["EQV_strain"]       = eqv_strain_fc.astype(np.float32)
+        fc_grid.point_data["Stress_SX"]        = sx_out.astype(np.float32)
+
+        t = time.time()
+        fc_grid.save(output_path)
+        print(f"  [FC] vtk write: {time.time()-t:.2f}s  -> {output_path}")
+        print(f"  [FC] TOTAL:     {time.time()-t0:.2f}s")
+
+
+if __name__ == "__main__":
+
+    import pathlib
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("start", type=int, help="Start case index (inclusive)")
+    parser.add_argument("end", type=int, help="End case index (exclusive)")
+    parser.add_argument("nproc", type=int, default = 20, help="Number of processors PER bc instance (peak & low run concurrently)")
+    args = parser.parse_args()
+
+    import subprocess, shutil
+    # Per-case ROTATING ports: two concurrent instances need distinct ports, AND
+    # consecutive cases must NOT reuse the same port immediately (the freshly-exited
+    # MAPDL leaves the port in TIME_WAIT -> next case's launch would fail the gRPC
+    # server start). Rotate over 50 slots so a port is reused only ~50 cases later.
+    def _ports(ci):
+        return 50100 + (ci % 50), 50200 + (ci % 50)   # (peak_port, low_port)
+
+    # ==== 54_analysis plaque port (2026-07-28) ====
+    # PLAQUE = "LAP" (low-attenuation plaque) or "CP" (calcified plaque).
+    # Meshes are flat files:  {PLAQUE}_mesh/solid_{PLAQUE}_{i}.msh
+    # Results go to:          {PLAQUE}_results/case_{i}/ansys_results/
+    PLAQUE = "LAP"
+
+    working_dir = pathlib.Path(__file__).parent
+    pre_data_dir = working_dir / "pre_data"
+    material_json_path = pre_data_dir / "material.json"
+    parameter_csv_path = pre_data_dir / "parameter_0728.csv"
+    wall_dir = working_dir / "post_data" / "wall_no_hyperemia"
+    mesh_dir = working_dir / f"{PLAQUE}_mesh"
+    results_root = working_dir / f"ansys_{PLAQUE}_0728"
+
+    no_msh = []
+    too_large_mesh = []
+    waiting_wall = []   # cases whose wall CSVs have not synced from harvey yet
+
+
+    import time as _time, signal
+    case_list = list(range(args.start, args.end))
+    solver = str(working_dir / "pymapdl_solve_bc.py")
+    PARN = 4            # worker-pool size (ws2 free -> use ~all 64 cores: 4 x nproc16)
+    TIMEOUT = 9000      # per-case hard cap (s); kills pathological out-of-core grinders + frees their disk
+    MIN_FREE_GB = 450   # don't START a new case if free disk below this (out-of-core scratch can be ~350GB/case)
+
+    # eligible = has mesh + low wall csv synced + not yet done
+    eligible = []
+    for ci in case_list:
+        if not (mesh_dir / f"solid_{PLAQUE}_{ci}.msh").exists():
+            no_msh.append(ci); continue
+        if not (wall_dir / "low" / f"wall_low_case_{ci}.csv").exists():
+            waiting_wall.append(ci); continue
+        if (results_root / f"case_{ci}" / f"FC_case_{ci}_low.vtk").exists():
+            continue
+        eligible.append(ci)
+    print(f"[{PLAQUE}] LOW-only: {len(eligible)} eligible this pass, POOL of {PARN} @ nproc {args.nproc}", flush=True)
+
+    def free_gb():
+        st = os.statvfs(str(results_root)); return st.f_bavail * st.f_frsize / 1e9
+
+    def spawn_low(ci):
+        case_dir = results_root / f"case_{ci}"; case_dir.mkdir(parents=True, exist_ok=True)
+        low_dir = case_dir / "low"; low_dir.mkdir(exist_ok=True)
+        low_vtk = case_dir / f"FC_case_{ci}_low.vtk"
+        _, low_port = _ports(ci)   # each concurrent case gets its own rotating port
+        # start_new_session -> solve_bc is its own process-group leader, so on TIMEOUT we
+        # can kill the whole group (python + its MAPDL child) with one killpg.
+        p = subprocess.Popen(["python", solver, str(ci), "low",
+                              str(args.nproc), str(low_dir), str(low_port), str(low_vtk), PLAQUE],
+                             start_new_session=True)
+        return {"ci": ci, "p": p, "low_dir": low_dir, "low_vtk": low_vtk, "start": _time.time()}
+
+    def finalize(r, reason):
+        ci = r["ci"]
+        if r["low_vtk"].exists():
+            print(f"************ Finished case {ci} (LOW only) ************", flush=True)
+        else:
+            print(f"case {ci}: INCOMPLETE ({reason}) - retry next pass", flush=True)
+        # always drop scratch (cdb/rst/db) whether ok or failed; final vtk is in parent case dir
+        shutil.rmtree(r["low_dir"], ignore_errors=True)
+        try:
+            (results_root / f"case_{ci}" / "total_solid1.cdb").unlink()
+        except FileNotFoundError:
+            pass
+
+    # WORKER POOL: keep up to PARN low solves running; refill as each finishes, so one
+    # slow (out-of-core) case only occupies ONE slot instead of blocking a whole group.
+    running = {}
+    ei = 0
+    while ei < len(eligible) or running:
+        while len(running) < PARN and ei < len(eligible):
+            if running and free_gb() < MIN_FREE_GB:
+                print(f"[disk] free {free_gb():.0f}GB < {MIN_FREE_GB}GB -> holding new spawns ({len(running)} running)", flush=True)
+                break
+            ci = eligible[ei]; ei += 1
+            running[ci] = spawn_low(ci)
+            print(f"[pool] started case {ci} ({len(running)}/{PARN} running, {free_gb():.0f}GB free)", flush=True)
+        _time.sleep(5)
+        for ci in list(running):
+            r = running[ci]; rc = r["p"].poll()
+            if rc is None and (_time.time() - r["start"]) > TIMEOUT:
+                print(f"case {ci}: TIMEOUT >{TIMEOUT}s - killing process group", flush=True)
+                try:
+                    os.killpg(os.getpgid(r["p"].pid), signal.SIGKILL)
+                except Exception:
+                    pass
+                r["p"].wait(); rc = -9
+            if rc is not None:
+                finalize(r, f"rc={rc}")
+                del running[ci]

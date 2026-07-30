@@ -1,0 +1,8 @@
+# Gmail 발신 자격증명 예시. 이 파일을 복사해 pipeline/.gmail_creds 로 저장하고 값을 채운다.
+#   cp pipeline/.gmail_creds.example pipeline/.gmail_creds
+# .gmail_creds 는 .gitignore 되어 커밋되지 않는다.
+#
+# ⚠️ 일반 로그인 비밀번호는 Google이 SMTP를 막는다. '앱 비밀번호'(16자리)를 발급받아야 한다:
+#   Google 계정 → 보안 → 2단계 인증 켜기 → '앱 비밀번호' 생성 → 16자리 복사
+sender=kimse991228@gmail.com
+password=abcd efgh ijkl mnop

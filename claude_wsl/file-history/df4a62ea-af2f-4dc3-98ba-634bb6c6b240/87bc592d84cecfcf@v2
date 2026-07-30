@@ -1,0 +1,43 @@
+# Solve ONE boundary condition (peak or low) for one case, in its own MAPDL
+# instance / exec dir / port, and write the final FC vtk to out_vtk.
+# Spawned as a subprocess by the parallel orchestrator in pymapdl_sim_{LAP,CP}.py.
+# Usage: pymapdl_solve_bc.py <case> <bc> <nproc> <exec_dir> <port> <out_vtk> <PLAQUE>
+import sys, time, pathlib
+import ansys.mapdl.core as pymapdl
+from pymapdl_sim_LAP import PYMAPDL_worker  # identical class in LAP/CP; import once
+
+case    = int(sys.argv[1])
+bc      = sys.argv[2]
+nproc   = int(sys.argv[3])
+exec_dir= pathlib.Path(sys.argv[4])
+port    = int(sys.argv[5])
+out_vtk = sys.argv[6]
+PLAQUE  = sys.argv[7]
+
+Q        = pathlib.Path("/home/jeff/project/54_analysis")
+mesh     = Q / f"{PLAQUE}_mesh" / f"solid_{PLAQUE}_{case}.msh"
+wall_dir = Q / "post_data" / "wall_no_hyperemia"
+param    = Q / "pre_data" / "parameter_0728.csv"
+matjson  = Q / "pre_data" / "material.json"
+exec_dir.mkdir(parents=True, exist_ok=True)
+
+w = PYMAPDL_worker(case, wall_dir, exec_dir, param, nproc=nproc)
+t0 = time.time()
+# builds nodes_by_tag from the mesh; skips the 1GB cdb WRITE if a hardlinked
+# total_solid1.cdb is already present in exec_dir (orchestrator pre-links it).
+w.cdb_path = w.pymapdl_msh_to_cdb(mesh)
+# launch on an explicit distinct port so the two concurrent instances never collide
+w.mapdl = pymapdl.launch_mapdl(
+    jobname=f"{case}_{bc}",
+    exec_file="/opt/cvbml/softwares/ansys_inc/v251/ansys/bin/ansys251",
+    run_location=str(exec_dir), loglevel="ERROR", override=True, port=port, nproc=nproc)
+w.mapdl.units("CGS")
+w.bc_type = bc
+w.casename = f"case_{case}_{bc}"
+w.mapdl.jobname = w.casename
+w.pymapdl_prep_bc(wall_dir / bc / f"wall_{bc}_case_{case}.csv")
+w.pymapdl_prep_mat(matjson)
+w.pymapdl_solve()
+w._save_fc_results_rst(str(out_vtk))
+w.safe_mapdl_exit()
+print(f"[{PLAQUE} {bc}] case {case} DONE in {time.time()-t0:.1f}s -> {out_vtk}", flush=True)

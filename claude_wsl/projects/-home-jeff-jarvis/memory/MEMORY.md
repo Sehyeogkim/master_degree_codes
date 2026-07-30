@@ -1,0 +1,14 @@
+- [Project: jarvis](project_jarvis.md) — central monitoring tool for simulations across 4 machines
+- [Environment](environment.md) — WSL2 Ubuntu on Windows host DESKTOP-QOJU0PM
+- [Auth decision](feedback_auth.md) — SSH keys preferred over password files
+- [Harvey HPC cluster](harvey_hpc.md) — harvey.kaist.ac.kr, Slurm scheduler (inferred, needs confirm)
+- [Servers](servers.md) — harvey + 2 KAIST workstations (cvbml01/02), aliases & ports, key-auth only
+- [Simulations](simulations.md) — ANSYS/PyMAPDL workflow, slrum_pymapdl_smp_array.sh, labmates list
+- [Harvey ANSYS sim run](harvey_ansys_sim_run.md) — how to run sims on harvey: base env, license var, -smp, sim_one.sh template
+- [Master thesis defense](project_thesis_defense.md) — ws2:~/project/55b_sensitivity_for_defense_0407/ (Experiments A–E2)
+- [ANSYS license (Etri-pc)](ansys_license.md) — FlexNet `1055@Etri-pc` (143.248.174.50), env var, troubleshooting
+- [PyMAPDL WSL2 ip fix](feedback_pymapdl_wsl_ip.md) — must pass `ip="127.0.0.1"` to launch_mapdl on WSL2 to avoid false "port in use"
+- [0519_claude_analysis layout](0519_claude_analysis_layout.md) — ws2 folder convention: top level = active 0521 work; bin/ = archive; output_0521/ = results
+- [No jq locally](env_no_jq.md) — jq not installed + no passwordless sudo; parse JSON with python3, not jq
+- [Post-proc CP_0618](postproc_CP_0618.md) — PSS/del-PSS pipeline → merged 756-case CSV on cvbml02 (done 2026-06-19)
+- [FFR-DOS plot dir](ffr_dos_plot_dir.md) — ws2:.../55c_final_defense_0512/Experiment_LAP/Q0_result/ (FFR vs DOS + clinical refs)

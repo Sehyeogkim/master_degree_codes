@@ -1,0 +1,24 @@
+"""전 종목 yfinance 일봉 캐시 프리페치 (resumable). back_test/cache/daily/{code}.csv.
+실패 종목은 'MISS' 마커로 남겨 재조회 방지. 진행상황 stdout."""
+import blib, os
+
+codes = set()
+for w in blib.weeks():
+    for code, _ in blib.week_stocks(w):
+        codes.add(code)
+codes = sorted(codes)
+print(f"유니크 종목 {len(codes)}개 캐시 시작")
+ok = miss = cached = 0
+for i, c in enumerate(codes, 1):
+    p = blib._cache_path(c)
+    was = os.path.exists(p)
+    rows = blib.daily(c)
+    if was:
+        cached += 1
+    elif rows:
+        ok += 1
+    else:
+        miss += 1
+    if i % 25 == 0 or i == len(codes):
+        print(f"  [{i}/{len(codes)}] 신규성공 {ok} · 실패 {miss} · 기존캐시 {cached}", flush=True)
+print(f"완료: 신규 {ok}, 실패(MISS) {miss}, 기존 {cached}")

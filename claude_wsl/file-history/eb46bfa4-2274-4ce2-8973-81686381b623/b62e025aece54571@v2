@@ -1,0 +1,38 @@
+#!/bin/bash
+# REVERSE per-node steady-3D (non-hyperemia, LOW) runner for 54_analysis.
+# Iterates END -> START (e.g. 999,998,...). Meant to run toward a forward job from the top.
+# PHASES env (default low). Resumable: skips a case whose low wall csv already exists.
+# NP = SLURM_NTASKS (so this works at 72 procs on harvey01 as well as 96 elsewhere).
+#SBATCH -N 1
+#SBATCH -c 1
+
+source /HL8/HMod/modules/5.1.1/init/bash
+module purge
+module load cmake/3.25.2 gcc/11.3.0 mpi/gcc-11.3.0/openmpi-4.1.5
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib64/:/home/jkim/repos/svSolverPrivate/build/svSolver-build/bin/:/home/jkim/repos/svSolverPrivate/build/svSolver-build/lib/:/opt/cvbml/libraries/VTK-8.2.0/lib64/
+
+BASE=/home/jeff/project/54_analysis
+PY=/home/jeff/miniconda3/bin/python3
+SV=/opt/cvbml/repos/svSolverPrivate/build/svSolver-build/bin/svsolver
+WALL=$BASE/post_data/wall_no_hyperemia
+NP=${SLURM_NTASKS:-96}
+export PHASES="${PHASES:-low}"
+
+: "${START:?need START}"; : "${END:?need END}"
+echo "NODE=$SLURM_JOB_NODELIST REVERSE $END..$START PHASES='$PHASES' NP=$NP start=$(date)"
+
+for i in $(seq $END -1 $START); do
+  if [ -f "$WALL/low/wall_low_case_${i}.csv" ]; then echo "[$i] already done, skip"; continue; fi
+  echo "==== [$i] PRE $(date) ===="
+  $PY $BASE/steady_3D_pre_no_hyperemia.py $i || { echo "[$i] pre failed -> next"; continue; }
+  if [ $i -lt 500 ]; then FD=fluid_data; else FD=fluid_data_500; fi
+  CD="$BASE/$FD/case_${i}/steady_3d_no_hyperemia/low"
+  [ -f "$CD/solver.inp" ] || { echo "[$i] no solver.inp, skip"; continue; }
+  [ -d "$CD/${NP}-procs_case" ] && rm -rf "$CD/${NP}-procs_case"
+  cd "$CD"
+  echo "==== [$i/low] SOLVE $(date) ===="
+  mpirun -np $NP $SV solver.inp
+  echo "==== [$i] POST $(date) ===="
+  $PY $BASE/steady_3D_post_no_hyperemia.py $i && echo "[$i] DONE low" || echo "[$i] POST incomplete"
+done
+echo "REVERSE $END..$START FINISHED $(date)"

@@ -1,0 +1,382 @@
+%% Computers in Biology and Medicine (Elsevier) -- "Your Paper Your Way" free-format submission.
+%% Manuscript assembled from the Notion draft (Plaque / vulnerability-index study).
+%% Body text (Introduction/Methods/Results/Discussion/Conclusion) transcribed from Notion;
+%% Abstract written from the content; Title/Highlights/Keywords from the Notion "Title and highlights" page.
+%% Figures: figure1.pdf ... figure7.pdf (top/bottom-cropped pages of final_figure_CIBM.pdf).
+%% Citations left as \cite{...}; unresolved keys are prefixed TODO_ (see references.bib).
+
+\documentclass[preprint,12pt]{elsarticle}
+
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{pdflscape}
+\usepackage{makecell}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{xurl} % allow long URLs in references to break across lines
+
+\journal{Computers in Biology and Medicine}
+
+% Sort multi-key citations into ascending order, e.g. [7,3,6] -> [3,6,7].
+% Use "sort&compress" instead if you also want consecutive runs collapsed to ranges ([3,6,7] -> [3,6--7]).
+\biboptions{sort}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{Material-dominated sensitivity of coronary plaque vulnerability to rupture under pulsatile loading}
+% Global sensitivity analysis of coronary plaque vulnerability to rupture under pulsatile loading
+% Material-dominated sensitivity of coronary plaque vulnerability to rupture under pulsatile loading
+\author[label1]{Se Hyeog Kim\fnref{equal}}
+\ead{kimse991228@gmail.com}
+
+\author[label1]{Wonjin Choi\fnref{equal}}
+\ead{wj0220@kaist.ac.kr}
+
+\author[label1]{Hyun Jin Kim\corref{cor1}}
+\ead{kim.hyunjin@kaist.ac.kr}
+
+\affiliation[label1]{
+    organization={Department of Mechanical Engineering, Korea Advanced Institute of Science and Technology},
+    addressline={291 Daehak-ro, Yuseong-gu},
+    city={Daejeon},
+    postcode={34141},
+    country={Republic of Korea}
+}
+
+\fntext[equal]{These authors contributed equally to this work.}
+\cortext[cor1]{Corresponding author.}
+
+\begin{abstract}
+Coronary atherosclerotic plaque rupture is a major cause of acute coronary events, and its risk is governed jointly by plaque morphology, tissue material properties, and hemodynamic loading. Which of these factor groups most strongly governs rupture-risk variability remains poorly characterized, partly because pulsatile fluid--structure interaction (FSI) is computationally expensive. Here, a cost-effective snapshot-based FSI formulation was used as the forward model to generate large input--output datasets for low-attenuation (LAP) and calcified (CP) plaque phenotypes, sampled by Latin hypercube design over morphological, material, and hemodynamic parameters. Two stress-based vulnerability indices, the peak plaque structural stress (PSS) and its pulsatile amplitude ($\Delta$PSS), were evaluated and first checked for directional consistency with five clinically recognized high-risk plaque features. Gaussian process regression surrogates were then trained for each index, and Sobol variance-based global sensitivity analysis was performed at the individual-variable and factor-group levels. $\Delta$PSS was consistent with all five high-risk features, whereas PSS was consistent with three, indicating that the pulsatile stress amplitude is the more clinically consistent index. The surrogates were accurate ($R^2 = 0.94$--$0.97$). Across both phenotypes and indices, the vessel-wall modulus, fibrous-cap modulus, and systolic pressure were the dominant contributors, and the material group showed the largest total-order contribution ($S_T = 0.596$--$0.708$), followed by the hemodynamic group, whereas morphology contributed mainly through interactions. These results indicate that coronary plaque rupture-risk variability is governed primarily by material and hemodynamic factors rather than by morphology alone, providing a basis for prioritizing the quantities that warrant accurate patient-specific characterization.
+\end{abstract}
+
+\begin{highlights}
+\item Morphological, material, and hemodynamic factors varied jointly in a large FSI set
+\item Peak (PSS) and pulsatile ($\Delta$PSS) plaque structural stress compared as risk indices
+\item Pulsatile $\Delta$PSS is more clinically consistent than peak systolic stress (PSS)
+\item Sobol sensitivity analysis ranks material properties as the top rupture-risk factor
+\end{highlights}
+
+\begin{keyword}
+Coronary plaque rupture \sep Plaque structural stress \sep Global sensitivity analysis \sep Sobol indices \sep Fluid--structure interaction \sep Gaussian process regression \sep Vulnerability index
+\end{keyword}
+
+\end{frontmatter}
+
+%% ============================================================
+\section{Introduction}
+\label{sec:intro}
+
+Cardiovascular disease (CVD) remains the leading cause of death worldwide, and ischemic heart disease alone accounted for approximately 9.0 million deaths in 2021~\cite{GBD2021}. Atherosclerotic plaque rupture is a major mechanism underlying acute coronary events. Rupture of the fibrous cap exposes thrombogenic plaque contents to the bloodstream and can precipitate coronary thrombosis and myocardial infarction~\cite{bentzon2014, costopoulos2017}. From a mechanical perspective, rupture occurs when the local stress acting on the fibrous cap exceeds its mechanical strength~\cite{costopoulos2017}. The mechanical loading of the fibrous cap is therefore central to plaque stability and rupture risk.
+
+Advances in coronary computed tomography angiography and intravascular imaging have enabled increasingly detailed \textit{in vivo} characterization of plaque geometry and composition~\cite{lu2021highrisk, williams2020lap, milzi2021}. These developments have also supported image-based computational models that estimate local mechanical quantities not directly available from imaging alone. Among these quantities, plaque structural stress (PSS), the mechanical stress developed within the plaque tissue (particularly the fibrous cap) under physiological loading, is widely used to characterize the mechanical loading associated with plaque rupture~\cite{teng2014, costopoulos2017}. The local stress field depends on plaque geometry, tissue material properties, and the applied physiological loading~\cite{huang2001, costopoulos2017, stefanati2024}. Clinical imaging studies have further associated elevated PSS with plaque composition, phenotype, and rupture~\cite{teng2014, costopoulos2017, milzi2021}. PSS is commonly evaluated at or near systole to represent peak plaque loading~\cite{teng2014, costopoulos2017}. Other studies have examined the pulsatile variation in structural stress ($\Delta\mathrm{PSS}$), motivated by repeated cyclic loading and potential fatigue-related damage accumulation~\cite{bank2000, costopoulos2017}. The present study therefore considers both PSS and $\Delta\mathrm{PSS}$ as complementary stress-based measures of plaque vulnerability.
+
+However, estimating a vulnerability index for a given lesion does not identify which underlying inputs drive variation in that index across the plausible parameter space. This distinction is important because plaque morphology, tissue properties, and hemodynamic conditions all vary between patients. Moreover, these quantities cannot be measured or prescribed with equal accuracy in patient-specific models. Identifying the dominant contributors can therefore help prioritize measurement, calibration, and model-refinement efforts. Global sensitivity analysis (GSA) provides a systematic framework for this purpose by quantifying how uncertain inputs contribute to output variability over their prescribed ranges~\cite{saltelli2008}. Variance-based GSA can also capture interaction effects that are not resolved when factors are examined only in isolation~\cite{saltelli2008}. Such interactions are particularly relevant to plaque mechanics because the effect of a geometric feature may depend on the surrounding material and hemodynamic state.
+
+Despite this need, previous computational studies of plaque mechanics have generally examined restricted subsets of the relevant factor space. Parametric studies have investigated selected geometric and mechanical factors within predefined model settings~\cite{cilla2012, polzer2019}. Patient-specific studies have related plaque morphology and composition to structural stress~\cite{teng2014, costopoulos2017, milzi2021}, while other work has examined the effect of variability in tissue mechanical properties~\cite{stefanati2024}. These studies have provided important insight into individual determinants of plaque stress. However, they do not provide a common variance decomposition across morphological, material, and hemodynamic factor groups. Restricted parametric designs also provide limited information on interactions among these groups. A further limitation is computational scale. Pulsatile fluid--structure interaction (FSI) couples time-dependent blood flow with deformable vessel and plaque mechanics and is computationally expensive~\cite{wang2021_multipatient, lissoni2025_coronary_methods}. This cost complicates the large number of model evaluations required for variance-based GSA, for which stable sensitivity estimates depend on adequate sampling of the input space~\cite{saltelli2008}. The relative contributions of morphology, material properties, and hemodynamic loading therefore remain insufficiently characterized within a unified large-scale analysis.
+
+Accordingly, this study aimed to determine which of the morphological, material, and hemodynamic factor groups most strongly governs the variability of coronary plaque rupture risk. A cost-effective snapshot-based FSI formulation was used as the forward model to generate large computational datasets for low-attenuation and calcified plaque phenotypes. Two stress-based vulnerability indices, PSS and $\Delta\mathrm{PSS}$, were evaluated. Their directional consistency with clinically recognized high-risk plaque features was first assessed before sensitivity interpretation. Gaussian process regression surrogates were then trained for each index, followed by Sobol variance-based GSA at both the individual-variable and factor-group levels. This framework quantifies direct and total contributions, including interaction-related effects, across broad physiologically plausible input ranges. The analysis was designed to identify the dominant determinants of plaque-vulnerability variability and to provide a mechanistic basis for prioritizing quantities that warrant accurate characterization in future patient-specific assessment.
+
+%% ============================================================
+\section{Methods}
+\label{sec:methods}
+
+The proposed framework consists of three stages (Fig.~\ref{fig:framework}). First, a snapshot-based fluid--structure interaction (FSI) solver was used as the forward model to generate large input--output datasets for two coronary plaque phenotypes (low-attenuation and calcified). Second, two vulnerability indices (VIs; PSS and $\Delta\mathrm{PSS}$) were checked for consistency with clinically recognized high-risk features. Third, a Gaussian process regression (GPR) surrogate was trained for each VI, and Sobol variance-based global sensitivity analysis (GSA) was performed to quantify the contribution of each factor group to the variability of rupture risk.
+
+\subsection{Snapshot-based FSI forward solver}
+The forward model employed in this study is the snapshot-based pulsatile FSI solver developed and validated in a previous study~\cite{TODO_kim_snapshot}. It decouples the temporal and spatial components of the pulsatile load. A single one-dimensional (1D) reduced-order hemodynamic simulation provides the time-dependent pressure and flow-rate boundary conditions, which are then imposed on steady three-dimensional (3D) fluid and quasi-static structural analyses at selected time instants to reconstruct the instantaneous vessel-wall stress field.
+
+In this forward solver, the 1D reduced-order model (ROM) fluid simulations were performed using an in-house C++ solver on a desktop workstation with an Intel Core i7-12700K processor (3.61~GHz) and 64~GB of RAM. The 3D fluid and solid simulations were conducted on an HPC cluster equipped with Intel Xeon processors (2 sockets, 96 cores) and 257~GB of RAM. The steady 3D fluid analyses were performed using svSolver~\cite{updegrove2017simvascular}, and the quasi-static structural analyses were performed using ANSYS Mechanical APDL (release 2025; ANSYS Inc., Canonsburg, PA, USA).
+
+\subsection{Computational model and input space}
+\label{subsec:model}
+In this study, two plaque phenotypes commonly identified by coronary computed tomography angiography (CCTA), a widely used non-invasive imaging method, were modeled: low-attenuation plaque (LAP) and calcified plaque (CP)~\cite{lu2021highrisk, williams2020lap}. These were constructed as idealized geometric models (Fig.~\ref{fig:geometry}A). The LAP was defined as a three-domain model comprising the vessel wall, the fibrous cap (FC), and the lipid core, whereas the CP was defined as a four-domain model with an additional calcification domain inside the lipid core. The input parameters were organized into three groups---morphological, hemodynamic, and material---whose definitions, ranges, and sources are summarized in Table~\ref{tab:inputs}.
+
+\subsubsection{Geometry and morphology parameters}
+The baseline coronary geometry was modeled as a cylindrical segment with a length of $10\,\mathrm{cm}$, a lumen normal diameter of $d_\mathrm{ref} = 0.2\,\mathrm{cm}$, and a wall thickness of $t_\mathrm{wall} = 0.02\,\mathrm{cm}$~\cite{dodge1992lumen_r_av, fung1993biomechanics, caro2012mechanics}. Since fibrous-cap thickness can only be resolved by invasive imaging such as optical coherence tomography (OCT)~\cite{jang2005oct, kume2005octimt}, it was fixed at a uniform representative value of $t_\mathrm{FC} = 100\,\mu\mathrm{m}$ for all baseline samples.
+
+The lesion morphology was parameterized by six variables common to both phenotypes (Table~\ref{tab:inputs}): degree of stenosis ($DoS$), lesion length ($L_\mathrm{lesion}$), lumen axial skewness ($\gamma_z$), positive remodeling index ($PI$), lipid arc angle ($\theta_\mathrm{lipid,max}$), and lipid length ratio ($l_\mathrm{lipid}$). These parameters determine the shape of the lumen, fibrous cap, lipid core and vessel wall. The degree of stenosis was defined as $DoS = (1 - d_\mathrm{min}/d_\mathrm{ref}) \times 100$, where $d_\mathrm{min}$ and $d_\mathrm{ref}$ are the minimum and reference lumen diameters; the lumen axial skewness as $\gamma_z = z_\mathrm{MLA}/z_\mathrm{lesion}$, which locates the minimum-lumen-area (MLA) plane relative to the lesion end; the positive remodeling index as $PI = A_\mathrm{max}/A_\mathrm{ref} = (D_\mathrm{max}/D_\mathrm{ref})^{2}$, where $A_\mathrm{max}$ and $A_\mathrm{ref}$ (diameters $D_\mathrm{max}$ and $D_\mathrm{ref}$) are the vessel cross-sectional areas at the lesion and reference sites; and the lipid length ratio as $l_\mathrm{lipid} = L_\mathrm{lipid}/L_\mathrm{lesion}$, where $L_\mathrm{lipid}$ is the lipid length. To reproduce the irregular morphology of plaque calcifications, the calcification was generated inside the lipid core using a seed-based region-growing algorithm. Its total volume was set to $f_\mathrm{calc}\,V_\mathrm{lipid}$, defining the calcified fraction $f_\mathrm{calc} = V_\mathrm{calc}/V_\mathrm{lipid}$ as the ratio of the calcification volume $V_\mathrm{calc}$ to the lipid-core volume $V_\mathrm{lipid}$, while four auxiliary shape parameters controlled the seed location and growth direction within the lipid core. These auxiliary parameters were excluded from the surrogate training and sensitivity analysis because an initial Sobol screening confirmed that their contribution to the output was negligible (all first-order indices $S_1 < 10^{-3}$). Moreover, they are numerical controls for shape generation rather than clinically interpretable variables.
+
+Based on these morphology parameters, a CAD model was generated in Autodesk Inventor Professional 2026 (Autodesk Inc., San Francisco, CA, USA). The solid domains were meshed in Gmsh~\cite{geuzaine2009gmsh} with approximately $3\times10^{6}$ second-order tetrahedral elements, and the fluid domain in Simmetrix MeshSim (Simmetrix Inc., Clifton Park, NY, USA) with approximately $5\times10^{6}$ first-order tetrahedral elements and three prism boundary layers along the lumen wall.
+
+% [Table 1 (tab:inputs) moved to the end of the document, after the references.]
+
+\subsubsection{Boundary conditions and hemodynamic parameters}
+For the fluid inlet boundary condition, a physiological pressure waveform $P_\mathrm{in}(t)$ was prescribed. This waveform was generated by coupling a fixed reference coronary flow waveform $Q(t)$ with a three-element Windkessel (RCR) model, fixing the coronary resistance ratio at $R_p/R_d = 1/10$ and fitting the remaining parameters by least squares to the target $(P_\mathrm{sys},\ P_\mathrm{dia} = P_\mathrm{sys} - \Delta P)$~\cite{westerhof2009windkessel}. Thus, $P_\mathrm{in}(t)$ for each sample is fully determined by the three hemodynamic parameters: systolic pressure $P_\mathrm{sys}$, pulse pressure $\Delta P$, and diastolic decay ratio $\tau$ (Table~\ref{tab:inputs}). For the outlet boundary condition, a lumped-parameter coronary model was imposed at each outlet to represent the distal coronary microvasculature, with a time-varying intramyocardial pressure accounting for myocardial compression~\cite{kim2010coronary}. Its parameters were calibrated to reference coronary flow and pressure values~\cite{guyton2011_av_P, Sankaran2012}. For the solid boundary condition, the wall pressure field reconstructed from the steady 3D fluid simulation was applied as a surface traction on the inner wall of the multi-domain solid mesh, and both ends of the segment were constrained as fixed ends. The fluid and solid boundary conditions are summarized in Fig.~\ref{fig:bc}.
+
+\subsubsection{Material property parameters}
+Although arterial tissue exhibits anisotropic and hyperelastic behavior, the coronary domains undergo only small deformations over the cardiac cycle and were therefore modeled as isotropic linear elastic materials~\cite{milzi2021, loree1992}. The Young's modulus of each solid domain was treated as an input parameter (Table~\ref{tab:inputs}). The Poisson's ratio was set to $\nu = 0.49$ for the vessel wall, fibrous cap, and lipid core to approximate nearly incompressible soft vascular/plaque tissues, whereas the calcification was assigned $\nu = 0.30$~\cite{cheng1993distribution, huang2001impact, milzi2021coronary}. Blood in the fluid domain was modeled as an incompressible Newtonian fluid with a density of $1.06\,\mathrm{g/cm^3}$ and a dynamic viscosity of $\mu_f = 0.04~\mathrm{poise}$~\cite{ku1997blood}.
+
+\subsubsection{Input parameter sampling}
+The range of each input parameter was determined from previous clinical and imaging studies and is summarized, together with its definition, in Table~\ref{tab:inputs}. Each variable was assumed to follow an independent uniform distribution within its range, and 1,000 input vectors were generated per phenotype by Latin hypercube sampling (LHS)~\cite{mckay1979lhs}. The LAP was sampled over its 12 analysis variables, and the CP was sampled over an 18-dimensional design comprising the 14 analysis variables (the 12 common variables plus $f_\mathrm{calc}$ and $E_\mathrm{calc}$) and four auxiliary parameters controlling the calcification-shape generation. During sampling, the constraint $P_\mathrm{dia} > 40\,\mathrm{mmHg}$ was imposed to exclude physiologically unrealistic low-pressure conditions~\cite{heward2025cpp, mcevoy2016diastolic}. After excluding samples that failed during geometry generation, Boolean operations, or meshing, $784/1{,}000$ and $756/1{,}000$ valid input--output pairs remained for the LAP and CP, respectively. In addition, a separate auxiliary dataset was generated to verify that the forward solver reproduces the clinically recognized inverse relationship between fibrous-cap thickness and cap stress. In this set, $t_\mathrm{FC}$ was varied from $40$ to $200\,\mu\mathrm{m}$ in $40\,\mu\mathrm{m}$ increments and $E_\mathrm{FC}$ over $1.2$, $1.6$, and $2.0\,\mathrm{MPa}$, with all other inputs fixed at the midpoints of their prescribed ranges.
+
+\subsection{Output quantities}
+\subsubsection{Vulnerability indices (PSS and $\Delta$PSS)}
+For each sample, end-systole ($t_\mathrm{sys}$) and end-diastole ($t_\mathrm{dia}$) were identified from the inlet pressure waveform, and the forward solver was evaluated at both instants. This yielded the nodal maximum-principal stress fields on the fibrous-cap surface, denoted as $\sigma_n(t_\mathrm{sys})$ and $\sigma_n(t_\mathrm{dia})$ for each fibrous-cap surface node $n$. The plaque structural stress (PSS) was defined as the largest end-systolic maximum-principal stress over all fibrous-cap surface nodes. The pulsatile stress amplitude ($\Delta\mathrm{PSS}$) was defined as the largest absolute systolic--diastolic change in maximum-principal stress over those nodes~\cite{costopoulos2017, TODO_new_brown_prospect}:
+\begin{align}
+\mathrm{PSS} &= \max_{n \in \Gamma_{FC}} \sigma_n(t_\mathrm{sys}), \\
+\Delta\mathrm{PSS} &= \max_{n \in \Gamma_{FC}} \big|\sigma_n(t_\mathrm{sys}) - \sigma_n(t_\mathrm{dia})\big|,
+\end{align}
+where $\Gamma_{FC}$ is the set of fibrous-cap surface nodes. To suppress single-node noise, $\sigma_n$ at each node was spatially averaged within a spherical neighborhood of radius $r = 0.01\,\mathrm{cm}$ before the maximum was taken~\cite{corti2022}.
+
+Rupture occurs when the local stress exceeds the fibrous-cap strength, so the vulnerability of a plaque is governed by the stress-to-strength ratio~\cite{corti2022}. However, because the absolute fibrous-cap strength is highly uncertain and cannot be prescribed on a sample-specific basis, it was treated as a constant in this study. Under this assumption, each vulnerability index is proportional to its corresponding stress measure, and PSS and $\Delta\mathrm{PSS}$ were therefore adopted directly as the two vulnerability indices (VIs).
+
+\subsubsection{Rupture-location analysis}
+For each sample, the locations of the maximum PSS and maximum $\Delta\mathrm{PSS}$ were localized axially and circumferentially (Fig.~\ref{fig:ruploc}). Axially, each location was classified as proximal, mid, or distal using the lumen area ratio $LA(z) = A_\mathrm{lumen}(z)/A_\mathrm{normal}$, with the mid region bounded by the two locations where $LA = 0.3$, following Chung et al.~\cite{chung2017_LA}. Circumferentially, the angle $\theta_\mathrm{rupture}$ from the reference $y$-axis to the rupture node, measured on the rupture plane, was normalized by the lipid arc angle $\theta_\mathrm{lipid}$ on the same cross-section:
+\begin{align}
+I_\theta = \frac{|\theta_\mathrm{rupture}|}{\theta_\mathrm{lipid}}.
+\end{align}
+Each rupture was then classified as center ($I_\theta < 0.5$) or shoulder ($I_\theta \geq 0.5$), where the threshold of $0.5$ corresponds to the geometric midpoint between the cap center and the plaque shoulder over the lipid arc.
+
+\subsection{Clinical consistency of the vulnerability indices}
+\label{subsec:consistency}
+This stage examines whether the two vulnerability indices, PSS and $\Delta\mathrm{PSS}$, behave consistently with clinically recognized markers of plaque vulnerability. Five clinically recognized high-risk plaque features were used for this check. Each feature was represented by a model-measurable quantity, and the expected sign of the correlation between that quantity and each VI was defined according to its association with plaque vulnerability. For example, the high-risk feature ``soft plaque'' was represented by the lipid-core modulus $E_\mathrm{lipid}$, for which a negative correlation with each VI was expected because a softer lipid core is associated with greater plaque vulnerability.
+
+Three of the five features were represented directly by baseline input variables ($E_\mathrm{lipid}$, $f_\mathrm{calc}$, and $\theta_\mathrm{lipid}$). The remaining two, plaque burden ($PB$) and functional gradient ($\Delta\mathrm{FFR}$), were not input variables but were instead derived from the geometry and simulation results. Plaque burden was evaluated at the minimum-lumen-area (MLA) cross-section, defined as the plane at which the lumen diameter was smallest. It was computed in the conventional cross-sectional form as $PB = (A_\mathrm{vessel} - A_\mathrm{lumen})/A_\mathrm{vessel} \times 100\%$, where $A_\mathrm{vessel}$ and $A_\mathrm{lumen}$ are the vessel-wall-bounded and luminal areas on that plane~\cite{mintz2001ivus}. $\Delta\mathrm{FFR}$ was computed as $FFR_\mathrm{prox} - FFR_\mathrm{dist} = 1 - P_d/P_\mathrm{in}$, with the distal pressure $P_d$ taken as the cross-sectional mean $3\,\mathrm{cm}$ downstream of the lesion~\cite{lee2019emerald, cami2018ffrct}.
+
+For each VI and each representative model quantity, both the Pearson linear correlation coefficient ($r$) and the Spearman rank correlation coefficient ($\rho$) were computed. Because the check was based on the direction of association, the sign of $\rho$ was used and compared with the expected correlation sign defined in Table~\ref{tab:features}. A VI was regarded as clinically consistent for a given feature when the sign of $\rho$ matched the expected sign.
+
+% [Table 2 (tab:features) moved to the end of the document, after the references.]
+
+\subsection{Surrogate-based global sensitivity analysis}
+Surrogate-based global sensitivity analysis (GSA) was performed on both vulnerability indices (PSS and $\Delta\mathrm{PSS}$). Sobol analysis requires more than $10^4$ model evaluations per phenotype, which is impractical even with the cost-effective FSI forward solver. A Gaussian process regression (GPR) surrogate was therefore trained on the valid input--VI pairs, and the Sobol indices were estimated on the surrogate.
+
+\subsubsection{Gaussian process regression surrogate}
+For each VI and phenotype, an individual GPR surrogate was trained to map the input vector ($d = 12$ for the LAP, $d = 14$ for the CP) to a scalar VI, using the valid samples ($784$ for the LAP, $756$ for the CP) with an $8{:}2$ training--test split. The model used a squared-exponential kernel with automatic relevance determination (a separate length scale per input dimension), and the hyperparameters were determined by maximizing the marginal log-likelihood using scikit-learn~\cite{pedregosa2011scikit, rasmussen2006gpml}. Predictive accuracy was reported as the coefficient of determination ($R^2$) on the held-out test set.
+
+\subsubsection{Sobol variance-based indices}
+Sobol variance-based GSA was performed on the trained surrogate~\cite{sobol2001global, saltelli2002sobol, saltelli2010variance}. The first-order index $S_i$ (the individual contribution of $X_i$ to the output variance) and the total-order index $S_{Ti}$ (its total contribution including interactions) were estimated using Saltelli sampling based on Sobol quasi-random sequences (SALib). With a base sample size of $N = 1{,}024$, this required $N(d+2)$ surrogate evaluations, i.e., $14{,}336$ for the LAP ($d = 12$) and $16{,}384$ for the CP ($d = 14$). In addition to the individual-variable indices, group-level indices $S_G$ and $S_{TG}$ were computed for the three factor groups $G \in \{\text{morphological, material, hemodynamic}\}$ by treating each group as a grouped input, thereby capturing within-group interactions rather than summing individual indices~\cite{saltelli2008}:
+\begin{align}
+S_i &= \frac{\operatorname{Var}_{X_i}\!\big[\mathbb{E}_{X_{\sim i}}(Y \mid X_i)\big]}{\operatorname{Var}(Y)}, &
+S_{Ti} &= \frac{\mathbb{E}_{X_{\sim i}}\!\big[\operatorname{Var}_{X_i}(Y \mid X_{\sim i})\big]}{\operatorname{Var}(Y)}, \\
+S_G &= \frac{\operatorname{Var}_{X_G}\!\big[\mathbb{E}_{X_{\sim G}}(Y \mid X_G)\big]}{\operatorname{Var}(Y)}, &
+S_{TG} &= \frac{\mathbb{E}_{X_{\sim G}}\!\big[\operatorname{Var}_{X_G}(Y \mid X_{\sim G})\big]}{\operatorname{Var}(Y)}.
+\end{align}
+
+%% ============================================================
+\section{Results}
+\label{sec:results}
+
+This section presents the main results for the vulnerability-index consistency check and the subsequent sensitivity analysis. First, the simulation outputs were summarized to characterize the range and distribution of the computational outputs. Next, the two vulnerability indices (PSS and $\Delta\mathrm{PSS}$) were checked for whether the sign of their correlation with each model quantity was consistent with the expected high-risk direction. Finally, for both indices, the GPR surrogate accuracy and Sobol global sensitivity indices were reported.
+
+\subsection{Simulation outputs and forward-solver validation}
+The simulated PSS values ranged from 43 to 247~kPa, with a median of 101~kPa and an interquartile range of 84--121~kPa. The simulated $\Delta\mathrm{PSS}$ values ranged from 14 to 79~kPa, with a median of 31~kPa and an interquartile range of 25--38~kPa (Fig.~\ref{fig:outputs}A). Predicted high-risk locations were then classified in the circumferential and axial directions. Circumferentially, high-risk locations were more frequently identified at the shoulder than at the center for both the PSS-based VI (56.9\% vs.\ 43.1\%) and the $\Delta\mathrm{PSS}$-based VI (57.5\% vs.\ 42.5\%) (Fig.~\ref{fig:outputs}B). Axially, high-risk locations were most frequently identified in the middle region near the minimum lumen area, accounting for 60.2\% of cases for the PSS-based VI and 67.3\% for the $\Delta\mathrm{PSS}$-based VI (Fig.~\ref{fig:outputs}C). The simulated median FFR decreased monotonically with DoS (0.86, 0.85, 0.80, 0.72, and 0.60 at DoS values of 0.3, 0.4, 0.5, 0.6, and 0.7, respectively; Fig.~\ref{fig:outputs}D). In the auxiliary validation set, both PSS and $\Delta\mathrm{PSS}$ increased exponentially with decreasing fibrous-cap thickness across all three fibrous-cap moduli (Fig.~\ref{fig:outputs}E).
+
+\subsection{Clinical consistency of the vulnerability indices}
+The two vulnerability indices, PSS and $\Delta\mathrm{PSS}$, were checked against the five clinically recognized high-risk plaque features listed in Table~\ref{tab:consistency}. For each feature, the sign of the Spearman correlation between the representative model quantity and each VI was compared with the expected high-risk direction (Fig.~\ref{fig:consistency}).
+
+Both VIs showed the expected correlation signs for the soft-plaque ($E_\mathrm{lipid}$), less-calcified ($f_\mathrm{calc}$), and large-lipid-arc ($\theta_\mathrm{lipid}$) features. The two indices differed for plaque burden ($PB$) and functional gradient ($\Delta\mathrm{FFR}$). $\Delta\mathrm{PSS}$ was positively correlated with both, matching the expected high-risk direction, whereas PSS showed the opposite sign for both. The expected correlation signs and the consistency of each VI are summarized in Table~\ref{tab:consistency}. Overall, $\Delta\mathrm{PSS}$ was consistent with all five high-risk features, whereas PSS was consistent with three of the five.
+
+% [Table 3 (tab:consistency) moved to the end of the document, after the references.]
+
+\subsection{Sensitivity analysis results}
+For the two selected vulnerability indices, PSS and $\Delta\mathrm{PSS}$, GPR surrogate models were constructed to approximate the relationship between the input parameters and each VI for each plaque phenotype (LAP and CP). The numbers of valid input--output pairs were 784 for LAP and 756 for CP. Hold-out validation (80/20 split) showed high surrogate accuracy, with $R^2$ values of 0.94 and 0.94 for PSS and $\Delta\mathrm{PSS}$ in LAP, and 0.97 and 0.96 for PSS and $\Delta\mathrm{PSS}$ in CP, respectively.
+
+Saltelli sampling was performed using the trained GPR surrogate models to compute the first-order Sobol index ($S_1$) and total-order Sobol index ($S_T$). At the individual-variable level, $E_\mathrm{vessel}$, $E_\mathrm{FC}$, and $P_\mathrm{sys}$ were the dominant contributors for both VIs (Fig.~\ref{fig:sobol}A). For LAP, $E_\mathrm{vessel}$ showed the largest total-order index for both indices ($S_T = 0.372$ for PSS and $S_T = 0.380$ for $\Delta\mathrm{PSS}$), followed by $E_\mathrm{FC}$ ($S_T = 0.247$ and $0.266$) and $P_\mathrm{sys}$ ($S_T = 0.217$ and $0.169$). For CP, $E_\mathrm{FC}$ was the leading contributor for both indices ($S_T = 0.303$ for PSS and $S_T = 0.316$ for $\Delta\mathrm{PSS}$); for PSS it was followed by $P_\mathrm{sys}$ ($S_T = 0.277$) and $E_\mathrm{vessel}$ ($S_T = 0.231$), and for $\Delta\mathrm{PSS}$ by $E_\mathrm{vessel}$ ($S_T = 0.235$) and $P_\mathrm{sys}$ ($S_T = 0.221$).
+
+These results indicated that VI variability was primarily governed by $E_\mathrm{vessel}$, $E_\mathrm{FC}$, and $P_\mathrm{sys}$. In contrast, the morphological variables showed relatively low individual effects, with $S_1$ values generally below 0.08. However, several morphological variables exhibited $S_T$ values larger than their corresponding $S_1$ values, suggesting the presence of interaction-related contributions. For example, in LAP the lipid arc angle ($\theta_\mathrm{lipid,max}$) showed $S_1 = 0.058$ and $S_T = 0.104$ for PSS, and the degree of stenosis showed $S_1 = 0.002$ and $S_T = 0.055$ for $\Delta\mathrm{PSS}$, i.e., an almost entirely interaction-driven contribution.
+
+The same trend was observed in the group-level sensitivity results (Fig.~\ref{fig:sobol}B). The material group showed the largest total-order contribution across both phenotypes and both selected VIs ($S_T = 0.596$--$0.708$), followed by the hemodynamic group ($S_T = 0.217$--$0.310$). The morphology group showed the lowest $S_1$ values ($S_1 = 0.046$--$0.147$), while its total-order contribution was larger ($S_T = 0.126$--$0.247$), indicating that morphological factors contributed mainly through interactions rather than direct effects.
+
+%% ============================================================
+\section{Discussion}
+\label{sec:discussion}
+The main findings of this study can be summarized as follows. First, $\Delta\mathrm{PSS}$ was consistent with all five clinically recognized high-risk features, whereas PSS was consistent with three of the five. This result shows that the pulsatile stress amplitude is the more clinically consistent index. Second, the global sensitivity analysis showed that the variability of both indices was governed predominantly by material properties ($E_\mathrm{vessel}$ and $E_\mathrm{FC}$), with systolic pressure ($P_\mathrm{sys}$) acting as a hemodynamic contributor. As a prerequisite for interpreting these findings, the simulation outputs were compared with previously reported computational and clinical evidence.
+
+\subsection{Consistency of simulated outputs with prior clinical and computational evidence}
+As shown in Fig.~\ref{fig:outputs}A, the simulated PSS values ranged from 43 to 247~kPa, with a median of 101~kPa. This median fell within the range of prior OCT-based computational estimates, which reported $52 \pm 42$~kPa for non-ruptured plaques, $174 \pm 67$~kPa for ruptured plaques, and 150--230~kPa for vulnerable plaques~\cite{milzi2021pss, guo2026pss}, and the simulated distribution spanned the stress levels reported across these non-ruptured-to-vulnerable states. Similarly, the simulated $\Delta\mathrm{PSS}$ values ranged from 14 to 79~kPa, with a median of 31~kPa, falling within the range of previously reported cyclic stress variations of 43 [34--59]~kPa in non-ruptured fibroatheromas, 55 [37--75]~kPa in ruptured fibroatheromas, and $59.3 \pm 48.2$~kPa in diseased coronary segments~\cite{costopoulos2017, huang2021dpss}.
+
+The predicted high-risk locations followed clinically expected spatial patterns. Circumferentially, the predicted high-risk site was more frequent at the plaque shoulder than at the cap center (56.9\% and 57.5\% for PSS and $\Delta\mathrm{PSS}$, respectively), consistent with pathological and \textit{in vivo} observations of preferential shoulder rupture~\cite{richardson1989, maehara2002}. Axially, high-risk sites concentrated in the mid-lesion region near the minimum lumen area (60.2\% and 67.3\%), consistent with imaging studies reporting frequent rupture near the mid-lesion segment~\cite{chung2017_LA}.
+
+The simulated median FFR decreased monotonically with increasing DoS, from 0.86 to 0.60 as DoS increased from 0.3 to 0.7. This trend followed the expected inverse FFR--DoS relationship, remaining within the reported clinical reference band and tracking its lower edge for severe stenoses (DoS $>$ 0.6)~\cite{kristensen_ffr_ds, dai_ffr_ds, nijjer_ffr_ds, lee_ffr_ds}. The larger apparent FFR reduction in the severe range coincided with a wider spread among the reference curves in the same range (Fig.~\ref{fig:outputs}D). This pattern is consistent with prior evidence that FFR becomes increasingly sensitive to lesion geometry and flow conditions as stenosis severity increases~\cite{TODO_newcombe2021}.
+
+In the auxiliary validation set, both PSS and $\Delta\mathrm{PSS}$ increased exponentially as fibrous-cap thickness decreased across all three fibrous-cap moduli (Fig.~\ref{fig:outputs}E). This trend is consistent with prior structural analyses reporting an exponential rise in peak cap stress with decreasing cap thickness~\cite{TODO_li2006cap, TODO_akbar2022cap}, in line with the steep increase in rupture risk clinically observed for caps below ${\sim}65\,\mu\mathrm{m}$~\cite{TODO_oct_fct2022}.
+
+Overall, these comparisons indicate that the generated dataset reproduced prior clinical and computational trends, supporting its use as the input space for the subsequent clinical-consistency check and sensitivity analysis.
+
+\subsection{Stress amplitude versus peak stress as a vulnerability index}
+Among the two vulnerability indices, $\Delta\mathrm{PSS}$ was consistent with all five high-risk features, whereas PSS was not. This result indicates that the pulsatile stress amplitude ($\Delta\mathrm{PSS}$) is a more clinically consistent index than the peak systolic stress (PSS). This finding is consistent with the view that plaque rupture may involve fatigue-type damage accumulation under repeated cardiac loading~\cite{bank2000}. In an \textit{in vivo} VH-IVUS cohort, Costopoulos et al.~\cite{costopoulos2017} found that ruptured fibroatheromas exhibited a larger cyclic variation in PSS than non-ruptured ones, supporting the relevance of stress amplitude to plaque fatigue. This supports assessing vulnerability from the cyclic stress amplitude rather than from a single peak-stress snapshot, which requires pulsatile simulation rather than static analysis.
+
+This result may be explained by the geometric dependence of peak stress. In the present geometric parameterization, plaque burden and $\Delta\mathrm{FFR}$ both reflect increasing stenotic severity, because greater $DoS$ reduces $FFR$ and therefore increases $\Delta\mathrm{FFR}$~\cite{pijls1996ffr, kristensen_ffr_ds}. As a peak systolic quantity, PSS reflects the combined effects of multiple local geometric factors, including lumen radius, lumen area, and fibrous-cap thickness~\cite{teng2014, TODO_more}. Therefore, it cannot be interpreted solely as a function of plaque burden. Consistent with this interpretation, prior work reported that PSS does not necessarily increase with plaque burden and may even correlate negatively with it~\cite{teng2014, brown2016}.
+
+The lack of a positive PSS--plaque-burden relationship may be explained by the Laplace relation $\sigma_\theta \sim P r / t$. Under otherwise similar pressure and wall-thickness conditions, a smaller lumen radius reduces the predicted circumferential stress. This may explain why PSS can underrepresent some high-burden lesions that are clinically regarded as vulnerable~\cite{teng2014, TODO_burden_stress}. By contrast, $\Delta\mathrm{PSS}$ captures the systole-to-diastole stress amplitude rather than the absolute stress at a single instant, and may therefore provide a more appropriate stress metric for the proposed vulnerability-index framework.
+
+\subsection{Material-dominated sensitivity hierarchy}
+At the individual-parameter level, the sensitivity hierarchy was mainly characterized by material stiffness and pressure loading. Across both vulnerability indices, $E_\mathrm{vessel}$, $E_\mathrm{FC}$, and $P_\mathrm{sys}$ were consistently identified as the major contributors. Pressure loading directly affects the wall stress field, whereas the material parameters determine how this loading is transmitted and concentrated within the plaque structure.
+
+When the parameters were grouped by physical category, the material group showed the largest contribution, followed by the hemodynamic group and then the morphological group. Thus, although pressure-related variables such as $P_\mathrm{sys}$ and $\Delta P$ were important contributors, the overall sensitivity structure was primarily material-dominated. In contrast, the morphology group showed relatively small first-order effects but larger total-order contributions, suggesting that morphological variables influenced both VIs mainly through interactions with material and hemodynamic factors rather than through independent main effects. This finding is consistent with previous computational studies showing that the stress effect of plaque morphology is strongly modulated by tissue material properties~\cite{TODO_akyildiz2011, TODO_akyildiz2016}.
+
+\subsection{Limitations}
+This study has four main limitations. First, the geometry was idealized as an axisymmetric vessel with uniform fibrous-cap thickness and no curvature, bifurcation, or asymmetric plaque morphology. Second, a linear-elastic constitutive model was adopted for the solid domain, whereas near-rupture thin caps may deform nonlinearly and tissue anisotropy may not be negligible, so extension to hyperelastic, anisotropic laws such as the Holzapfel--Gasser--Ogden model~\cite{hgo} remains future work. Third, the fibrous-cap strength was treated as a constant because patient-specific strength cannot currently be measured \textit{in vivo}; micro-indentation, atomic force microscopy, or image-based stiffness--strength models could provide sample-specific strength estimates in future work. Fourth, the VI is a surrogate validated only for directional consistency with established high-risk features, not against rupture events or patient outcomes. Therefore, comparison with prospective imaging cohorts or longitudinal data is an essential next step before clinical application.
+
+%% ============================================================
+\section{Conclusion}
+\label{sec:conclusion}
+This study aimed to identify which of the morphological, material, and hemodynamic factor groups most strongly governs the variability of coronary plaque rupture risk. To overcome the high computational cost of fully coupled pulsatile FSI, which has previously limited the scale of parametric analyses, a cost-effective snapshot-based FSI formulation was used as the forward solver. The pulsatile response was computed once using a 1D reduced-order model, and the representative stress field was reconstructed using 3D static structural analysis.
+
+Using this forward solver, large input--output datasets were generated for the low-attenuation (LAP) and calcified (CP) plaque phenotypes. Two stress-based vulnerability indices, PSS and $\Delta\mathrm{PSS}$, were evaluated for their directional consistency with clinically established high-risk plaque features. $\Delta\mathrm{PSS}$ was consistent with all five features, whereas PSS was consistent with three of the five. This result indicates that plaque rupture vulnerability is more consistently captured by the pulsatile stress amplitude than by the peak systolic stress alone, supporting the use of pulsatile rather than static analysis.
+
+Gaussian process regression surrogates were then used to perform Sobol variance-based global sensitivity analysis at both the individual-variable and factor-group levels. Across both plaque phenotypes and both indices, $E_\mathrm{vessel}$, $E_\mathrm{FC}$, and $P_\mathrm{sys}$ were the dominant individual contributors. At the group level, the material group showed the largest total-order contribution ($S_T = 0.596$--$0.708$), followed by the hemodynamic group, whereas the morphological group contributed mainly through interactions rather than direct effects. These results indicate that the variability of coronary plaque rupture risk is governed primarily by material and hemodynamic factors rather than by morphology alone.
+
+Together, these findings demonstrate that the proposed framework enables an efficient, pulsatility-aware, and mechanically interpretable analysis of the factors governing coronary plaque rupture-risk variability. By quantifying the dominant determinants of this variability, the framework provides a mechanistic basis for prioritizing the quantities that warrant accurate characterization in future patient-specific assessment. Future work should extend the framework to patient-specific geometries, nonlinear and anisotropic constitutive models, and prospective clinical cohorts for direct validation against rupture events or longitudinal outcomes.
+
+%% ============================================================
+\section*{Declaration of Competing Interest}
+The authors declare that there is no conflict of interest.
+
+\section*{Declaration of generative AI and AI-assisted technologies}
+During the preparation of this work the authors used ChatGPT (OpenAI) in order to assist language editing and translation. After using this tool, the authors reviewed and edited the content as needed and take full responsibility for the content of the published article.
+
+\section*{Funding sources}
+This work was supported by the National Research Foundation of Korea (NRF) grant funded by the Korea government (RS-2022-NR070832, RS-2026-25472457), Ministry of Food and Drug Safety (RS-2023-00215667), and Samsung Research Funding and Incubation Center for Future Technology (SRFC-IT2401-04).
+
+%% ============================================================
+\bibliographystyle{elsarticle-num}
+\bibliography{references}
+
+%% ============================================================
+%% Tables (one per page, placed at the end for submission)
+%% ============================================================
+\clearpage
+\begin{table}[htbp]
+\centering
+\footnotesize
+\renewcommand{\arraystretch}{1.25}
+\setlength{\tabcolsep}{4pt}
+\caption{Input parameters for the two plaque phenotypes: symbol, unit, sampling range, and source. Full variable definitions are given in the text (Section~\ref{sec:methods}). A dash in the unit column denotes a dimensionless quantity. LAP, low-attenuation plaque; CP, calcified plaque.}
+\label{tab:inputs}
+\begin{tabular}{@{}p{2.0cm}p{2.9cm}ccccc@{}}
+\toprule
+Group & Variable & Symbol & Unit & \makecell{Range\\{}[min, max]} & \makecell{Plaque\\type} & Ref. \\
+\midrule
+\multirow{7}{*}{Morphology}
+& Degree of stenosis & $DoS$ & \% & [25, 75] & LAP, CP & \cite{ambrose1999, kang2018} \\
+& Lesion length & $L_\mathrm{lesion}$ & cm & [1.0, 3.0] & LAP, CP & \cite{vanvelzen2012} \\
+& Lumen axial skewness & $\gamma_z$ & --- & [$-0.75$, 0.75] & LAP, CP & \cite{choi2015aps} \\
+& Positive remodeling index & $PI$ & --- & [0.9, 1.2] & LAP, CP & \cite{lee2012remodeling, geng2021} \\
+& Lipid arc angle (maximum) & $\theta_\mathrm{lipid,max}$ & degree & [120, 270] & LAP, CP & \cite{wang2017plr, sugiura2021} \\
+& Lipid length ratio & $l_\mathrm{lipid}$ & --- & [0.5, 0.8] & LAP, CP & \cite{ryan2021oct_lipid_review} \\
+& Calcified fraction (CP) & $f_\mathrm{calc}$ & --- & [0.20, 0.80] & CP & \cite{krishnamoorthy2017} \\
+\midrule
+\multirow{3}{*}{Hemodynamic}
+& Systolic pressure & $P_\mathrm{sys}$ & mmHg & [100, 170] & LAP, CP & \cite{aha2024bp} \\
+& Pulse pressure & $\Delta P$ & mmHg & [35, 80] & LAP, CP & \cite{danchin2004aorticpp, parenica2011aorticpp} \\
+& Decay ratio & $\tau$ & --- & [0.01, 0.50] & LAP, CP & \cite{westerhof2009windkessel} \\
+\midrule
+\multirow{4}{*}{\makecell[l]{Material\\properties}}
+& Vessel-wall modulus & $E_\mathrm{vessel}$ & MPa & [0.1, 1.4] & LAP, CP & \cite{wangtang2021, holzapfel2005, karimi2013} \\
+& Fibrous-cap modulus & $E_\mathrm{FC}$ & MPa & [0.4, 2.3] & LAP, CP & \cite{loree1994static, teng2014material} \\
+& Lipid-core modulus & $E_\mathrm{lipid}$ & kPa & [1, 100] & LAP, CP & \cite{cheng1993, teng2014material} \\
+& Calcification modulus (CP) & $E_\mathrm{calc}$ & GPa & [0.7, 25] & CP & \cite{barrett2019, cahalane2018, milzi2021} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\clearpage
+\begin{table}[htbp]
+\centering
+\small
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.2}
+\caption{Clinical high-risk plaque features used to check the clinical consistency of the vulnerability indices.}
+\label{tab:features}
+\begin{tabular}{@{}c >{\raggedright\arraybackslash}p{5.0cm} c c c@{}}
+\toprule
+\# & \makecell[l]{High rupture-risk\\plaque feature} & \makecell{Representative\\model quantity} & \makecell{Expected \\correlation sign} & Data \\
+\midrule
+1 & Large plaque burden        & $PB$                        & $+$ & LAP \\
+2 & Functional gradient        & $\Delta\mathrm{FFR}$        & $+$ & LAP \\
+3 & Soft plaque                & $E_\mathrm{lipid}$          & $-$ & LAP \\
+4 & Large lipid arc angle      & $\theta_\mathrm{lipid,max}$ & $+$ & LAP \\
+5 & Low calcification fraction & $f_\mathrm{calc}$           & $-$ & CP  \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\clearpage
+\begin{table}[htbp]
+\centering
+\small
+\caption{Clinical consistency of the two vulnerability indices. Expected correlation direction between each model quantity and the VI, and the consistency of PSS and $\Delta\mathrm{PSS}$. \checkmark: expected direction satisfied; $\times$: violates expected direction.}
+\label{tab:consistency}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{@{}c >{\raggedright\arraybackslash}p{4.8cm} c c c c@{}}
+\toprule
+\# & \makecell[l]{High rupture-risk\\plaque feature} & \makecell{Representative\\model quantity} & \makecell{Expected \\correlation sign} & PSS & $\Delta\mathrm{PSS}$ \\
+\midrule
+1 & Large plaque burden        & $PB$                    & $+$ & $\times$ & \checkmark \\
+2 & High $\Delta\mathrm{FFR}$  & $\Delta\mathrm{FFR}$    & $+$ & $\times$ & \checkmark \\
+3 & Soft plaque                & $E_\mathrm{lipid}$      & $-$ & \checkmark & \checkmark \\
+4 & Large lipid arc angle & $\theta_\mathrm{lipid,max}$ & $+$ & \checkmark & \checkmark \\
+5 & Less calcification fraction & $f_\mathrm{calc}$      & $-$ & \checkmark & \checkmark \\
+\midrule
+\multicolumn{4}{l}{\textbf{All 5 satisfied?}} & $\times$ & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% ============================================================
+%% Figures (one per page, placed at the end for submission)
+%% ============================================================
+\clearpage
+
+\begin{figure}[p]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/figure1.pdf}
+    \caption{Overview of the proposed three-stage framework. \textbf{Step 1:} a snapshot-based FSI solver maps morphological, hemodynamic, and material inputs to the peak structural stress (PSS) and its pulsatile amplitude ($\Delta\mathrm{PSS}$), evaluated over the fibrous-cap surface nodes ($\Gamma_{FC}$). \textbf{Step 2:} the two indices are checked for sign-consistency with five clinically recognized high-risk plaque features (shown for plaque burden). \textbf{Step 3:} a Gaussian process regression surrogate is trained for each index, and Sobol variance-based sensitivity analysis quantifies each factor group's contribution to rupture-risk variability.}
+    \label{fig:framework}
+\end{figure}
+
+\clearpage
+\begin{figure}[p]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/figure2.pdf}
+    \caption{Idealized geometric models of the two coronary plaque phenotypes. \textbf{(A)} Anatomical context and schematic representations of low-attenuation plaque (LAP) and calcified plaque (CP). The LAP model comprises the vessel wall, fibrous cap, and lipid core, whereas the CP model additionally includes calcification within the lipid core. \textbf{(B)} Parametric lesion geometry shown for the LAP model: (i) lesion extent within the 10-cm cylindrical vessel segment and (ii) cross-section at the minimum lumen area (MLA) plane, $z = z_\mathrm{MLA}$. Geometric parameters are summarized in Table~\ref{tab:inputs}.}
+    \label{fig:geometry}
+\end{figure}
+
+\clearpage
+\begin{figure}[p]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/figure3.pdf}
+    \caption{Boundary conditions for the fluid and solid analyses. \textbf{(A)} Idealized fluid and solid domains with fixed supports and the outlet lumped-parameter coronary/Windkessel model. \textbf{(B)} Prescribed inlet pressure waveform, $P_\mathrm{in}(t)$, and intramyocardial pressure, $P_\mathrm{im}(t)$, indicating systolic pressure $P_\mathrm{sys}$, pulse pressure $\Delta P$, and characteristic time points $t_\mathrm{low}$ and $t_\mathrm{peak}$. \textbf{(C)} Representative parameter values of the lumped-parameter circuit used for the outlet boundary condition.}
+    \label{fig:bc}
+\end{figure}
+
+\clearpage
+\begin{figure}[p]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/figure4.pdf}
+    \caption{Rupture-location classification. \textbf{(A)} Axial classification into proximal, mid, and distal regions using the lumen area ratio $LA(z) = A_\mathrm{lumen}/A_\mathrm{normal}$, with the mid region bounded by the two locations where $LA = 0.3$. \textbf{(B)} Circumferential classification on the rupture plane, where the angle $\theta_\mathrm{rupture}$ is normalized by the lipid arc angle $\theta_\mathrm{lipid}$ to define center ($I_\theta < 0.5$) versus shoulder ($I_\theta \geq 0.5$) locations.}
+    \label{fig:ruploc}
+\end{figure}
+
+\clearpage
+\begin{figure}[p]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/figure5.pdf}
+    \caption{Simulated stress, FFR, and rupture-location results from the LAP dataset. \textbf{(A)} Distributions of simulated PSS and $\Delta\mathrm{PSS}$. \textbf{(B, C)} Circumferential (center/shoulder) and axial (proximal/mid/distal) classification of the predicted high-risk locations. \textbf{(D)} Simulated FFR--DoS relationship compared with reported clinical data. \textbf{(E)} PSS and $\Delta\mathrm{PSS}$ versus fibrous-cap thickness ($t_\mathrm{FC}$) from the auxiliary validation set, shown for three fibrous-cap moduli ($E_\mathrm{FC}$).}
+    \label{fig:outputs}
+\end{figure}
+
+\clearpage
+\begin{figure}[p]
+    \centering
+    \includegraphics[width=1.0\textwidth]{figures/figure6.pdf}
+    \caption{Clinical consistency check of the vulnerability indices. Sign of the correlation between each representative model quantity and each vulnerability index (PSS and $\Delta\mathrm{PSS}$) for the five high-risk plaque features, evaluated on the LAP and CP datasets, compared with the expected high-risk direction. $PB$: plaque burden; $\Delta\mathrm{FFR}$: functional (FFR) gradient; $E_\mathrm{lipid}$: lipid-core modulus; $\theta_\mathrm{lipid,max}$: maximum lipid arc; $f_\mathrm{calc}$: calcification fraction.}
+    \label{fig:consistency}
+\end{figure}
+
+\clearpage
+\begin{figure}[p]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/figure7.pdf}
+    \caption{Sobol sensitivity analysis (first- and total-order indices) of the selected vulnerability indices. \textbf{(A)} Individual-variable and \textbf{(B)} group-level results for the morphology, material, and hemodynamic groups, shown for PSS and $\Delta\mathrm{PSS}$ in the low-attenuation plaque (LAP) and calcified plaque (CP) datasets.}
+    \label{fig:sobol}
+\end{figure}
+
+\end{document}

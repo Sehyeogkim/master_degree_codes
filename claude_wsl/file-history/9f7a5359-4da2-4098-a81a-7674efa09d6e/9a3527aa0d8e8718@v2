@@ -1,0 +1,130 @@
+#!/usr/bin/env python
+"""
+Re-mesh 63, 215, 231 after the user regenerated FULL geometry (all 5 files,
+2026-07-27 18:13) with lowered skewness AND DOS + fresh guideline lumen /
+centerline solid. This targets the boolean/2D root cause (lumen was the source).
+
+Per-case ladder (first success wins):
+  * 63, 231 -- boolean failures before -> standard ladder, re-check the cut.
+  * 215     -- 2D surface stall before -> Frontal-Delaunay (algo2d=6) first.
+  * 231 lumen.stp is large (many B-spline ctrl pts) -> may be slower; 25min cap.
+"""
+import json
+import time
+import subprocess
+import threading
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+HERE = Path(__file__).resolve().parent
+PY = "/home/jeff/miniconda3/envs/ansys_new/bin/python"
+NPROC = 12
+WORKERS = 3
+CAP = 1500  # 25 min per rung
+
+PLANS = {
+    63:  [(0.05, 5, 10), (0.06, 6, 10), (0.06, 5, 1)],
+    231: [(0.05, 5, 10), (0.06, 6, 10), (0.06, 5, 1)],
+    215: [(0.05, 6, 10), (0.05, 5, 10), (0.06, 6, 10)],
+}
+CASES = sorted(PLANS)
+
+SOLID = HERE / "solid_0727"
+LOGDIR = SOLID / "logs"; LOGDIR.mkdir(parents=True, exist_ok=True)
+PROG = SOLID / "batch_f_progress.jsonl"
+STATUS = SOLID / "batch_f_status.json"
+MARKER = SOLID / "batch_f.marker"
+
+_lock = threading.Lock()
+counts = {"total": len(CASES), "done": 0, "failed": 0, "timeout": 0,
+          "skipped": 0, "running": 0}
+start_time = time.time()
+
+
+def msh_path(c):
+    return SOLID / f"case_{c}" / "dist_run" / "solid_type_1_dist.msh"
+
+
+def write_status():
+    with _lock:
+        s = dict(counts)
+        s["start_time"] = start_time
+        s["elapsed"] = round(time.time() - start_time, 1)
+        STATUS.write_text(json.dumps(s, indent=2))
+
+
+def record(entry):
+    entry["ts"] = time.time()
+    with _lock:
+        with open(PROG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+        st = entry.get("status")
+        if st in counts:
+            counts[st] += 1
+    write_status()
+
+
+def attempt(c, size, a2, a3, tag):
+    logf = LOGDIR / f"case{c}_{tag}.log"
+    try:
+        with open(logf, "w") as lf:
+            p = subprocess.run(
+                [PY, "mesh_one_0727.py", str(c), str(NPROC), str(size), str(a2), str(a3)],
+                cwd=str(HERE), stdout=lf, stderr=subprocess.STDOUT, timeout=CAP,
+            )
+        for line in reversed(logf.read_text(errors="replace").splitlines()):
+            if line.startswith("STATUS "):
+                return json.loads(line[len("STATUS "):])
+        return {"status": "failed", "error": f"no STATUS line (exit {p.returncode})"}
+    except subprocess.TimeoutExpired:
+        return {"status": "timeout"}
+    except Exception as e:
+        return {"status": "failed", "error": f"{type(e).__name__}: {e}"}
+
+
+def run_case(c):
+    # remove any stale mesh so the new geometry re-meshes
+    mp = msh_path(c)
+    if mp.exists():
+        mp.unlink()
+    with _lock:
+        counts["running"] += 1
+    write_status()
+    entry = {"case": c}
+    try:
+        for i, (size, a2, a3) in enumerate(PLANS[c]):
+            st = attempt(c, size, a2, a3, f"f{i+1}")
+            st.update({"mesh_size": size, "algo2d": a2, "algo3d": a3, "rung": i + 1})
+            entry.update(st)
+            if st.get("status") == "done":
+                break
+    finally:
+        with _lock:
+            counts["running"] -= 1
+    record(entry)
+    return entry
+
+
+def main():
+    if MARKER.exists():
+        MARKER.unlink()
+    write_status()
+    print(f"[0727f] {len(CASES)} cases (63,215,231), FULL new geometry 18:13", flush=True)
+    for c in CASES:
+        print(f"  case {c}: {PLANS[c]}", flush=True)
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        futs = [ex.submit(run_case, c) for c in CASES]
+        for fut in as_completed(futs):
+            e = fut.result()
+            print(f"[case {e.get('case')}] {e.get('status')} rung={e.get('rung')} "
+                  f"size={e.get('mesh_size')} algo=({e.get('algo2d')},{e.get('algo3d')}) "
+                  f"elem={e.get('num_elements')} min_q={e.get('min_quality')} "
+                  f"neg={e.get('neg_jacobian')} {e.get('seconds')}s "
+                  f"{str(e.get('error',''))[:70]}", flush=True)
+    MARKER.write_text("DONE\n")
+    write_status()
+    print("[0727f] COMPLETE")
+
+
+if __name__ == "__main__":
+    main()

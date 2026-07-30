@@ -1,0 +1,16 @@
+---
+name: solid-mesh-two-types
+description: "The \"2 meshes\" for project 65_final_0723 = Type 1 (no calcification) and Type 2 (calcification)"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: 9f7a5359-4da2-4098-a81a-7674efa09d6e
+  modified: 2026-07-23T00:20:58.130Z
+---
+
+For 65_final_0723, "총 2개의 메쉬" refers to two SOLID mesh types (not fluid):
+
+- **Type 1** — no calcification, lipid core only. Script `HXT_meshing_I.py` (`gmshing_solid`), gmsh OCC boolean on `{lumen,solid,lipid,fc}.stp`, output `solid_type_1.msh`. Reads `pre_data/parameter.csv` for `lesion_length` — but actual file is at `pre_data/bin/parameter.csv` (path mismatch to fix if running Type 1 as-is).
+- **Type 2** — calcification inside lipid core. `HXT_meshing_II_main.py` (+ `HXT_meshing_II_cal_generation.py`) driving `HXT_type2_utils.HXT_mesh_II`. Generates cal from (lipid − fc_offset), Voronoi/KDTree, smooth→stl→step, then `solid_gmshing_production`. Type 2 is the production path.
+
+Env + run recipe: [[solid-mesh-env-cv1]].

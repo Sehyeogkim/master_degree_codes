@@ -1,0 +1,14 @@
+{
+    "dmPolicy": "pairing",
+    "allowFrom": [
+      "444739416745967626"
+    ],
+    "groups": {
+      "1507995266090008710": {
+        "requireMention": true,
+        "allowFrom": []
+      }
+    },
+    "pending": {}
+  }
+  

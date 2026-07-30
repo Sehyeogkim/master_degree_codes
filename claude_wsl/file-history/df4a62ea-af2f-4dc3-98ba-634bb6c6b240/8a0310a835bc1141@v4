@@ -1,0 +1,39 @@
+#!/bin/bash
+# Resumable plaque solid-sim batch on cvbml02 for 54_analysis.
+# Usage: run_plaque_batch.sh <LAP|CP>
+# The python script SKIPS: no-mesh cases, cases whose wall CSV has not synced
+# from harvey yet (waiting), and already-done cases (both FC vtk exist).
+# So each pass resumes and picks up whatever new wall CSVs the harvey->ws2 sync
+# daemon has delivered. Loops forever (90s between passes) until a STOP_<PLAQUE>
+# file appears, so the outer monitor controls the lifecycle / LAP->CP handoff.
+set -u
+PLAQUE="${1:?usage: run_plaque_batch.sh <LAP|CP>}"
+Q=/home/jeff/project/54_analysis
+SCRIPT=$Q/pymapdl_sim_${PLAQUE}.py
+LOG=$Q/${PLAQUE}_batch.log
+STOP=$Q/STOP_${PLAQUE}
+START=${START:-500}
+END=${END:-1000}          # exclusive -> covers 500..999
+NPROC=${NPROC:-20}
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate ansys_new
+
+meshes(){ ls $Q/${PLAQUE}_mesh/solid_${PLAQUE}_*.msh 2>/dev/null | wc -l; }
+donecnt(){ n=0; for f in $Q/ansys_${PLAQUE}_0728/case_*/FC_case_*_low.vtk; do
+             [ -f "$f" ] || continue; p="${f/_low.vtk/_peak.vtk}"; [ -f "$p" ] && n=$((n+1)); done; echo $n; }
+
+echo "==== ${PLAQUE} batch START $(date) meshes=$(meshes) ====" >> "$LOG"
+pass=0
+while [ ! -f "$STOP" ]; do
+  pass=$((pass+1))
+  d0=$(donecnt)
+  echo "==== ${PLAQUE} PASS $pass START $(date) done=$d0 meshes=$(meshes) ====" >> "$LOG"
+  pkill -9 -f '[a]nsys.e' 2>/dev/null; pkill -9 -f '[a]nsys251' 2>/dev/null; sleep 2
+  python "$SCRIPT" "$START" "$END" "$NPROC" >> "$LOG" 2>&1
+  d1=$(donecnt)
+  echo "==== ${PLAQUE} PASS $pass END $(date) done=$d1/$(meshes) ====" >> "$LOG"
+  [ -f "$STOP" ] && break
+  sleep 90    # let the harvey->ws2 sync daemon deliver more wall CSVs
+done
+pkill -9 -f '[a]nsys.e' 2>/dev/null; pkill -9 -f '[a]nsys251' 2>/dev/null
+echo "==== ${PLAQUE} batch EXIT $(date) done=$(donecnt)/$(meshes) (STOP file seen) ====" >> "$LOG"

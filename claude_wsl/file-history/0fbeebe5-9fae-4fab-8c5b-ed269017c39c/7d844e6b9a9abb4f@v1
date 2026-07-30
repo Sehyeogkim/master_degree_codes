@@ -1,0 +1,67 @@
+# Workflow — 라이브 주간 파이프라인 (선정 → engine281 → 보고서)
+
+지난주(월~금) 데이터로 종목을 선정하고, 이번 주 5분봉에 **281 엔진(engine281)** 을 가동해
+진행상황 워크스루 리포트를 만드는 반복 실행 절차. 매주 실행 가능.
+
+산출물 예: `report/live-281-thisweek.html` (종목별 가로스크롤 캔들 + 알고리즘 논리).
+
+---
+
+## 입력 파라미터 (매주 갱신)
+- **선정 주(지난주)**: 월요일~금요일 (예: 2026-06-29 ~ 07-03). 금요일 종가 = 이번 주 **F0**.
+- **가동 주(이번 주)**: 월요일~현재 (예: 2026-07-06 ~ 목 14:00).
+- 스크립트 상단 상수로 지정: `pipeline/select_stocks.py`의 `SEL_START/SEL_FRI/DL_START/DL_END`,
+  `pipeline/run_live_report.py`의 `CUR_START/CUR_END/STAMP`.
+
+---
+
+## Step 1 — 종목 선정 (지난주 기준)
+```bash
+cd /Users/jeff/bullet281/pipeline
+python3 select_stocks.py          # → _top5.json
+```
+규칙(3단계):
+1. **시총 5,000억↑** — `tradingview-screener` (`market_cap_basic > 5e11`, market='korea').
+2. **주간 변동율 상승 Top20** — 변동율 = (금요일 종가 − 월요일 시가) / 월요일 시가. `yfinance` 지난주 일봉.
+3. **그중 거래대금 Top5** — 거래대금 ≈ Σ(일 종가 × 거래량).
+- 결과 `_top5.json`: `[{code, chg, val, fri_close(=F0), mon_open}]`.
+
+## Step 2 — engine281 가동 + 보고서 (이번 주)
+```bash
+python3 run_live_report.py        # → ../report/live-281-thisweek.html
+```
+- `_top5.json` 읽고, 각 종목의 **이번 주 5분봉**을 `yfinance`로 수집(KST 변환, 09:00~15:30).
+- `engine281`의 281 설정(`strategy281.STRAT281`)으로 `run(bars, F0=fri_close)`.
+- 종목별 캔들(월~현재, 요일 구분선) + E(신고점 돌파 진입)·T(익절)·◆(현재가 미청산) + 알고리즘 논리 서술.
+- 미청산 포지션은 **평가손익**(현재가), 금요일 15:15에 실제 청산.
+
+## Step 3 — 확인
+- 브라우저로 `report/live-281-thisweek.html` 열어 검토(또는 `open` 명령).
+- 스크린샷으로 자체 확인 권장(캔들·마커·요일라벨·스크롤).
+
+---
+
+## 데이터 소스 — 반드시 지킬 것 (Notion 'trading view data complition' 근거)
+| 목적 | 도구 | 상태 |
+|---|---|---|
+| 시총/스크리닝 | **tradingview-screener** | ✅ 작동 |
+| 일봉·5분봉 | **yfinance** | ✅ 작동 |
+| KRX 일봉/시총 | pykrx | ❌ 이 환경 전 날짜 오류 |
+| TradingView OHLCV | tvDatafeed | ❌ 익명 접속 타임아웃 |
+
+핵심 팁:
+- **yfinance 티커 = `{6자리코드}.KS`** — KOSPI/KOSDAQ 무관하게 올바르게 해석됨(‑.KQ 불필요).
+- **5분봉 타임스탬프는 UTC** → `tz_convert('Asia/Seoul')` 로 KST 변환 후 09:00~15:30 필터.
+- 회사명은 스크리너 `description` 필드(영문).
+- 거래대금은 Σ(종가×거래량) **근사** — 정밀 필요시 KIS Open API 교차검증.
+- **F0 = 지난주 금요일 종가**(선정 결과의 `fri_close`).
+
+## 주의
+- 종가·가격은 yfinance 기준 — TradingView와 미세차 가능(Notion 경고). 운영 전엔 공식 API로 교차검증.
+- 주 중간(예: 목 오후) 실행 시 마지막 봉은 진행 중일 수 있음 → 리포트는 스냅샷.
+- 금요일 마감 후 재실행하면 실제 청산(금 15:15)이 반영됨.
+
+## 파일
+- `engines/engine281/{engine,strategy281,chart}.py` — 281 엔진.
+- `pipeline/{select_stocks,run_live_report}.py` — 이 워크플로우.
+- 전체 방법론: `report/workflow/workflow-overall.md`.

@@ -1,0 +1,54 @@
+import numpy as np, pyvista as pv, os
+W = "/home/jeff/project/54_analysis/mesh_independent_test_solid/results"
+Z = 0.02
+PCTS = [90, 95, 99]
+
+def gz(m):
+    g = np.asarray(m.point_data["Group"]) == 5
+    X = np.asarray(m.points); wz = X[g][:, 2]
+    return np.where(g & (X[:, 2] > wz.min() + Z) & (X[:, 2] < wz.max() - Z))[0]
+
+def vals(path):
+    m = pv.read(path); i = gz(m)
+    s = np.asarray(m.point_data["Principal_stress"], float)[i]
+    d = {f"p{p}": float(np.nanpercentile(s, p)) for p in PCTS}
+    d["max"] = float(np.nanmax(s)); d["n"] = len(i)
+    return d
+
+# grid label -> (elements, file stem)
+GRIDS = [
+    ("0.08",   577078,   "FC_case_961_a6_0.08_{bc}.vtu"),
+    ("0.065",  1066870,  "FC_case_961_a6_0.0625_{bc}.vtu"),
+    ("0.05*",  2224465,  "FC_case_961_prod_{bc}.vtu"),      # * = production mesh
+    ("0.04",   3606134,  "FC_case_961_a6_0.04_{bc}.vtu"),
+    ("0.032",  6812791,  "FC_case_961_a6_0.032_{bc}.vtu"),
+]
+
+def load(bc):
+    out = []
+    for label, ne, pat in GRIDS:
+        f = f"{W}/{pat.format(bc=bc)}"
+        out.append((label, ne, vals(f) if os.path.exists(f) else None))
+    return out
+
+S = {"peak": load("peak"), "low": load("low")}
+COLS = ["p90", "p95", "p99", "max"]
+
+def table(title, include_032, ref_label):
+    print(f"########## {title} ##########")
+    for bc, nm in (("peak", "SYSTOLIC"), ("low", "DIASTOLIC")):
+        rows = [r for r in S[bc] if include_032 or r[0] != "0.032"]
+        ref = next(v for (l, _, v) in rows if l == ref_label)
+        print(f"  --- {nm} cap max-principal stress  (ref = {ref_label} mm) ---")
+        print(f"    {'size(mm)':9s}{'elem':>10s}" + "".join(f"{c:>12s}" for c in COLS))
+        for label, ne, v in rows:
+            cells = []
+            for c in COLS:
+                diff = abs(v[c] - ref[c]) / ref[c] * 100
+                cells.append(f"{v[c]*1e-4:5.1f}/{diff:4.2f}%")
+            print(f"    {label:9s}{ne:10d}" + "".join(f"{c:>12s}" for c in cells))
+        print()
+
+table("TABLE 1  (finest = 0.032)", True, "0.032")
+table("TABLE 2  (finest = 0.04)", False, "0.04")
+print("* 0.05 row = the actual production mesh (LAP_mesh/solid_LAP_961.msh); values shown are kPa / % vs the reference grid.")

@@ -1,0 +1,67 @@
+# PEAK diagnostic: run each unfinished case in ISOLATION (own port, own log)
+# to definitively separate real mesh defects (neg-Jac/reshape) from transient gRPC.
+# Pool of 3 with well-separated ports -> minimal collision; each case's stdout/stderr
+# goes to solo_logs/case_<ci>.log so error attribution is clean (no interleave).
+import os, sys, time as _t, signal, subprocess, shutil, pathlib
+
+Q = pathlib.Path("/home/jeff/project/54_analysis")
+solver = str(Q / "pymapdl_solve_peak.py")
+LOGDIR = Q / "solo_logs"; LOGDIR.mkdir(exist_ok=True)
+CASES = [15,37,43,74,93,96,97,120,147,149,163,167,282,327,382,419,438,445,485,491,494,495,544,595,643,653,743,744]
+PARN = 3
+NPROC = 20
+TIMEOUT = 9000
+def refdir(ci): return Q/"solid_data"/f"case_{ci}"/"ansys_results_type1_expB_new"
+def peak_vtu(ci): return refdir(ci)/f"FC_case_{ci}_peak.vtu"
+
+print(f"[DIAG] {len(CASES)} cases, POOL {PARN} @ nproc {NPROC}", flush=True)
+
+def spawn(ci, slot):
+    rd = refdir(ci); rd.mkdir(parents=True, exist_ok=True)
+    ex = rd/"peaktmp"; ex.mkdir(exist_ok=True)
+    out = peak_vtu(ci)
+    port = 50400 + slot*30            # 50400/50430/50460 - well separated
+    lf = open(LOGDIR/f"case_{ci}.log", "w")
+    p = subprocess.Popen(["python", solver, str(ci), str(NPROC), str(ex), str(port), str(out)],
+                         stdout=lf, stderr=subprocess.STDOUT, start_new_session=True)
+    return {"ci": ci, "p": p, "ex": ex, "out": out, "lf": lf, "slot": slot, "start": _t.time()}
+
+def classify(ci):
+    if peak_vtu(ci).exists(): return "SUCCESS"
+    try: txt = (LOGDIR/f"case_{ci}.log").read_text(errors="ignore")
+    except Exception: return "NOLOG"
+    if "negative Jacobian" in txt: return "NEGJAC"
+    if "cannot reshape" in txt or "not enough values to unpack" in txt: return "RESHAPE"
+    if "failed to start" in txt or "Error in instance GRPC" in txt: return "gRPC"
+    return "OTHER"
+
+running = {}; ei = 0; results = {}; free_slots = list(range(PARN))
+while ei < len(CASES) or running:
+    while len(running) < PARN and ei < len(CASES):
+        ci = CASES[ei]; ei += 1
+        slot = free_slots.pop(0)
+        running[ci] = spawn(ci, slot)
+        print(f"[start] case {ci} (slot {slot}, port {50400+slot*30})", flush=True)
+    _t.sleep(5)
+    for ci in list(running):
+        r = running[ci]; rc = r["p"].poll()
+        if rc is None and (_t.time()-r["start"]) > TIMEOUT:
+            print(f"[timeout] case {ci}", flush=True)
+            try: os.killpg(os.getpgid(r["p"].pid), signal.SIGKILL)
+            except Exception: pass
+            r["p"].wait(); rc = -9
+        if rc is not None:
+            r["lf"].close()
+            res = classify(ci)
+            results[ci] = res
+            print(f"[done] case {ci} -> {res}", flush=True)
+            shutil.rmtree(r["ex"], ignore_errors=True)
+            free_slots.append(r["slot"]); free_slots.sort()
+            del running[ci]
+
+print("==== DIAG SUMMARY ====", flush=True)
+from collections import defaultdict
+byres = defaultdict(list)
+for ci, res in sorted(results.items()): byres[res].append(ci)
+for res in ["SUCCESS","NEGJAC","RESHAPE","gRPC","OTHER","NOLOG"]:
+    if byres[res]: print(f"{res} ({len(byres[res])}): {' '.join(map(str,byres[res]))}", flush=True)

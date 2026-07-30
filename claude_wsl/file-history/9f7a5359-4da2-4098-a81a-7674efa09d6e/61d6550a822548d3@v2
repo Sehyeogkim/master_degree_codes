@@ -1,0 +1,65 @@
+#!/usr/bin/env python
+"""
+Type-1 solid meshing with a swappable lipid geometry, to test whether reducing
+the roundness / sharpening the lipid end-caps improves mesh quality.
+
+Everything except the lipid STP is identical to the baseline run (no post-mesh
+optimization). Outputs are tagged so runs don't clobber each other.
+
+Usage: python run_solid_0723_lipid.py <case> <nproc> <mesh_size> <lipid_file> <tag>
+"""
+import sys
+import time
+from pathlib import Path
+
+import pandas as pd
+import meshio
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from HXT_meshing_I import gmshing_solid          # baseline module, no optimization
+
+CASE = int(sys.argv[1])
+NPROC = int(sys.argv[2])
+MESH_SIZE = float(sys.argv[3])
+LIPID_FILE = sys.argv[4]
+TAG = sys.argv[5]
+
+geo = HERE / "geo_0723" / f"case_{CASE}"
+out = HERE / "solid_0723" / f"case_{CASE}"
+out.mkdir(parents=True, exist_ok=True)
+
+CSV = Path("/home/jeff/project/54_analysis/pre_data/bin/parameter.csv")
+lesion_length = float(pd.read_csv(CSV).loc[CASE, "lesion_length"])
+
+lipid_path = geo / LIPID_FILE
+assert lipid_path.exists(), f"missing lipid: {lipid_path}"
+print(f"[cfg] case={CASE} nproc={NPROC} mesh_size={MESH_SIZE} lesion_length={lesion_length} lipid={LIPID_FILE} tag={TAG}")
+
+t0 = time.time()
+msh = gmshing_solid(
+    geo / "lumen.stp",
+    geo / "solid.stp",
+    lipid_path,
+    geo / "fc.stp",
+    str(out),
+    nproc=NPROC,
+    Terminal_display=True,
+    save_vtu=False,
+    mesh_size=MESH_SIZE,
+    lesion_length=lesion_length,
+)
+total = time.time() - t0
+
+msh_tag = out / f"solid_type_1_{TAG}.msh"
+Path(msh).replace(msh_tag)
+vtu_tag = out / f"solid_type_1_{TAG}.vtu"
+mesh = meshio.read(str(msh_tag))
+mesh.points *= 0.1
+if mesh.cell_sets:
+    mesh.cell_sets = {}
+meshio.write(str(vtu_tag), mesh)
+print(f"[msh] {msh_tag}")
+print(f"[vtu] {vtu_tag}")
+print(f"[total_time_s] {total:.1f}")
+print("[done]")

@@ -1,0 +1,65 @@
+# PEAK diag round 2: re-run the 15 cases that hit PORT-COLLISION gRPC in round 1.
+# Root cause: round-1 used fixed-per-slot ports -> consecutive cases reused a port
+# still held by the prior MAPDL. Fix: UNIQUE port per case (50500 + ci%90), so no
+# two runs (concurrent OR consecutive) share a port. PARN=2. Per-case logs.
+import os, sys, time as _t, signal, subprocess, shutil, pathlib
+from collections import defaultdict
+
+Q = pathlib.Path("/home/jeff/project/54_analysis")
+solver = str(Q / "pymapdl_solve_peak.py")
+LOGDIR = Q / "solo_logs2"; LOGDIR.mkdir(exist_ok=True)
+CASES = [167,282,327,382,419,438,445,485,491,494,495,544,595,743,744]
+PARN = 2
+NPROC = 20
+TIMEOUT = 9000
+def refdir(ci): return Q/"solid_data"/f"case_{ci}"/"ansys_results_type1_expB_new"
+def peak_vtu(ci): return refdir(ci)/f"FC_case_{ci}_peak.vtu"
+
+print(f"[DIAG2] {len(CASES)} port-collision cases, POOL {PARN} @ nproc {NPROC}, unique ports", flush=True)
+
+def spawn(ci):
+    rd = refdir(ci); rd.mkdir(parents=True, exist_ok=True)
+    ex = rd/"peaktmp"; ex.mkdir(exist_ok=True)
+    out = peak_vtu(ci)
+    port = 50500 + (ci % 90)          # unique-ish per case, wide spread
+    lf = open(LOGDIR/f"case_{ci}.log", "w")
+    p = subprocess.Popen(["python", solver, str(ci), str(NPROC), str(ex), str(port), str(out)],
+                         stdout=lf, stderr=subprocess.STDOUT, start_new_session=True)
+    return {"ci": ci, "p": p, "ex": ex, "out": out, "lf": lf, "start": _t.time()}
+
+def classify(ci):
+    if peak_vtu(ci).exists(): return "SUCCESS"
+    try: txt = (LOGDIR/f"case_{ci}.log").read_text(errors="ignore")
+    except Exception: return "NOLOG"
+    if "negative Jacobian" in txt: return "NEGJAC"
+    if "cannot reshape" in txt or "not enough values to unpack" in txt: return "RESHAPE"
+    if "failed to start" in txt or "Error in instance GRPC" in txt: return "gRPC"
+    return "OTHER"
+
+running = {}; ei = 0; results = {}
+while ei < len(CASES) or running:
+    while len(running) < PARN and ei < len(CASES):
+        ci = CASES[ei]; ei += 1
+        running[ci] = spawn(ci)
+        print(f"[start] case {ci} (port {50500+ci%90})", flush=True)
+        _t.sleep(3)                   # small stagger so 2 MAPDLs don't race startup
+    _t.sleep(5)
+    for ci in list(running):
+        r = running[ci]; rc = r["p"].poll()
+        if rc is None and (_t.time()-r["start"]) > TIMEOUT:
+            print(f"[timeout] case {ci}", flush=True)
+            try: os.killpg(os.getpgid(r["p"].pid), signal.SIGKILL)
+            except Exception: pass
+            r["p"].wait(); rc = -9
+        if rc is not None:
+            r["lf"].close()
+            res = classify(ci); results[ci] = res
+            print(f"[done] case {ci} -> {res}", flush=True)
+            shutil.rmtree(r["ex"], ignore_errors=True)
+            del running[ci]
+
+print("==== DIAG2 SUMMARY ====", flush=True)
+byres = defaultdict(list)
+for ci, res in sorted(results.items()): byres[res].append(ci)
+for res in ["SUCCESS","NEGJAC","RESHAPE","gRPC","OTHER","NOLOG"]:
+    if byres[res]: print(f"{res} ({len(byres[res])}): {' '.join(map(str,byres[res]))}", flush=True)

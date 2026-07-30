@@ -1,0 +1,21 @@
+"""function2 — 엔진 가동.
+
+종목·기간·F0을 받아 5분봉(data_source.bars_5m: tvDatafeed 메인 → yfinance fallback)을 받고
+엔진(default engine281 = strategy281.STRAT281)을 돌려 렌더에 필요한 섹션 번들을 반환한다.
+엔진/전략을 주입 가능 → 다른 엔진도 이 파일 수정 없이 plug-in.
+"""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "engines", "engine281"))
+from engine import run
+from strategy281 import STRAT281
+from data_source import bars_5m
+
+
+def run_engine(code, start, end, F0, capital=10_000_000.0, strat=STRAT281, engine_run=run):
+    """(bars, events, ctx, source) 번들 반환. 5분봉 없으면 None."""
+    bars, src = bars_5m(code, start, end)
+    if not bars:
+        return None
+    events, ctx = engine_run(bars, F0, capital=capital, **strat)
+    return dict(code=code, F0=F0, bars=bars, events=events, ctx=ctx, source=src, nbar=len(bars))

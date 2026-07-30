@@ -1,0 +1,578 @@
+The list of all files belonging to the 'Elsarticle Bundle' is
+%% given in the file `manifest.txt'.
+%% 
+%% Template article for Elsevier's document class `elsarticle'
+%% with numbered style bibliographic references
+%% SP 2008/03/01
+%% $Id: elsarticle-template-num.tex 272 2025-01-09 17:36:26Z rishi $
+%%
+\documentclass[preprint,12pt]{elsarticle}
+\usepackage{xcolor,color}
+\usepackage{soul}
+
+%% Use the option review to obtain double line spacing
+%% \documentclass[authoryear,preprint,review,12pt]{elsarticle}
+
+%% Use the options 1p,twocolumn; 3p; 3p,twocolumn; 5p; or 5p,twocolumn
+%% for a journal layout:
+%% \documentclass[final,1p,times]{elsarticle}
+%% \documentclass[final,1p,times,twocolumn]{elsarticle}
+%% \documentclass[final,3p,times]{elsarticle}
+%% \documentclass[final,3p,times,twocolumn]{elsarticle}
+%% \documentclass[final,5p,times]{elsarticle}
+%% \documentclass[final,5p,times,twocolumn]{elsarticle}
+
+%% For including figures, graphicx.sty has been loaded in
+%% elsarticle.cls. If you prefer to use the old commands
+%% please give \usepackage{epsfig}
+
+%% The amssymb package provides various useful mathematical symbols
+\usepackage{amssymb}
+%% The amsmath package provides various useful equation environments.
+\usepackage{amsmath}
+%% The amsthm package provides extended theorem environments
+%% \usepackage{amsthm}
+\usepackage{booktabs}
+\usepackage{pdflscape}
+\usepackage{makecell}
+\usepackage{kotex}
+\usepackage{multirow}
+
+%% The lineno packages adds line numbers. Start line numbering with
+%% \begin{linenumbers}, end it with \end{linenumbers}. Or switch it on
+%% for the whole article with \linenumbers.
+%% \usepackage{lineno}
+
+\journal{Computer Methods and Programs in Biomedicine}
+
+\begin{document}
+
+\begin{frontmatter}
+
+%% Title, authors and addresses
+
+%% use the tnoteref command within \title for footnotes;
+%% use the tnotetext command for theassociated footnote;
+%% use the fnref command within \author or \affiliation for footnotes;
+%% use the fntext command for theassociated footnote;
+%% use the corref command within \author for corresponding author footnotes;
+%% use the cortext command for theassociated footnote;
+%% use the ead command for the email address,
+%% and the form \ead[url] for the home page:
+%% \title{Title\tnoteref{label1}}
+%% \tnotetext[label1]{}
+%% \author{Name\corref{cor1}\fnref{label2}}
+%% \ead{email address}
+%% \ead[url]{home page}
+%% \fntext[label2]{}
+%% \cortext[cor1]{}
+%% \affiliation{organization={},
+%%             addressline={},
+%%             city={},
+%%             postcode={},
+%%             state={},
+%%             country={}}
+%% \fntext[label3]{}
+
+\title{Snapshot-based estimation of vessel-wall stress under pulsatile hemodynamic loading}
+
+%% use optional labels to link authors explicitly to addresses:
+%% \author[label1,label2]{}
+%% \affiliation[label1]{organization={},
+%%             addressline={},
+%%             city={},
+%%             postcode={},
+%%             state={},
+%%             country={}}
+%%
+%% \affiliation[label2]{organization={},
+%%             addressline={},
+%%             city={},
+%%             postcode={},
+%%             state={},
+%%             country={}}
+
+\author[label1]{Se Hyeog Kim\fnref{equal}}
+\ead{kis99156@kaist.ac.kr}
+
+\author[label1]{Wonjin Choi\fnref{equal}}
+\ead{wj0220@kaist.ac.kr}
+
+\author[label1]{Hyeok Sul Kwon}
+\ead{soori1029@kaist.ac.kr}
+
+\author[label1]{Chanhee An}
+\ead{an981031@kaist.ac.kr}
+
+\author[label1]{Hyun Jin Kim\corref{cor1}}
+\ead{kim.hyunjin@kaist.ac.kr}
+
+\affiliation[label1]{
+    organization={Department of Mechanical Engineering, Korea Advanced Institute of Science and Technology},
+    addressline={291 Daehak-ro, Yuseong-gu},
+    city={Daejeon},
+    postcode={34141},
+    country={Republic of Korea}
+}
+
+\fntext[equal]{These authors contributed equally to this work.}
+\cortext[cor1]{Corresponding author. E-mail address: kim.hyunjin@kaist.ac.kr}
+
+%% Abstract
+%% Text of abstract
+
+\begin{abstract}
+\noindent\textbf{Background and Objective:}
+Fully coupled three-dimensional (3D) fluid--structure interaction (FSI) simulations can quantify vessel-wall stress under pulsatile hemodynamic loading, but their high computational cost limits repeated patient-specific evaluations and sensitivity analyses. This study aimed to develop a snapshot-based framework for efficient estimation of localized vessel-wall stress at selected cardiac phases, particularly in vascular models with limited cyclic wall deformation.
+
+\noindent\textbf{Methods:}
+The proposed framework integrates a one-dimensional reduced-order hemodynamic model with steady 3D fluid and structural analyses. Pulsatile pressure and flow-rate waveforms were first predicted using the reduced-order model informed by limited 3D solution data. Boundary conditions were then extracted at representative cardiac phases and applied to steady 3D fluid simulations to reconstruct wall traction. The computed wall traction was transferred to steady structural analyses to estimate vessel-wall stress. The framework was evaluated against fully coupled pulsatile three-dimensional FSI simulations in an idealized stenosed coronary model, a subject-specific coronary artery model, and a subject-specific abdominal aortic aneurysm model.
+
+\noindent\textbf{Results:}
+Across all cases, the proposed method reproduced von Mises stress fields with low spatial relative $L_2$-norm error at the selected cardiac phases. The maximum relative $L_2$-norm stress error was below 1\% in the idealized coronary model, below 5\% in the subject-specific coronary model, and below 2\% in the aneurysm model. Equivalent strain showed larger, localized discrepancies, particularly near complex geometric regions and phases associated with rapid wall motion. The proposed framework reduced computational cost by more than 30-fold compared with fully coupled three-dimensional FSI simulations.
+
+\noindent\textbf{Conclusions:}
+The snapshot-based framework provides a computationally efficient, stress-oriented strategy for selected-phase vessel-wall assessment under pulsatile hemodynamic loading. The method may support repeated patient-specific biomechanical analyses when fully coupled transient FSI simulations are computationally prohibitive.
+\end{abstract}
+
+%%Graphical abstract
+%\begin{graphicalabstract}
+%\includegraphics[width = 0.95\textwidth]{Figures/grabs}
+%\end{graphicalabstract}
+
+\begin{highlights}
+\item A snapshot-based framework estimates vessel-wall stress at selected cardiac phases.
+\item Global stress errors remained below 5\% across all vascular models.
+\item The framework reduced computational cost by more than 30-fold.
+\item Stress-oriented estimates were obtained without repeated transient FSI..
+\end{highlights}
+
+\begin{keyword}
+Fluid--structure interaction \sep Vessel wall stress \sep Reduced-order modeling \sep Pulsatile hemodynamics \sep Snapshot-based coupling \sep Cardiovascular biomechanics
+\end{keyword}
+
+\end{frontmatter}
+
+%% Add \usepackage{lineno} before \begin{document} and uncomment 
+%% following line to enable line numbers
+%% \linenumbers
+
+%% main text
+%%
+
+%% Use \section commands to start a section
+
+\section{Introduction}
+\label{Introduction}
+
+Cardiovascular computational modeling has become an essential tool for the quantitative analysis and prediction of complex physiological phenomena~\cite{colebank2024guidelines, macraild2024accelerated}. The cardiovascular system is inherently nonlinear and dynamically coupled, with interactions among flow, pressure, vessel-wall deformation, and upstream and downstream vascular responses governing overall hemodynamics. In particular, vascular tissues are subjected to pulsatile loading generated by the cardiac cycle, leading to continuous adaptation in response to physiological and metabolic demands. As a result, conventional image-based simulations assuming rigid vessel walls are often insufficient to characterize the underlying biomechanical environment~\cite{gu2024comprehensive, schahab2025abdominal}. Accordingly, integrated hemodynamic and biomechanical quantities should be evaluated under dynamic pulsatile conditions, particularly when wall deformation and structural stress are of interest.
+
+Fluid–structure interaction (FSI) analyses are therefore widely employed in cardiovascular biomechanics to evaluate hemodynamic and biomechanical quantities in an integrated manner~\cite{schahab2025abdominal, lopes2019influence, athani2024fsi_review, morab2024computational, saib2025fsi_review, debruyne1994cfr, pijls1995ffr, mcgarvey2026lesion, pedrigi2014stress, Cheng1993, li2007structural, wang2025role, marcinno2024computational}. Despite these advantages, high-resolution three-dimensional (3D) pulsatile simulations, particularly fully coupled FSI analyses, remain computationally demanding. This computational burden limits their practical use in large-scale patient cohort studies and repeated simulations for uncertainty quantification, sensitivity analysis, and patient-specific computational assessment~\cite{athani2024fsi_review, lissoni2025computational}.
+
+To address these challenges, several strategies have been proposed to reduce the computational cost of pulsatile three-dimensional (3D) simulations. Rigid-wall computational fluid dynamics (CFD) models are widely used due to their simplicity and efficiency; however, they neglect vessel-wall deformation and therefore cannot directly provide structural stress fields~\cite{lopes2019influence, athani2024fsi_review}. One-way or weakly coupled approaches improve efficiency by decoupling fluid and structural analyses, but still require transient 3D simulations to obtain time-resolved loading conditions~\cite{syed2023fsi_review}. Reduced-order hemodynamic models, including one-dimensional (1D) and lumped parameter representations, offer substantial computational savings and can capture global pulsatile behavior~\cite{shi2011review, macraild2024accelerated}. However, these models do not directly provide localized 3D vessel-wall stress distributions required for structural assessment. More recently, surrogate and machine-learning-based approaches have been introduced to accelerate high-fidelity simulations~\cite{pegolotti2024learning, barzegar2025surrogate, grieco2026wss}. While effective, these methods typically require extensive high-fidelity training data and additional validation efforts.
+
+Despite these developments, computational approaches that efficiently estimate localized 3D vessel-wall stress at selected cardiac phases, without repeated fully coupled FSI simulations or pre-trained surrogate models, remains limited.
+
+Motivated by this need, the present study develops a snapshot-based coupling framework for efficient estimation of vessel-wall stress under pulsatile hemodynamic loading. The proposed approach integrates a 1D reduced-order hemodynamic model with steady 3D fluid and structural analyses. The 1D model is first calibrated using limited 3D solution data and then used to predict pulsatile pressure and flow-rate waveforms. Representative time points are selected from these waveforms, and the corresponding boundary pressure and flow conditions are extracted and applied to steady 3D fluid simulations to reconstruct localized wall traction. The resulting traction is then transferred to steady structural analyses to estimate vessel-wall stress at the selected cardiac phases.
+
+The proposed methodology is evaluated against fully coupled 3D FSI simulations in an idealized coronary artery model, a subject-specific coronary artery model, and a subject-specific abdominal aortic aneurysm model. The results demonstrate that the framework achieves more than a 30-fold reduction in computational cost while reproducing localized von Mises stress fields with low global error compared with fully coupled 3D FSI simulations.
+
+\section{Methods}
+\label{Methods}
+\subsection{Proposed snapshot-based coupling framework}
+
+The proposed framework provides a computationally efficient approximation of localized vessel-wall stress at selected cardiac phases while avoiding repeated fully coupled 3D pulsatile FSI simulations. The method consists of three sequential steps.
+
+First, a 1D pulsatile flow simulation based on a ROM is performed to compute the temporal waveforms of pressure and flow rate, denoted by $P(t)$ and $Q(t)$, throughout the vascular tree, including the inlet and outlet boundaries. From these waveforms, boundary condition values at a specific time point $t_a$, namely $P_{\mathrm{BC}}(t_a)$ and $Q_{\mathrm{BC}}(t_a)$, are extracted.
+
+Second, the extracted boundary conditions are applied to a 3D steady-state fluid simulation. Although temporally steady, this simulation preserves the geometric complexity of the vascular domain and enables computation of the total wall traction, defined as the sum of pressure and viscous shear stress acting on the luminal surface.
+
+Finally, a 3D steady structural analysis of the vessel wall is performed by prescribing the computed wall traction as a boundary condition. The resulting stress field is interpreted as an approximation of the structural response corresponding to the selected time point $t_a$ under pulsatile physiological loading. An overview of the proposed snapshot-based coupling strategy is provided in Fig.~\ref{fig:fig1}.
+
+\subsubsection{One-dimensional reduced-order hemodynamics}
+
+Pulsatile blood flow is computed by solving the following 1D governing equations under the assumption of a rigid vessel wall:
+\begin{gather}
+\frac{\partial Q}{\partial z} = 0, \\
+\frac{\partial Q}{\partial t}
++ \frac{\partial}{\partial z} \left( \alpha \frac{Q^{2}}{S} \right)
++ \frac{S}{\rho}\frac{\partial P}{\partial z}
+= N \frac{Q}{S},
+\end{gather}
+where $S$ denotes the cross-sectional area, $z$ is the axial coordinate, $\alpha$ is the momentum correction coefficient, and $N$ represents the viscous resistance term. A parabolic velocity profile is assumed, with $\alpha = 4/3$ and $N = 8\pi\nu$.
+
+While these equations efficiently capture global pulsatile hemodynamics, they are limited in representing pressure losses in diseased or geometrically complex regions, such as stenoses and bifurcations. To address this limitation, the ROM coefficients are adjusted using limited 3D solution data by modeling pressure drop as a nonlinear function of the volumetric flow rate~\cite{choi2025developing}:
+\begin{align}
+\Delta P = a Q + b Q^2 + c \frac{dQ}{dt},\label{ROM_equation}
+\end{align}
+where $Q$ denotes the volumetric flow rate. The coefficients $a$, $b$, and $c$ are identified based on minimal 3D solution data~\cite{choi2025developing}. The resulting ROM provides rapid, accurate computation of pressure and flow waveforms for various pulsatile conditions.
+
+\subsubsection{Snapshot selection and steady fluid--structure coupling}
+
+Using the ROM, pressure and flow-rate waveforms can be efficiently obtained at arbitrary spatial locations under prescribed pulsatile conditions. Based on these waveforms, representative time instants, denoted by $t_a$, are selected to capture key phases associated with significant structural response.
+
+For each selected time point, a steady three-dimensional fluid simulation is performed by prescribing the corresponding boundary conditions extracted from the ROM. Although temporally steady, this formulation preserves the geometric fidelity of the domain and enables efficient evaluation of wall loading. The resulting wall traction is defined as:
+
+
+\begin{align}
+\mathbf{t}_{\mathrm{wall}}(t_a) = \boldsymbol{\sigma}_f(t_a)\mathbf{n}
+\quad \text{on } \Gamma_{\mathrm{wall}}.
+\end{align}
+
+The computed wall traction is then transferred to the corresponding surface of the solid domain and applied as a boundary condition for structural analysis. This transfer is performed using a surface mapping procedure to ensure consistency between the fluid and solid discretizations. The structural problem is solved under a quasi-static assumption, with fixed inlet and outlet boundaries, leading to:
+\begin{align}
+\nabla \cdot \boldsymbol{\sigma}_s + \mathbf{f}_s = 0
+\quad \text{in } \Omega_s.
+\end{align}
+
+This framework assumes that the instantaneous fluid-induced traction provides the dominant contribution to the stress field at each selected time point. The influence of the neglected transient coupling effects was assessed by comparison with fully coupled FSI simulations. Accordingly, the method is designed to approximate instantaneous stress states rather than the full transient dynamics of the coupled system.
+
+\subsubsection{Three-dimensional governing equations at selected time instants}
+
+Three-dimensional fluid and structural analyses were performed by solving the incompressible Navier--Stokes equations and continuity equation in the fluid domain, and Cauchy’s equation of motion in the solid domain~\cite{zhu2022svfsi}.
+
+For the reference fully coupled FSI simulations, the fluid and solid domains are coupled using an arbitrary Lagrangian--Eulerian (ALE) formulation, which enables consistent treatment of mesh deformation and fluid--structure interaction at the interface~\cite{zhu2022svfsi}.
+
+The vessel wall is modeled as an isotropic linear elastic material. Although vascular tissues exhibit nonlinear, anisotropic, and hyperelastic behavior~\cite{masson2011carotid}, linear elasticity has been widely adopted in computational biomechanics due to its numerical robustness and reduced parametric uncertainty~\cite{lopes2019influence, li2022finite, shakya2024fluid, benitez2021evaluating}. In the present study, this simplified constitutive model is employed to isolate and evaluate the performance of the proposed computational framework, rather than to capture detailed material behavior.
+
+%========================================================
+\subsection{Validation strategy and error metrics}
+\label{subsubsec:validation}
+
+The proposed framework was validated primarily by comparing von Mises stress distributions in the solid domain against those obtained from fully coupled reference FSI simulations. Equivalent strain was also evaluated as a diagnostic measure of deformation-field consistency. Comparisons were performed at selected time instants within the cardiac cycle representing both characteristic hemodynamic phases and periods of pronounced wall motion.
+
+The selected time points included end-diastole, peak systole, and mid-diastole, identified from the pressure waveform. In addition, time points corresponding to the maximum and minimum rates of wall-motion-induced volume change were included, as these phases were expected to yield the largest discrepancies between the snapshot-based approximation and the reference FSI solution.
+
+Let $g_i^{\mathrm{FSI}}(t_a)$ and $g_i^{\mathrm{Prop}}(t_a)$ denote a structural quantity at solid node $i$ and selected time point $t_a$, obtained from the reference FSI simulation and the proposed method, respectively. In this study, $g$ represents either the von Mises stress ($\sigma_{VM}$) or the equivalent strain ($\varepsilon$). All comparisons were conducted on an identical solid mesh to ensure node-wise consistency.
+
+To quantify the discrepancy in the structural field, a spatial relative $L_2$-norm error was computed at each selected time point:
+\begin{equation}
+e_{L_2}^{g}(t_a)
+=
+\frac{
+\left(
+\sum_{i=1}^{N}
+\left[
+g_i^{\mathrm{Prop}}(t_a)
+-
+g_i^{\mathrm{FSI}}(t_a)
+\right]^2
+\right)^{1/2}
+}{
+\left(
+\sum_{i=1}^{N}
+\left[
+g_i^{\mathrm{FSI}}(t_a)
+\right]^2
+\right)^{1/2}
+},
+\label{eq:L2_error}
+\end{equation}
+where $N$ is the total number of solid nodes. 
+This global normalization avoids point-wise division by small local reference values and provides an integrated measure of field-level discrepancy.
+
+In addition to the structural error metrics, instantaneous hemodynamic discrepancies were evaluated at the selected time points to characterize the fluid loading mismatch between the proposed method and the reference FSI solution. Pressure error was computed as the point-wise relative error over the fluid domain:
+\begin{equation}
+e_{P,k}(t_a)
+=
+\left|
+\frac{
+P_k^{\mathrm{Prop}}(t_a)
+-
+P_k^{\mathrm{FSI}}(t_a)
+}{
+P_k^{\mathrm{FSI}}(t_a)
+}
+\right|
+\times 100,
+\label{eq:pressure_error}
+\end{equation}
+where $k$ denotes a node in the fluid domain. For the flow rate, absolute error was used instead of relative error because small instantaneous flow-rate values can artificially inflate relative errors:
+\begin{equation}
+e_{Q,j}(t_a)
+=
+\left|
+Q_j^{\mathrm{Prop}}(t_a)
+-
+Q_j^{\mathrm{FSI}}(t_a)
+\right|,
+\label{eq:flow_error}
+\end{equation}
+where $j$ denotes an inlet or outlet boundary. Mean and maximum values were summarized over the selected time points and corresponding sampling locations. For the contour-based comparison, nodal absolute errors in von Mises stress and equivalent strain were visualized at selected time points. 
+
+\subsection{Computational details}
+\subsubsection{Geometrical models}
+
+Three representative geometrical models were considered to evaluate the proposed framework across increasing levels of anatomical and hemodynamic complexity. The geometrical configurations, boundary-condition assignments, and case-specific parameters are summarized in Fig.~\ref{fig:fig2}--\ref{fig:fig4}.
+
+An idealized model was constructed to represent a simplified segment of the left anterior descending (LAD) coronary artery, as shown in Fig.~\ref{fig:fig2}. The model had a total length of \(L = 10~\mathrm{cm}\), a lumen radius of \(R = 0.1~\mathrm{cm}\), and a wall thickness of \(t = 0.02~\mathrm{cm}\). To mimic stenotic disease, an eccentric stenosis with a degree of stenosis (DoS) of 55\% was introduced in the distal segment.
+A subject-specific coronary artery geometry was reconstructed from computed tomography (CT) images to assess the framework under anatomically realistic conditions, as shown in Fig.~\ref{fig:fig3}. Three stenotic lesions were identified in the left main (LM), mid-LAD, and distal LAD segments, with an average DoS of 69\%.
+A subject-specific abdominal aortic aneurysm (AAA) geometry was reconstructed from CT images to evaluate the applicability of the framework to vessels with substantial luminal enlargement and complex flow patterns, as shown in Fig.~\ref{fig:fig4}.
+
+The fluid and solid domains were discretized using tetrahedral meshes generated with the commercial mesh-generation software MeshSim (Simmetrix Inc., Clifton Park, NY, USA). For the fluid domain, three boundary-layer elements were generated near the wall to improve the resolution of near-wall hemodynamics.
+
+\subsubsection{Boundary conditions and material properties}
+\label{subsubsection_Hemodynamic_BC}
+
+Hemodynamic boundary conditions were prescribed according to the characteristics of each geometrical model. The case-specific boundary-condition configurations and parameter values are provided together with the corresponding geometries in Fig.~\ref{fig:fig2}--\ref{fig:fig4}.
+
+For the solid domain, the inlet and outlet rims were fixed in all cases, and fluid-induced traction was applied to the luminal surface. The same structural boundary-condition framework was used in both the fully coupled reference FSI simulations and the proposed snapshot-based method to ensure direct comparability.
+
+Representative material properties were assigned based on literature values. For the coronary artery models, the vessel wall was modeled with a Young's modulus of \(E = 1.0 \times 10^7~\mathrm{dynes/cm^2}\), Poisson's ratio \(\nu = 0.45\), and density \(\rho_s = 1.1~\mathrm{g/cm^3}\)~\cite{Cheng1993, Hsu2014, Chen2021, Jiang2022}. For the AAA model, a stiffer wall response was assumed, with \(E = 6.0 \times 10^7~\mathrm{dynes/cm^2}\), \(\nu = 0.49\), and \(\rho_s = 1.0~\mathrm{g/cm^3}\)~\cite{joldes2016simple, figueroa2006coupled}. Blood was modeled as an incompressible Newtonian fluid with density \(\rho_f = 1.06~\mathrm{g/cm^3}\) and dynamic viscosity \(\mu_f = 0.04~\mathrm{poise}\).
+
+\subsubsection{Simulation details}
+
+All 3D simulations, including steady fluid analyses, prestressing analyses, pulsatile rigid-wall simulations, and fully coupled FSI simulations, were performed using \texttt{svFSI}~\cite{zhu2022svfsi}. These simulations were conducted on a high-performance computing cluster equipped with Intel\textsuperscript{\texttrademark} Xeon processors with 96 cores across two sockets and 257~GB of RAM. The 1D ROM simulations were performed using an in-house C++ solver on a desktop workstation equipped with an Intel\textsuperscript{\texttrademark} Core i7-12700K 3.61~GHz processor and 64~GB of RAM.
+
+To obtain the prestressed configuration of the vessel wall, cycle-averaged inlet pressure and outlet flow rates were first computed from the converged pulsatile solution and applied in a steady-state fluid simulation. The resulting time-averaged wall traction was then imposed on the structural domain in a prestressing analysis~\cite{zhu2022svfsi}. The prestressed configuration was used to initialize all structural simulations, including both the fully coupled FSI simulations and the proposed snapshot-based analyses.
+
+For validation of the reduced-order hemodynamic predictions, additional pulsatile rigid-wall 3D fluid simulations were performed until cycle convergence. These simulations provided high-fidelity reference solutions in the absence of wall deformation and were used to assess the accuracy of the 1D ROM predictions.
+
+\section{Results}
+\label{Results}
+
+The proposed snapshot-based framework was evaluated using three representative models: an idealized LAD coronary artery model, a subject-specific coronary artery model, and a subject-specific AAA model. For each case, hemodynamic responses from the 1D ROM, pulsatile rigid-wall 3D fluid simulation, and fully coupled FSI simulation were compared.
+
+Five representative cardiac phases were selected: end-diastole (\(t_1\)), maximum wall-induced volume-change rate (\(t_2\)), peak systole (\(t_3\)), minimum wall-induced volume-change rate (\(t_4\)), and mid-diastole (\(t_5\)). In the subject-specific coronary and AAA models, \(t_2\) and \(t_4\) occurred near the acceleration and deceleration phases of the flow-rate waveform, respectively. For the idealized LAD model, an additional acceleration-phase instant (\(t^{*}\)) was included because the acceleration phase did not coincide with the extrema of the wall-induced volume-change rate.
+
+%Across all models, the 1D reduced-order and rigid-wall 3D simulations showed close agreement in the predicted pressure and flow waveforms, indicating that the 1D ROM accurately captures global hemodynamic behavior. In contrast, differences were observed when the proposed method was compared with the fully coupled FSI solution, reflecting the influence of wall motion on instantaneous hemodynamic loading. 
+
+\subsection{Idealized LAD coronary artery model}
+\label{subsec:results_case1}
+
+The hemodynamic responses of the idealized LAD model are shown in Fig.~\ref{fig:fig5}. The selected representative time points, wall-induced volume-change rate, pressure waveforms, and flow-rate waveforms are shown in Fig.~\ref{fig:fig5}(a)--(d), respectively. Because the inlet pressure waveform was prescribed, all three approaches produced identical inlet pressure profiles, and similar waveform was also observed at the outlet. The mean and maximum pressure differences between the proposed method and the reference FSI solution were 0.35\% and 1.37\%, respectively.
+
+The main discrepancies were observed in the flow-rate response of the fully coupled FSI simulation. Positive wall-induced volume-change rates occurred during early systole, whereas negative values occurred during late systole, corresponding to vessel expansion followed by recoil. During the expansion phase, the inlet flow rate in the FSI solution exceeded that of the rigid-wall simulation, whereas the opposite trend was observed during recoil. A consistent temporal pattern was also observed in the outlet flow-rate waveform. The mean and maximum absolute flow-rate differences between the proposed method and the reference FSI solution were 0.0164 and 0.1068~cc/s, respectively.
+
+The largest discrepancies occurred near the time points corresponding to the extrema of the wall-induced volume-change rate. These points, together with the additional acceleration-phase point \(t^{*}\), are indicated in Fig.~\ref{fig:fig5}(a). The spatial relative \(L_2\)-norm errors of von Mises stress and equivalent strain are summarized in Table~\ref{tab:error}. For this model, the mean and maximum stress errors over the selected time points were 0.433\% and 0.96\%, respectively. The corresponding mean and maximum strain errors were 6.85\% and 14.52\%, respectively. The stress error remained below 1\% at all evaluated time points, whereas the strain error was larger, reflecting the greater sensitivity of deformation-gradient-based quantities to local differences in the displacement field.
+
+\subsection{Subject-specific coronary artery model}
+\label{subsec:results_case2}
+
+The hemodynamic responses of the subject-specific coronary artery model are shown in Fig.~\ref{fig:fig6}. The pressure waveforms in the right coronary branches closely followed the inlet waveform, whereas the branches distal to the LM stenosis exhibited pronounced waveform distortion and temporal delay. This effect was most evident in the left coronary tree, reflecting the presence of serial stenotic segments. The mean and maximum pressure differences between the proposed method and the reference FSI solution were 3.21\% and 11.66\%, respectively.
+
+At the inlet, the flow-rate waveform was nearly identical among the reduced-order, rigid-wall, and fully coupled simulations because it was governed by the same heart model. By contrast, branch-level differences emerged at the outlets. 
+The magnitude of wall deformation observed in the reference FSI simulations was approximately 3\%--5\% over the cardiac cycle, consistent with reported \textit{in vivo} measurements~\cite{Kelle2011}. The fully coupled FSI solution showed substantial wall-induced volume-change rates during systole, corresponding to vessel expansion followed by recoil. During expansion, the outlet flow rates in the LAD and left circumflex (LCX) branches were lower than those predicted by the rigid-wall simulation, whereas the opposite trend was observed during recoil. The right coronary artery (RCA) branches showed only minor deviations. The mean and maximum absolute flow-rate differences between the proposed method and the reference FSI solution were 0.0203 and 0.124~cc/s, respectively.
+
+The representative time points are indicated in Fig.~\ref{fig:fig6}(a), and the corresponding spatial relative errors of the von Mises stress field are summarized in Table~\ref{tab:error}. For this model, the mean and maximum stress errors were 3.00\% and 4.45\%, respectively, whereas the mean and maximum strain errors were 12.63\% and 17.75\%, respectively. 
+%Among the three models, the subject-specific coronary artery model showed the largest errors, consistent with the presence of serial stenoses and branch-level geometric complexity.
+
+\subsection{Subject-specific aortic aneurysm model}
+\label{subsec:results_case3}
+
+The hemodynamic responses of the subject-specific AAA model are shown in Fig.~\ref{fig:fig7}. Because the inlet flow-rate waveform was prescribed, all three simulations produced identical inlet flow profiles. Consequently, differences were observed primarily in the pressure distribution and outlet flow response. The mean and maximum pressure differences between the proposed method and the reference FSI solution were 1.51\% and 7.37\%, respectively. The corresponding mean and maximum absolute flow-rate differences were 1.5656 and 13.46~cc/s, respectively.
+
+The wall deformation observed in the reference FSI simulation was approximately 1\%, consistent with clinical observations~\cite{aneurysm_vertification_wall_strain}. The wall-induced volume-change rate exhibited positive values during early systole and negative values during late systole, indicating expansion followed by recoil of the aneurysmal wall. During expansion, the FSI solution predicted lower outlet flow rates than the rigid-wall simulation, whereas increased outlet flow rates were observed during recoil. Pressure differences also emerged during systole: the fully coupled solution produced higher inlet pressure and lower outlet pressure than the rigid-wall case, resulting in a larger pressure drop across the aneurysmal segment.
+
+The selected time instants are marked in Fig.~\ref{fig:fig7}(a), and the corresponding global relative \(L_2\)-norm errors of von Mises stress and equivalent strain are reported in Table~\ref{tab:error}. The mean and maximum stress errors were 0.702\% and 1.12\%, respectively, whereas the mean and maximum strain errors were 7.09\% and 11.87\%, respectively. Larger errors occurred near systolic phases and phases associated with rapid wall motion, but the overall stress error remained low across all evaluated time points.
+
+\subsection{Computational cost comparison}
+\label{subsec:computational_cost}
+
+The computational costs of the proposed framework and the reference fully coupled FSI simulations are summarized in Table~\ref{tab:computational_cost}. For the proposed framework, the total cost consists of four components: (i) transient ramped-flow simulation for determining the 1D ROM coefficients, (ii) 1D pulsatile simulation, (iii) steady 3D fluid simulations, and (iv) steady structural simulations at the selected time points. The transient ramped-flow simulation is required only once for each geometry; after the ROM coefficients are identified, additional snapshot evaluations can be performed without repeating this preprocessing step.
+
+By contrast, the reference FSI analysis requires time-resolved 3D fluid--structure coupling over multiple cardiac cycles until a periodic solution is reached. Therefore, the primary computational advantage of the proposed framework arises from using reduced-order hemodynamic prediction and steady 3D snapshot evaluations instead of performing repeated fully coupled transient 3D FSI simulations for each evaluated condition.
+
+Across all three models, the proposed framework reduced the overall computational cost by more than an order of magnitude, with greater than 30-fold reduction in all cases. The savings were more pronounced for geometries requiring finer spatial resolution or longer simulation times to achieve periodic convergence in the fully coupled FSI analysis.
+
+\section{Discussion}
+\label{discussion}
+This study showed that localized vessel-wall stress under pulsatile loading can be approximated efficiently using ROM-derived hemodynamic snapshots and steady 3D fluid–-structure analyses in vascular models with limited cyclic wall deformation. Across three vascular models, the proposed framework reproduced stress distributions from reference transient FSI simulations with low global relative $L_2$-norm error while reducing computational cost by more than 30-fold.
+
+The instantaneous error analysis provides insight into the origin of the hemodynamic and structural discrepancies. As shown in the Results, the overall pressure field was reproduced with relatively small errors, whereas the instantaneous flow-rate discrepancies were more sensitive to the neglect of wall deformation and transient fluid storage effects. Because pressure constitutes the dominant normal component of the transferred wall traction, the small pressure discrepancies are consistent with the low global error observed in the von Mises stress field. In contrast, flow-rate differences appear to reflect wall-motion-induced temporary flow storage, delayed downstream transmission, and local flow redistribution rather than a systematic bias in the reduced-order hemodynamic prediction.
+
+The phase-dependent error pattern further supports this interpretation. In the idealized coronary artery model, where the inlet pressure waveform was prescribed, wall expansion in the reference FSI solution induced additional inflow, whereas wall recoil reduced it. By contrast, in the subject-specific coronary and AAA models, the inlet flow was constrained by either the heart model or the prescribed inflow waveform. Under these conditions, wall motion primarily influenced downstream flow transmission and branch-level flow redistribution rather than the imposed inlet condition itself. In the subject-specific coronary model, this effect was more pronounced in the left coronary branches, where serial stenoses increased hydraulic resistance and likely amplified delays in downstream flow transmission. The right coronary branches exhibited smaller deviations, consistent with a less restricted flow pathway. In the AAA model, expansion of the aneurysmal sac likely acted as a temporary compliant reservoir, delaying flow transmission toward the iliac outlets. Collectively, these mechanisms provide a plausible explanation for the larger discrepancies observed near the extrema of the wall-induced volume-change rate.
+
+The equivalent strain error exhibited a similar spatial pattern but showed larger discrepancies than the von Mises stress error. This trend is expected because the strain field in the reference FSI simulation reflects the time-evolving deformation and recovery of the vessel wall over the cardiac cycle, whereas the proposed framework computes an independent quasi-static structural response at each selected snapshot. Consequently, the proposed method does not explicitly track the transient deformation history that influences the instantaneous strain state. 
+In addition, strain measures are directly related to displacement gradients and are therefore more sensitive to local geometric features, boundary constraints, and small differences in deformation fields than the von Mises stress metric considered here. Because the primary objective of the framework is stress estimation, the strain field was used primarily as an additional diagnostic of local deformation consistency.
+
+The temporal distribution of the contour errors is also consistent with this mechanism. Across the models, larger local discrepancies were commonly observed at $t_2$, corresponding to the phase of maximum wall-induced volume-change rate. During this phase, wall expansion produced the largest mismatch between the reference FSI response and the steady rigid-wall snapshot approximation through temporary volume storage, delayed downstream transmission, and local flow redistribution. By contrast, the errors at $t_3$ were generally smaller, even though this phase corresponds to peak systole, because wall motion was less pronounced than at the extrema of the volume-change rate. These observations further support that the error is governed mainly by wall-motion effects, which are not explicitly resolved in the proposed framework. 
+
+These observations define the expected applicability of the proposed framework. Cyclic wall deformation appears to be a principal source of discrepancy between the snapshot-based approximation and the fully coupled FSI solution. Therefore, the framework is expected to be most appropriate for vascular settings with limited cyclic deformation. Such conditions may occur in several clinically relevant diseased vessels, where pathological remodeling can increase wall stiffness. For example, atherosclerotic coronary arteries may stiffen owing to plaque formation~\cite{wang2023quantification}, and both ascending thoracic~\cite{vorp2003effect} and abdominal aortic aneurysms~\cite{he1994composition} can exhibit increased stiffness relative to non-aneurysmal aorta through elastin degradation and increased collagen content. In these low-deformation settings, the framework may provide a practical means of estimating localized vessel-wall stress with substantially reduced computational cost. This balance between computational efficiency and stress-field accuracy supports the proposed framework as a practical tool for patient-specific biomechanical assessment, large-scale parametric studies, and repeated patient-specific biomechanical assessment, large-scale parametric studies, and uncertainty quantification, particularly when fully coupled transient FSI simulations are computationally prohibitive. The framework should therefore be interpreted as a stress-oriented approximation for selected cardiac phases, rather than as a replacement for the full transient deformation response obtained from fully coupled FSI.
+
+Several limitations of this study should be acknowledged. First, the accuracy of the proposed framework depends on the fidelity of the 1D ROM, which is formulated under a rigid-wall assumption. Errors arising from this assumption can propagate into the subsequent steady 3D fluid and structural analyses. In addition, transient fluid inertia and wall deformation are not explicitly resolved in the steady snapshot analyses. These simplifications can produce instantaneous discrepancies in flow rate and strain, particularly when wall deformation induces phase lag, temporary flow storage, or delayed downstream transmission. Although the steady snapshot approximation was reasonable for the geometries examined in this study, where wall deformation was relatively limited, its accuracy may decrease in flow regimes with stronger unsteady effects or large wall deformation. Second, the vessel wall was modeled as a homogeneous linear elastic material. This assumption does not capture the nonlinear, anisotropic, heterogeneous, and potentially viscoelastic behavior of vascular tissues \textit{in vivo}. Furthermore, plaque and intraluminal thrombus were not explicitly represented, which limits the interpretation of local stress magnitudes in regions with complex lesion morphology. Finally, validation was performed at selected cardiac phases rather than over the full transient response, although these phases were chosen to include time points expected to exhibit the largest discrepancies. Additional validation across a wider range of vascular geometries, material properties, and pulsatile conditions is needed to further assess the generality and robustness of the proposed framework.
+
+\section{Conclusion}
+\label{conclusion}
+This study presents a snapshot-based computational framework for efficient estimation of localized vessel-wall stress under pulsatile hemodynamic loading. The proposed approach integrates a 1D reduced-order model for rapid evaluation of time-dependent pressure and flow conditions with steady 3D fluid and structural analyses at selected cardiac phases. By doing so, the framework avoids repeated fully coupled transient 3D FSI simulations while retaining the three-dimensional spatial resolution required for localized stress assessment.
+
+The framework was evaluated using an idealized coronary artery model, a subject-specific coronary artery model, and a subject-specific abdominal aortic aneurysm model. Across all cases, the proposed method reproduced the von Mises stress fields obtained from reference 3D FSI simulations with low global error at representative cardiac phases. Equivalent strain showed larger discrepancies than stress, primarily because the snapshot-based approximation does not explicitly track transient wall-deformation history. These findings indicate that the framework can provide efficient, stress-oriented estimates of locaalized vessel-wall mechanics at selected cardiac phases.
+
+Overall, the proposed approach provides a computationally efficient strategy for time-specific structural assessment in cardiovascular biomechanics. It is particularly well suited for applications requiring repeated patient-specific evaluations across a wide range of physiological boundary conditions, as well as sensitivity analyses and large-scale parametric studies, where fully coupled transient FSI simulations computationally prohibitive.
+
+\clearpage
+\begin{landscape}
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lccccccccc}
+\hline
+\multirow{2}{*}{Time point} 
+& \multicolumn{3}{c}{\makecell{Idealized coronary\\artery model}}
+& \multicolumn{3}{c}{\makecell{Subject-specific\\coronary model}} 
+& \multicolumn{3}{c}{\makecell{Subject-specific\\aneurysm model}} \\
+\cline{2-10}
+& Time (s) & Stress (\%) & Strain (\%)
+& Time (s) & Stress (\%) & Strain (\%)
+& Time (s) & Stress (\%) & Strain (\%) \\
+\hline
+$t_1$: End-diastole          
+& 0.05 & 0.13 & 1.55 
+& 0.05 & 1.98 & 7.46 
+& 0.08 & 0.22 & 2.56 \\
+
+$t_2$: Max. vol.-change rate 
+& 0.15 & 0.96 & 13.27 
+& 0.15 & 3.04 & 17.30 
+& 0.15 & 1.12 & 10.20 \\
+
+$t_3$: Peak systole          
+& 0.28 & 0.28 & 1.51 
+& 0.25 & 3.91 & 9.28 
+& 0.25 & 1.00 & 3.62 \\
+
+$t_4$: Min. vol.-change rate 
+& 0.35 & 0.91 & 5.34 
+& 0.35 & 4.45 & 17.75 
+& 0.35 & 0.87 & 7.19 \\
+
+$t_5$: Mid-diastole          
+& 0.80 & 0.15 & 14.52 
+& 0.70 & 1.62 & 11.37 
+& 0.70 & 0.30 & 11.87 \\
+
+$t^{*}$: Additional phase    
+& 0.45 & 0.17 & 4.92 
+& -- & -- & -- 
+& -- & -- & -- \\
+\hline
+\end{tabular}
+\caption{Selected time points and corresponding spatial relative $L_2$-norm errors of von Mises stress and equivalent strain for the three models. Here, vol.-change rate denotes the wall-motion-induced volume-change rate.}
+\label{tab:error}
+\end{table}
+\end{landscape}
+
+\clearpage
+\begin{landscape}
+\begin{table}[t]
+\centering
+\begin{tabular}{ccccc}
+\hline
+\multicolumn{2}{c}{Simulation stage} 
+& \makecell{Idealized coronary\\artery model} 
+& \makecell{Subject-specific\\ coronary model} 
+& \makecell{Subject-specific\\ aneurysm model} \\
+\hline
+\multirow{4}{*}{\makecell{Proposed\\framework}}
+& Ramped-flow $^{a}$ & 3.3  & 33   & 5   \\
+& 1D pulsatile        & 0.2  & 3    & 0.9 \\
+& 3D steady fluid     & 1.2  & 15   & 7   \\
+& 3D steady solid     & 8    & 65   & 21  \\
+\cline{2-5}
+& Total               & 12   & 116  & 34  \\
+\hline
+\multicolumn{2}{c}{Full 3D FSI} & 6866 & 9989 & 1030 \\
+\hline
+\multicolumn{5}{l}{\footnotesize All times are reported in minutes.} \\
+\multicolumn{5}{l}{\footnotesize $^{a}$ One-time preprocessing step for a given geometry; not repeated for additional snapshot evaluations.} \\
+\end{tabular}
+\caption{Computational time required for the proposed snapshot-based framework and the reference fully coupled 3D FSI simulation in the three models.}\label{tab:computational_cost}
+\end{table}
+\end{landscape}
+
+\clearpage
+\begin{figure}
+    \centering
+    \includegraphics{Fig1.pdf}
+    \caption{Overview of the proposed snapshot-based coupling framework. (A) The 3D vascular geometry is reduced to a 1D representation to compute pulsatile hemodynamics. (B) At selected time instants, ROM-derived boundary conditions are applied to steady 3D fluid simulations to reconstruct wall traction, followed by steady structural analysis to estimate localized vessel-wall stress.}
+    \label{fig:fig1}
+\end{figure}
+
+\clearpage
+\begin{figure}
+    \centering
+    \includegraphics{Fig2.pdf}
+    \caption{Idealized coronary artery model used in this study. The figure shows the simplified cylindrical geometry with dimensional information and an eccentric stenosis. The green arrow indicates the inlet location, and the blue dot indicates the outlet location. (A) Prescribed inlet pressure waveform. (B) Coronary lumped-parameter boundary model and the corresponding parameter values.}
+    \label{fig:fig2}
+\end{figure}
+
+%\clearpage
+\begin{figure}
+   \centering
+   \includegraphics[width = 0.85\textwidth]{Fig3.pdf}
+   \caption{Subject-specific coronary artery model used in this study. The figure shows the reconstructed coronary geometry with serial triple stenoses. The green arrow indicates the inlet location, and blue dots indicate outlet locations. (A) Heart boundary model. (B) Windkessel RCR boundary model. (C) Coronary lumped-parameter boundary model. Each panel includes the corresponding lumped-parameter circuit and parameter values.}
+   \label{fig:fig3}
+\end{figure}
+
+\clearpage
+\begin{figure}
+    \centering
+    \includegraphics{Fig4.pdf}
+    \caption{Subject-specific abdominal aortic aneurysm (AAA) model used in this study. The figure shows the reconstructed aneurysmal aortic geometry. The green arrow indicates the inlet location, and blue dots indicate outlet locations. (A) Prescribed inlet flow-rate waveform. (B) Windkessel RCR boundary model and the corresponding parameter values.}
+    \label{fig:fig4}
+\end{figure}
+
+\clearpage
+\newpage
+\begin{figure} 
+    \centering
+    \includegraphics{Fig5.pdf}
+    \caption{Comparison of hemodynamic responses in the idealized coronary artery model obtained from the pulsatile 1D reduced-order simulation, the rigid-wall pulsatile 3D simulation, and the fully coupled pulsatile FSI simulation. (a) Selected representative time points. (b) Wall-motion-induced volume-change rate. (c) Pressure waveforms. (d) Flow-rate waveforms. An additional acceleration-phase instant, ($t^{*}$), is included for this model.}
+\label{fig:fig5}
+\end{figure}
+
+
+\clearpage
+\begin{figure}
+    \centering
+    \includegraphics{Fig6.pdf}
+    \caption{Comparison of hemodynamic responses in the subject-specific coronary artery model obtained from the pulsatile 1D reduced-order simulation, the rigid-wall pulsatile 3D simulation, and the fully coupled pulsatile FSI simulation. Representative inlet and outlet responses are shown for the aortic inlet and selected coronary branches. LAD1 denotes the diagonal branch distal to a stenotic lesion, and LAD2 denotes the distal LAD segment downstream of all stenotic lesions. (a) Selected representative time points. (b) Wall-motion-induced volume-change rate. (c) Pressure waveforms. (d) Flow-rate waveforms.}
+    \label{fig:fig6}
+\end{figure}
+
+
+\clearpage
+\begin{figure}
+    \centering
+    \includegraphics{Fig7.pdf}
+    \caption{Comparison of hemodynamic responses in the subject-specific abdominal aortic aneurysm (AAA) model obtained from the pulsatile 1D reduced-order simulation, the rigid-wall pulsatile 3D simulation, and the fully coupled pulsatile FSI simulation. Inlet and outlet responses are shown. (a) Selected representative time points. (b) Wall-motion-induced volume-change rate. (c) Pressure waveforms. (d) Flow-rate waveforms.}
+    \label{fig:fig7}
+\end{figure}
+
+\clearpage
+\begin{figure}
+    \centering
+    \includegraphics{Fig8.pdf}
+    \caption{Spatial distributions of von Mises stress (top panel) and equivalent strain (bottom panel) predicted by the proposed framework (left column), the reference FSI simulation (middle column), and the corresponding absolute errors (right column) at \(t_2\), \(t_3\), and \(t_4\) for the idealized LAD coronary artery model.} 
+\label{fig:fig8}
+\end{figure}
+
+\clearpage
+\begin{figure}
+    \centering
+    \includegraphics[width = 0.9\textwidth]{Fig9.pdf}
+    \caption{Spatial distributions of von Mises stress (top panel) and equivalent strain (bottom panel) predicted by the proposed framework (left column), the reference FSI simulation (middle column), and the corresponding absolute errors (right column) at \(t_2\), \(t_3\), and \(t_4\) for the subject-specific coronary artery model.}
+\label{fig:fig9}
+\end{figure}
+
+\clearpage
+\begin{figure}
+    \centering
+    \includegraphics[width = 0.85\textwidth]{Fig10.pdf}
+    \caption{Spatial distributions of von Mises stress (top panel) and equivalent strain (bottom panel) predicted by the proposed framework (left column), the reference FSI simulation (middle column), and the corresponding absolute errors (right column) at \(t_2\), \(t_3\), and \(t_4\) for the subject-specific abdominal aortic aneurysm model.}
+\label{fig:fig10}
+\end{figure}
+
+\newpage
+\clearpage
+\bibliographystyle{elsarticle-num}
+\bibliography{sn-bibliography.bib}
+
+\clearpage
+
+\section*{Declaration of Competing Interest}
+The authors declare that there is no conflict of interest. 
+
+\section*{Declaration of generative AI and AI-assisted technologies}
+During the preparation of this work the authors used ChatGPT (OpenAI) in order to assist language editing an

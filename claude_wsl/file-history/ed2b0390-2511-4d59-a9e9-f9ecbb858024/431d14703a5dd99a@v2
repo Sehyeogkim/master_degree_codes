@@ -1,0 +1,17 @@
+"""Quick single-size (0.02) smoke test of the WSL lumen meshing pipeline."""
+import json
+import sys
+
+PROJ = "/home/jeff/project/65_final_0723"
+sys.path.insert(0, PROJ)
+
+import lumen_simmetrix as L
+
+with open(L.CONFIG_PATH) as f:
+    config = json.load(f)
+
+if not L.INPUT_VTP.exists():
+    raise FileNotFoundError(L.INPUT_VTP)
+
+L.mesh_one(0.02, config)
+print("OK")

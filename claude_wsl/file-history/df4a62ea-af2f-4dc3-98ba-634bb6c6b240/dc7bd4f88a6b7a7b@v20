@@ -1,0 +1,25 @@
+- [Solid mesh env on cv1](solid-mesh-env-cv1.md) — run HXT pipeline via conda `ansys_new`; utils package comes from master_python editable install
+- [Solid mesh two types](solid-mesh-two-types.md) — "2 meshes" = Type 1 (no cal) + Type 2 (cal); scripts and inputs
+- [Focus solid not lumen](focus-solid-not-lumen.md) — 65_final_0723 meshing: solid only, ignore lumen/Simmetrix; user handles copy
+- [ANSYS sim on cvbml02](ansys-sim-cvbml02.md) — pymapdl_simulation_ver5_fibrous.py structural sim; curved Type2 mesh, wall_0723 pressure BC, material.json+parameter.csv
+- [Reporting format for mesh runs](reporting-format-mesh.md) — always report mesh quality, # of mesh, total time
+- [Solid mesh neg-Jacobian fix](solid-mesh-negjacobian-fix.md) — inverted elems live in fc cap; fixed by Smoothing=10 + HighOrder opt; dist(fc) field cuts elem count ~43%
+- [Batch dist meshing 0723](batch-dist-meshing-0723.md) — case 1-383 dist meshing on cvbml01 (4-wide, msh only, resumable) + Notion dashboard cron
+- [Lumen mesh WSL setup](lumen-mesh-wsl-setup.md) — run cvbml01's lumen_meshing_0723.py (stp->vtk->vtp->Simmetrix) in WSL: rsync master_python, pip install gmsh, solver_path.json; case_0 verified
+- [Copy mesh to harvey](copy-mesh-to-harvey.md) — copy completed fluid_0723 cases (≥5) to harvey via rsync (no --delete), then chain q_ramp
+- [Harvey q_ramp pipeline](harvey-qramp-pipeline.md) — sbatch Q_ramp_0723.py per case (QRAMP_CASE env), harvey07/-n96 primary, harvey01/-n72 fallback
+- [Notion Harvey Q ramp monitor](notion-harvey-qramp-monitor.md) — report pipeline status (mesh copy + Q_ramp) to this Notion page, newest on top
+- [cvbml02 quad batch](cvbml02-quad-batch.md) — all 384 geo_0723 cases Type2 quad mesh on cvbml02 (run_type2_0723.py, size 0.06, nproc 20, 3-wide, msh-only, resumable)
+- [Mesh failures are 2D, not 3D](mesh-timeout-2d-meshadapt.md) — Algorithm 5→6 ladder + 0.05→0.06 size rung took solid meshing 84% → 95.8%
+- [Cursor worktree disk](cursor-worktree-disk.md) — cvbml02 ~/.cursor worktrees ate 927GB; git worktree remove to reclaim; also clean ANSYS .DSPtri scratch
+- [case 0-4 mesh mismatch: ignored](case-0-4-mesh-mismatch-ignored.md) — harvey 0-4 use coarse g015 vs dense 5-164; user said ignore, don't re-raise
+- [case 150 mesh lost](case-150-mesh-lost.md) — mesh gone locally + truncated on harvey; SKIP in dispatch; needs re-mesh for 384/384
+- [Lumen mesh storage: drop .sms](lumen-mesh-storage-sms.md) — volume_mesh.sms is 63% of output and unused; delete after each case
+- [Lumen mesh mixed grid 0723](lumen-mesh-mixed-grid-0723.md) — case_0-164 @ 0.01, case_165-383 @ 0.015; batch kill/pkill gotcha
+- [Steady 3D pipeline](steady-3d-pipeline.md) — peak+low steady_3d on harvey04-07 (pre→dispatcher 2-case→post wall csv); restart=500; scripts + daemons
+- [Solid dist sim cvbml01](solid-dist-sim-cvbml01.md) — pymapdl dist Type1 solid sim, PCG solver, wall_0723 BC → FC vtk; clean-env-or-PCG-segfaults; pkill self-match gotcha
+- [Steady3D no-hyperemia 54_analysis](steady3d-nohyperemia-54analysis.md) — 54_analysis 1000-case rest 1D + steady-3D peak/low on harvey 2-node per-case pre→solve→post→wall_no_hyperemia csv
+- [LAP/CP sim 54_analysis](lap-cp-sim-54analysis.md) — cvbml02 LAP+CP solid ANSYS sim cases 500-999, sequential LAP→CP, wall BC synced 60s from harvey no-hyperemia (local relays; ws2 no route)
+- [LAP+CP meshing 54_analysis](lap-cp-meshing-54analysis.md) — two efforts: id>500 on cvbml02, id<500 on cvbml01 (LAP dist-field 91 missing running); CP(Type2) next needs fc_offset+input_0605.csv; blockers/settings noted
+- [LAP low-only + hyperemia finding](lap-lowonly-hyperemia-54analysis.md) — ws1 LAP cases 0-499 LOW-only even/odd batch (nproc20, ports 50052/50072, suffix E/O kill-scope); resting-vs-hyperemia: peak PSS ~2% (safe), ΔPSS ~22% (sensitive); old paper=hyperemia+traction-vector
+- [Steady 3D: 300 timesteps](steady3d-300-timesteps.md) — 유량은 ~300스텝에 수렴; 앞으로 500 대신 300 (restart freq/post STEP도 같이)

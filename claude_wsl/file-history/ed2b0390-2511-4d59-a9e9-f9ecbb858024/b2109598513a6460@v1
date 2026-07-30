@@ -1,0 +1,15 @@
+set(EXECUTABLE_NAME mesh_generator)
+
+set (${EXECUTABLE_NAME}_SOURCES
+     GenerateMeshUsingSimmetrix.cpp
+     MeshGenerationParameters.cpp
+     main.cpp)
+
+set (${EXECUTABLE_NAME}_HEADERS GenerateMeshUsingSimmetrix.h MeshGenerationParameters.h)
+
+add_executable(${EXECUTABLE_NAME} MACOSX_BUNDLE ${${EXECUTABLE_NAME}_SOURCES} ${${EXECUTABLE_NAME}_HEADERS} ${SIMMETRIX_INCLUDE_DIR})
+target_link_libraries(${EXECUTABLE_NAME}
+                      common
+                      ${VTK_LIBRARIES}
+                      ${Boost_LIBRARIES}
+                      SimLicense SimMeshing SimDiscrete SimModel SimAdvMeshing SimMeshing SimMeshTools SimPartitionWrapper SimPartitionedMesh)

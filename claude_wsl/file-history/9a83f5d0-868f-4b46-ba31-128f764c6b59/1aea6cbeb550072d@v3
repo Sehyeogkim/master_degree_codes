@@ -1,0 +1,22 @@
+# bullet281 — 라이브 자동매매 시뮬레이터 자동 파이프라인
+# 설치:  crontab /home/jeff/bullet281/deploy/crontab
+# 확인:  crontab -l      /  로그: report/live/_cron.log
+# 해제:  crontab -r
+# (이 머신: WSL2 systemd=true + cron.service active/enabled → 등록만 하면 백그라운드 자동 실행)
+
+SHELL=/bin/bash
+PATH=/home/jeff/miniconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=""
+
+# ── 토요일 09:00 — 다음주 종목 선정 + 선정보고서(순수 코드) ──
+0  9  * * 6       cd /home/jeff/bullet281 && python3 pipeline/p_live.py  --mode select      >> report/live/_cron.log 2>&1
+# ── 토요일 09:10 — 선정 이메일(config emails 수신자에게) ──
+10 9  * * 6       cd /home/jeff/bullet281 && python3 pipeline/p_email.py --kind selection   >> report/live/_cron.log 2>&1
+
+# ── 평일 09:00~15:55 5분마다 — 라이브 갱신 + 5분봉 CSV 축적 ──
+*/5 9-15 * * 1-5  cd /home/jeff/bullet281 && python3 pipeline/p_live.py  --mode update      >> report/live/_cron.log 2>&1
+
+# ── 월~목 15:35 — 장마감 일일 현황 이메일 ──
+35 15 * * 1-4     cd /home/jeff/bullet281 && python3 pipeline/p_email.py --kind daily       >> report/live/_cron.log 2>&1
+# ── 금요일 15:35 — 최종 보고서 이메일(그 주 마감) ──
+35 15 * * 5       cd /home/jeff/bullet281 && python3 pipeline/p_email.py --kind final       >> report/live/_cron.log 2>&1

@@ -1,0 +1,45 @@
+NEW_MAIN = '''if __name__ == "__main__":
+    # Self-contained driver: mesh case <CASE> from geo_0723 into
+    #   solid_0723/case_<CASE>/<TAG>_run/solid_type_1_<TAG>.{msh,vtu}
+    # Usage: python <this>.py [case] [nproc] [mesh_size]
+    import sys
+    from pathlib import Path
+
+    TAG = "___TAG___"
+    CASE = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+    NPROC = int(sys.argv[2]) if len(sys.argv) > 2 else 20
+    MESH_SIZE = float(sys.argv[3]) if len(sys.argv) > 3 else 0.05
+
+    here = Path(__file__).resolve().parent
+    geo = here / "geo_0723" / f"case_{CASE}"
+    out = here / "solid_0723" / f"case_{CASE}" / f"{TAG}_run"
+    out.mkdir(parents=True, exist_ok=True)
+
+    csv = Path("/home/jeff/project/54_analysis/pre_data/bin/parameter.csv")
+    lesion_length = float(pd.read_csv(str(csv)).loc[CASE, "lesion_length"])
+
+    print(f"[cfg] TAG={TAG} case={CASE} nproc={NPROC} mesh_size={MESH_SIZE} lesion_length={lesion_length}")
+    _msh = gmshing_solid(
+        geo / "lumen.stp", geo / "solid.stp", geo / "lipid.stp", geo / "fc.stp",
+        str(out), nproc=NPROC, Terminal_display=True, save_vtu=False,
+        mesh_size=MESH_SIZE, lesion_length=lesion_length,
+    )
+
+    _tag_msh = out / f"solid_type_1_{TAG}.msh"
+    Path(_msh).replace(_tag_msh)
+    _tag_vtu = out / f"solid_type_1_{TAG}.vtu"
+    _m = meshio.read(str(_tag_msh))
+    _m.points *= 0.1
+    if _m.cell_sets:
+        _m.cell_sets = {}
+    meshio.write(str(_tag_vtu), _m)
+    print(f"[out] {_tag_msh}")
+    print(f"[out] {_tag_vtu}")
+    print("[done]")
+'''
+
+for tag, fn in [("box", "HXT_meshing_I_box.py"), ("dist", "HXT_meshing_I_dist.py")]:
+    src = open(fn).read()
+    head = src[:src.index("if __name__")]
+    open(fn, "w").write(head + NEW_MAIN.replace("___TAG___", tag))
+    print(f"patched {fn} (head {len(head)} chars)")

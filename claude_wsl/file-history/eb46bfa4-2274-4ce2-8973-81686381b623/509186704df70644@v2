@@ -1,0 +1,36 @@
+#!/bin/bash
+# Simmetrix floating 라이선스는 랩 전체 공유 1석(cvbml01 서버).
+# 다른 사용자가 점유 중이면 그냥 실패하므로, 성공할 때까지 간격을 두고 재시도한다.
+# 남의 작업은 절대 건드리지 않는다 -- 기다리기만 한다.
+# 사용법: mesh_indep_wait.sh 0.025 0.008
+cd /home/jeff/project/54_analysis || exit 1
+PY=/home/jeff/miniconda3/envs/ansys_new/bin/python
+L=mesh_independent_test_fluid/logs
+W=mesh_independent_test_fluid/logs/wait.log
+mkdir -p "$L"
+MAXTRY=200          # 3분 간격 * 200 = 약 10시간
+INTERVAL=180
+
+for g in "$@"; do
+  done_file="mesh_independent_test_fluid/mesh/$g/meshing/mesh-complete/mesh-complete.mesh.vtu"
+  for try in $(seq 1 $MAXTRY); do
+    if [ -f "$done_file" ]; then echo "$(date +%T) $g OK (try $try)" >> "$W"; break; fi
+    # 로컬에서 우리 것이 돌고 있으면 대기
+    while pgrep -x mesh_generator > /dev/null; do sleep 20; done
+    rm -rf "mesh_independent_test_fluid/mesh/$g"
+    $PY -u mesh_indep_fluid.py "$g" > "$L/mesh_${g}.log" 2>&1
+    if [ -f "$done_file" ]; then
+      echo "$(date +%T) $g SUCCESS (try $try)" >> "$W"
+      break
+    fi
+    if grep -q "All licenses in use" "$L/mesh_${g}.log"; then
+      echo "$(date +%T) $g try $try: 라이선스 점유중 -> ${INTERVAL}s 후 재시도" >> "$W"
+    else
+      echo "$(date +%T) $g try $try: 라이선스 외 오류 -> 중단" >> "$W"
+      grep -iE "error" "$L/mesh_${g}.log" | head -3 >> "$W"
+      break
+    fi
+    sleep $INTERVAL
+  done
+done
+echo "$(date +%T) WAIT RUNNER DONE" >> "$W"

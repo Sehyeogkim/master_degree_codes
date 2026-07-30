@@ -1,0 +1,49 @@
+#!/bin/bash
+# Pause main LAP batch, benchmark case C two ways, resume batch.
+#   A) baseline: both BCs, one MAPDL @ nproc30, sequential (current method)
+#   B) parallel: peak@15 || low@15, two MAPDL concurrently (cdb reused from A)
+set -u
+Q=/home/jeff/project/54_analysis
+C=${1:-508}
+LOG=$Q/test_par/driver.log
+source ~/miniconda3/etc/profile.d/conda.sh; conda activate ansys_new
+cd $Q
+mkdir -p $Q/test_par
+echo "==== TEST DRIVER case $C START $(date) ====" | tee -a $LOG
+
+# 1) pause main batch
+touch $Q/STOP_LAP
+pkill -9 -f '[r]un_plaque_batch.sh LAP'
+pkill -9 -f '[a]nsys.e'; pkill -9 -f '[a]nsys251'
+sleep 6
+echo "paused batch; ansys.e now=$(pgrep -c ansys.e 2>/dev/null || echo 0)" | tee -a $LOG
+rm -rf $Q/test_par/case_$C; mkdir -p $Q/test_par/case_$C
+
+# 2) BASELINE both@30
+echo "---- BASELINE both@30 (sequential peak then low) ----" | tee -a $LOG
+tb0=$(date +%s)
+python test_bc.py $C both 30 seq >> $LOG 2>&1
+tb1=$(date +%s)
+echo ">>> BASELINE wall = $((tb1-tb0))s" | tee -a $LOG
+
+# 3) PARALLEL peak@15 || low@15, reuse cdb from baseline
+mkdir -p $Q/test_par/case_$C/par_peak $Q/test_par/case_$C/par_low
+cp $Q/test_par/case_$C/seq/total_solid1.cdb $Q/test_par/case_$C/par_peak/total_solid1.cdb 2>/dev/null && echo "cdb copied to par_peak" | tee -a $LOG
+cp $Q/test_par/case_$C/seq/total_solid1.cdb $Q/test_par/case_$C/par_low/total_solid1.cdb 2>/dev/null && echo "cdb copied to par_low" | tee -a $LOG
+echo "---- PARALLEL peak@15 || low@15 (cdb reused) ----" | tee -a $LOG
+tp0=$(date +%s)
+python test_bc.py $C peak 15 par_peak >> $LOG 2>&1 &
+P1=$!
+python test_bc.py $C low 15 par_low >> $LOG 2>&1 &
+P2=$!
+wait $P1; wait $P2
+tp1=$(date +%s)
+echo ">>> PARALLEL wall = $((tp1-tp0))s" | tee -a $LOG
+
+# 4) resume main batch
+pkill -9 -f '[a]nsys.e'; pkill -9 -f '[a]nsys251'; sleep 3
+rm -f $Q/STOP_LAP $Q/STOP_CP
+setsid nohup bash run_plaque_batch.sh LAP >> LAP_batch.out 2>&1 </dev/null & disown
+echo "==== resumed batch; DRIVER DONE $(date) ====" | tee -a $LOG
+echo "RESULTS SUMMARY case $C:" | tee -a $LOG
+grep -E 'BASELINE wall|PARALLEL wall|SOLVE=|meshprep|TOTAL=' $LOG | tail -20 | tee -a $LOG

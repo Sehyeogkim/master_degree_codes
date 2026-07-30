@@ -1,0 +1,37 @@
+---
+name: harvey-qramp-pipeline
+description: How to run q_ramp 3D simulation on harvey for a fluid case after mesh copy (SLURM sbatch + Q_ramp_0723.py)
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: 4c5c939f-6472-457a-bbdc-757c03d64685
+  modified: 2026-07-24T01:59:32.877Z
+---
+
+Pipeline extends [[copy-mesh-to-harvey]]: after a case's mesh is on harvey, run q_ramp 3D sim.
+
+**Host paths (harvey.kaist.ac.kr:10022, user jeff):**
+- Project: `/home/jeff/project/65_final_0723`, driver `Q_ramp_0723.py`
+- svpre/svsolver: `/home/wj0220/svSolverPrivate/build/svSolver-build/bin/{svpre,svsolver}`
+- python: `/home/jeff/miniconda3/bin/python3` (3.13.7, numpy 2.3.3)
+
+**Q_ramp_0723.py** reads case from env `QRAMP_CASE`, nproc from `SLURM_NTASKS`. Per case: prepare (creates model.svpre, inflow.flow Q=0.371, copies pre_data/scripts/solver_ramp.inp + revises inp to 500 timesteps, copies xyzts.dat into q_ramp/) → svpre → mpirun svsolver → post. Requires `fluid_0723/case_N/meshing/mesh-complete` + `xyzts.dat`.
+
+**Outputs (success signal):** `post_data/slab/slab_N.txt` + `post_data/flowhist/FlowHist_N.dat` (+ `fluid_0723/case_N/q_ramp/{nproc}-procs_case/slab.txt`). Cases 0–4 already done. **Only slab.txt + FlowHist.dat matter downstream** (user 2026-07-24) — everything else in `{nproc}-procs_case/` is scratch.
+
+**Restart frequency = 500 (final dump only), default since 2026-07-24.** Was 50 (10 dumps × nproc files). Overridable via env `QRAMP_RESTART_FREQ`. Verified on case 168 vs 165/166/167 baselines: `slab.txt` 100×50 and `FlowHist.dat` 502×1 **identical**, dir 190MB→32MB (83% less), 947→299 files, runtime ~8% faster (within case-to-case noise). Safe because slab dims come from `xyzts.dat` header (50 probes, sample every 5 → 500/5 = 100 rows) and FlowHist is written every step — neither depends on restart cadence. Original driver backed up as `Q_ramp_0723.py.bak_20260724`.
+
+**Submit wrapper:** `q_ramp_auto.sh` (created 2026-07-23) — SLURM header minimal, loads modules `cmake/3.25.2 gcc/11.3.0 mpi/gcc-11.3.0/openmpi-4.1.5` + LD_LIBRARY_PATH, then `python3 Q_ramp_0723.py`. Submit per case:
+```
+sbatch -p harvey05 --nodelist=harvey07 -n 96 --ntasks-per-node=96 \
+  --job-name=qramp_c${N} --export=ALL,QRAMP_CASE=${N} q_ramp_auto.sh
+```
+Fallback node (if harvey07 busy): `-p harvey01 --nodelist=harvey01 -n 72 --ntasks-per-node=72` (harvey01 = 72 cores).
+
+**3-node parallel (user request 2026-07-24, "we don't have time"):** `qramp_dispatch.sh` runs up to `MAXNODES=3` nodes, one case per node (NOT splitting a case). Candidate list `NODES=(...)` holds `"node partition ntasks min_case"`: **harvey01** (`-p harvey01`, **72c — not 96!**, `min_case=165`), **harvey07** / **harvey06** (`-p harvey05`, 96c, `min_case=5`), harvey04 (`-p defaults`, 96c) as spare.
+
+**Per-node case ranges (user 2026-07-24 10:29):** meshes from **case 165 onward have fewer elements** (user reduced them), so the weaker 72-core harvey01 takes **only case ≥165**; harvey07/06 keep climbing ascending from the 50s. Both draw from ONE shared ascending pool, so when 07/06 pass 165 they automatically help harvey01 with no duplicates. Implemented via `pick <min>` which claims into a `TAKEN` map — **must set global `PICKED`, never `N=$(pick ...)`**: command substitution forks a subshell, `TAKEN` updates are lost, and the same case gets submitted 3× (hit and fixed 2026-07-24). ntasks is per-node in the array, so harvey01 submits `-n 72 --ntasks-per-node=72`; Q_ramp_0723.py reads `SLURM_NTASKS` so its output lands in `q_ramp/72-procs_case/`. MAXPER=3 per node (1 running + 2 pending). Ascending case order; a node is skipped if another user runs on it, and only the first `MAXNODES` free candidates are used. Uses `scontrol show job ... ReqNodeList` to count per-node in-flight.
+
+**Node/partition map:** `harvey01` partition = harvey01 (72c); `harvey05` partition = harvey05/06/07 (96c); `defaults` = harvey02–07. Check occupancy with **`pestat`** (`/HL8/HScr/pestat`) — shows per-node alloc/idle, CPU use, free mem, and job owner. Other heavy user: `yjchoi` (MDLMFIX4_96).
+
+**SLURM partitions = node groups:** `harvey05` partition = nodes harvey05/06/07 (96c each); `harvey01` = harvey01 (72c). Runtime ~3.5–5 min/case. steady_3d sims run separately on harvey05/06 (jobs steady_peak/low).

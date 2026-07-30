@@ -1,0 +1,37 @@
+# Isolated timing test: reuse PYMAPDL_worker to solve one or both BCs for a case.
+# Usage: test_bc.py <case> <mode: peak|low|both> <nproc> <exec_subdir>
+import sys, time, pathlib
+from pymapdl_sim_LAP import PYMAPDL_worker  # __main__ is guarded, class import is safe
+
+case = int(sys.argv[1]); mode = sys.argv[2]; nproc = int(sys.argv[3]); exec_sub = sys.argv[4]
+Q = pathlib.Path("/home/jeff/project/54_analysis")
+mesh     = Q / f"LAP_mesh/solid_LAP_{case}.msh"
+wall_dir = Q / "post_data" / "wall_no_hyperemia"
+param    = Q / "pre_data" / "parameter_0728.csv"
+matjson  = Q / "pre_data" / "material.json"
+exec_dir = Q / "test_par" / f"case_{case}" / exec_sub
+exec_dir.mkdir(parents=True, exist_ok=True)
+
+bcs = ["peak", "low"] if mode == "both" else [mode]
+w = PYMAPDL_worker(case, wall_dir, exec_dir, param, nproc=nproc)
+
+t0 = time.time()
+cdb = w.pymapdl_msh_to_cdb(mesh); w.cdb_path = cdb
+t_cdb = time.time()
+w.pymapdl_launch(display_info=False)
+t_launch = time.time()
+print(f"[{exec_sub}] nproc={nproc} cdb/meshprep={t_cdb-t0:.1f}s launch={t_launch-t_cdb:.1f}s", flush=True)
+
+for bc in bcs:
+    w.mapdl.clear(); w.mapdl.units("CGS")
+    w.bc_type = bc; w.casename = f"case_{case}_{bc}"; w.mapdl.jobname = w.casename
+    w.pymapdl_prep_bc(wall_dir / bc / f"wall_{bc}_case_{case}.csv")
+    w.pymapdl_prep_mat(matjson)
+    ts = time.time()
+    w.pymapdl_solve()
+    te = time.time()
+    w._save_fc_results_rst(str(exec_dir / f"FC_case_{case}_{bc}.vtk"))
+    print(f"[{exec_sub}] bc={bc} SOLVE={te-ts:.1f}s save={time.time()-te:.1f}s", flush=True)
+
+w.safe_mapdl_exit()
+print(f"[{exec_sub}] mode={mode} TOTAL={time.time()-t0:.1f}s", flush=True)

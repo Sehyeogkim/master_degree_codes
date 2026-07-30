@@ -1,0 +1,163 @@
+핵심은 **sphere radius를 생리학적으로 유일한 값이라고 주장하는 것이 아니라, 점wise maximum의 mesh sensitivity를 줄이기 위한 수치적 정규화 길이로 정의하고 반경 민감도 분석으로 결정하는 것**입니다.
+
+참고 논문의 “최대응력 주변 30개 요소 평균”도 같은 목적이지만, **요소 개수는 mesh density에 따라 실제 평균 영역의 크기가 달라지므로** 그대로 따르는 것보다 고정된 물리적 반경을 사용하는 현재 방식이 더 재현성이 좋습니다. 실제 PSS는 매우 국소적인 기하학적·재료 경계에서 발생하며, 절대 최대값은 메시와 형상 재구성에 민감할 수 있습니다. ([PubMed Central (PMC)][1])
+
+## 가장 방어력 있는 결정 방법
+
+현재 최종 mesh에서 후보 반경을 몇 개 정합니다. 예를 들어 국소 fibrous-cap element size가 약 (h=20\text{–}30,\mu\mathrm{m})라면:
+
+[
+r_{\mathrm{avg}}
+================
+
+50,;75,;100,;150,;200,\mu\mathrm{m}
+]
+
+또는 무차원으로
+
+[
+r_{\mathrm{avg}}/h = 2,;3,;4,;6,;8
+]
+
+를 검사합니다.
+
+각 반경에 대해 모든 표본 또는 대표적인 20–50개 표본에서 다음을 비교하면 됩니다.
+
+[
+\overline{\sigma}_{n,r}
+=======================
+
+\frac{
+\displaystyle\sum_{m\in\mathcal{N}*r(n)}
+w_m\sigma_m
+}{
+\displaystyle\sum*{m\in\mathcal{N}_r(n)}w_m
+}
+]
+
+[
+\mathrm{PSS}_{r}
+================
+
+\max_{n\in\mathcal{N}*{\mathrm{FC}}}
+\overline{\sigma}*{n,r}
+]
+
+여기서 (\mathcal{N}_r(n))는 중심 노드 (n)에서 거리 (r) 이내에 있으면서 **fibrous-cap domain에 속하는 노드 또는 integration point만** 포함합니다.
+
+### 판단 기준
+
+반경 증가에 따라 다음 네 가지를 확인하세요.
+
+1. **PSS 값의 안정성**
+
+[
+\delta_r
+========
+
+\operatorname{median}*i
+\left[
+\frac{
+|\mathrm{PSS}*{i,r+\Delta r}-\mathrm{PSS}*{i,r}|
+}{
+\mathrm{PSS}*{i,r}
+}
+\right]
+]
+
+예를 들어 연속한 두 반경 사이에서 중앙 상대변화가 (<5%)인 첫 번째 반경을 선택합니다.
+
+2. **표본 간 순위 보존**
+
+[
+\rho_\mathrm{S}
+\left(
+\mathrm{PSS}*{r},
+\mathrm{PSS}*{r+\Delta r}
+\right)>0.95
+]
+
+3. **민감도 결과의 안정성**
+
+상위 입력변수 순위와 주요 Sobol index가 반경에 따라 바뀌지 않아야 합니다. 예를 들어:
+
+* 상위 5개 변수 동일
+* Sobol total-order index 차이 (<0.03) 또는 bootstrap CI 내
+* PSS와 (\Delta\mathrm{PSS})의 결론 동일
+
+4. **위치 분류의 안정성**
+
+proximal/mid/distal 및 shoulder/center 분류가 반경에 따라 거의 변하지 않아야 합니다. 예를 들어 일치율 (>95%).
+
+---
+
+## 반경은 어느 정도가 적절한가
+
+현재 fibrous-cap thickness를 (100,\mu\mathrm{m})로 고정했다면, 처음부터 너무 큰 (r=0.5) 또는 (1,\mathrm{mm})를 사용하면 국소적인 cap stress concentration을 지나치게 평활화할 가능성이 있습니다. 반대로 (r)이 한 요소 크기와 비슷하면 단일 요소 또는 소수 요소의 수치적 peak를 충분히 제거하지 못합니다.
+
+따라서 초기 후보로는 다음이 자연스럽습니다.
+
+[
+r_{\mathrm{avg}}=0.10,;0.15,;0.20,;0.25,;0.30,\mathrm{mm}
+]
+
+다만 **최종 선택은 cap thickness 자체보다 실제 local mesh size와 plateau 결과에 근거해야 합니다.**
+
+실무적으로는 다음 조건을 만족하는 가장 작은 반경이 좋습니다.
+
+[
+r_{\mathrm{avg}} \ge 3h_{\mathrm{local}}
+]
+
+이면서,
+
+[
+\mathrm{PSS}_{r}
+]
+
+와 민감도 순위가 반경 증가에 대해 plateau에 도달하는 값입니다. 가장 작은 안정 반경을 택해야 응력 집중을 유지하면서 mesh artifact만 줄일 수 있습니다.
+
+---
+
+## 참고 논문의 30개 요소 평균과 연결하는 방법
+
+참고 논문은 PCS를 최대 주응력 영역의 30개 mesh elements 평균으로 정의했습니다. 이 방식은 단일 요소의 극값보다 국소적인 응력장을 사용한다는 점에서 현재 접근의 근거가 됩니다. 다만 요소 개수 기준은 mesh-dependent하므로, 논문에서는 다음처럼 설명하면 됩니다.
+
+> Previous studies reduced the influence of isolated element-level stress peaks by averaging stresses over a prescribed number of elements surrounding the maximum-stress region. In the present study, a fixed physical averaging radius was used instead of a fixed number of elements so that the spatial extent of averaging remained independent of mesh density.
+
+즉, **선행연구의 원칙은 따르되 구현은 더 재현성 있게 개선했다**는 논리입니다.
+
+---
+
+## Methods에 넣을 문장
+
+To reduce the influence of isolated mesh-dependent stress peaks, maximum principal stress was locally averaged within a spherical neighborhood restricted to the fibrous-cap domain. A fixed physical radius was used rather than a fixed number of elements so that the spatial extent of averaging remained independent of mesh density. The averaging radius was selected through a radius-sensitivity assessment using (r_{\mathrm{avg}}=[\text{tested values}],\mathrm{mm}). For each candidate radius, the resulting PSS and (\Delta\mathrm{PSS}), their sample-wise rankings, rupture-location classifications, and sensitivity rankings were compared. A radius of (r_{\mathrm{avg}}=[\text{selected value}],\mathrm{mm}) was selected as the smallest radius for which the median change in the vulnerability indices was below 5%, the Spearman correlation with the next larger radius exceeded 0.95, and the ranking of the dominant input parameters remained unchanged.
+
+## Results에 넣을 문장
+
+The radius-sensitivity assessment showed that the locally averaged PSS and (\Delta\mathrm{PSS}) became stable for (r_{\mathrm{avg}}\geq[\text{value}],\mathrm{mm}). Increasing the radius from ([\text{selected value}]) to ([\text{next value}],\mathrm{mm}) changed the median PSS and (\Delta\mathrm{PSS}) by [X]% and [Y]%, respectively, while preserving the sample-wise rankings ((\rho_{\mathrm{S}}=[X]) and [Y]). The dominant sensitivity factors and rupture-location classifications were also unchanged. Therefore, (r_{\mathrm{avg}}=[\text{selected value}],\mathrm{mm}) was used in all subsequent analyses.
+
+## 최소한 만들어야 하는 supplementary figure
+
+가장 간결하게는 한 그림이면 충분합니다.
+
+* x축: (r_{\mathrm{avg}})
+* y축: normalized PSS와 normalized (\Delta\mathrm{PSS})
+* 각 반경의 전체 표본 median
+* 음영: IQR
+* 세로 점선: 선택한 반경
+
+추가 표에는 다음만 넣으면 됩니다.
+
+|  Radius | Median PSS change | PSS rank correlation | (\Delta)PSS rank correlation | Top-factor ranking | Location agreement |
+| ------: | ----------------: | -------------------: | ---------------------------: | ------------------ | -----------------: |
+| 0.10 mm |                 — |                    — |                            — | —                  |                  — |
+| 0.15 mm |                   |                      |                              |                    |                    |
+| 0.20 mm |                   |                      |                              |                    |                    |
+| 0.25 mm |                   |                      |                              |                    |                    |
+| 0.30 mm |                   |                      |                              |                    |                    |
+
+**결론적으로**, “(0.2,\mathrm{mm})가 문헌상 정답이다”라고 주장할 필요는 없습니다.
+“최대응력의 mesh artifact를 제거하기 위해 물리적 반경 평균을 사용했고, 반경 수렴성·표본 순위·민감도 순위·파열 위치가 안정화되는 가장 작은 반경을 선택했다”가 CIBM 리뷰어에게 가장 설득력 있는 정당화입니다.
+
+[1]: https://pmc.ncbi.nlm.nih.gov/articles/PMC4857277/?utm_source=chatgpt.com "Peak cap stress calculations in coronary atherosclerotic ... - PMC"

@@ -1,0 +1,56 @@
+#!/usr/bin/env python
+"""Grid-convergence (Roache GCI) + critical-node drift for the PSS ladder.
+
+Consumes the CSV written by pss_mesh_indep.py. Reports, per averaging radius:
+  - the realized grid refinement ratio r = (N_coarse/N_fine)^(1/3)
+  - successive relative changes
+  - the observed order p and GCI21, but ONLY when the ladder is monotone;
+    a negative p means refining moves the answer MORE than coarsening did,
+    i.e. the solution is not in the asymptotic range and a Richardson
+    extrapolation would be meaningless.
+"""
+import numpy as np
+import pandas as pd
+
+CSV = '/mnt/hdd/jeff/mesh_indep_solid/analysis/pss_mesh_indep.csv'
+# second-order tetrahedra, from each mesh's quality.json
+ELEM = {'h0.032': 5949098, 'h0.04': 3156195, 'h0.05': 1721620, 'h0.0625': 947190}
+ORDER = ['h0.04', 'h0.05', 'h0.0625']      # fine -> medium -> coarse
+
+df = pd.read_csv(CSV)
+
+for r in sorted(df.sphere_radius.unique()):
+    s = df[np.isclose(df.sphere_radius, r)].set_index('label')
+    order = [k for k in ORDER if k in s.index]
+    if len(order) < 3:
+        continue
+    print(f'\n================ averaging radius r = {r} cm ================')
+    N = np.array([ELEM[k] for k in order], float)
+    h = (1.0 / N) ** (1 / 3.0)
+    r21, r32 = h[1] / h[0], h[2] / h[1]
+    print(f'  grid refinement ratio  r21={r21:.4f}  r32={r32:.4f}')
+
+    for col in ['PSS_value', 'delPSS_value']:
+        f1, f2, f3 = [s.loc[k, col] for k in order]
+        e21, e32 = f2 - f1, f3 - f2
+        rel21, rel32 = abs(e21 / f1) * 100, abs(e32 / f2) * 100
+        print(f'  -- {col}')
+        print(f'     fine={f1:.4e}  med={f2:.4e}  coarse={f3:.4e}')
+        print(f'     |med-fine|/fine  = {rel21:6.2f} %')
+        print(f'     |coarse-med|/med = {rel32:6.2f} %')
+        p = np.log(abs(e32 / e21)) / np.log(r21)
+        if e21 != 0 and e32 / e21 > 0:
+            gci21 = 1.25 * rel21 / (r21 ** p - 1)
+            print(f'     observed order p = {p:.3f}   GCI21 = {gci21:.2f} %')
+        else:
+            print(f'     observed order p = {p:.3f}  ** NOT in the asymptotic range **')
+
+    print('  -- critical-node location (1 cm = 10 mm)')
+    for a, b in [(order[0], order[1]), (order[1], order[2]), (order[0], order[2])]:
+        for pre in ['PSS', 'delPSS']:
+            c = [f'{pre}_crit_{x}' for x in 'xyz']
+            d = np.linalg.norm(s.loc[a, c].values.astype(float)
+                               - s.loc[b, c].values.astype(float))
+            print(f'     {pre:6s} {a} vs {b}: {d*10:.4f} mm  (radius = {r*10:.2f} mm)')
+    print('  -- neighbourhood sample size:',
+          {k: int(s.loc[k, 'PSS_n_sphere']) for k in order})

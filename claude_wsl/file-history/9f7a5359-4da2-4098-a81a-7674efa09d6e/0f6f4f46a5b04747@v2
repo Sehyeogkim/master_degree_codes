@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""WSL LAP mesh (SAVE mode + ladder). Meshes one case and KEEPS the .msh.
+Ladder tries algo variants; first success wins. For cases where HXT 3D fails,
+the Delaunay-3D rung (algo3d=1) usually recovers.
+
+Usage: wsl_lap_mesh.py <geo_root> <case> <nproc>
+Saves -> ~/lap_wsl/meshes/solid_LAP_<case>.msh
+"""
+import sys, os, io, json, time, shutil, contextlib
+from pathlib import Path
+import pandas as pd
+
+HERE = Path(__file__).resolve().parent
+OUT = HERE / "meshes"; OUT.mkdir(exist_ok=True)
+CSV = "/mnt/c/Users/jeff/project_inventor/33_0605_final_analysis/parameter_0728.csv"
+RUNGS = [(0.06, 5, 1), (0.06, 6, 10), (0.055, 5, 10)]  # Delaunay-3D first (HXT already failed)
+
+
+def attempt(d, case, lesion, size, a2, a3):
+    import HXT_meshing_I_dist as M
+    buf = io.StringIO()
+    tmp = OUT / f"_tmp_{case}"; tmp.mkdir(exist_ok=True)
+    try:
+        with contextlib.redirect_stdout(buf):
+            msh = M.gmshing_solid(d/"lumen.stp", d/"solid.stp", d/"lipid.stp", d/"fc.stp",
+                                  tmp, 4, True, False, size, lesion, a2, a3)
+        q = {}
+        qj = tmp / "quality.json"
+        if qj.exists(): q = json.loads(qj.read_text())
+        final = OUT / f"solid_LAP_{case}.msh"
+        shutil.move(msh, final)
+        shutil.rmtree(tmp, ignore_errors=True)
+        return {"status": "done", "path": str(final), **{k: q.get(k) for k in
+                ("num_elements", "min_quality", "avg_quality", "neg_jacobian_count")}}
+    except Exception as e:
+        shutil.rmtree(tmp, ignore_errors=True)
+        return {"status": "failed", "error": f"{type(e).__name__}: {e}",
+                "tail": buf.getvalue()[-400:]}
+
+
+def main():
+    geo_root = Path(sys.argv[1]); case = int(sys.argv[2])
+    d = geo_root / f"case_{case}"
+    lesion = float(pd.read_csv(CSV).loc[case, "lesion_length"])
+    t0 = time.time()
+    for i, (size, a2, a3) in enumerate(RUNGS):
+        r = attempt(d, case, lesion, size, a2, a3)
+        r.update({"case": case, "rung": i + 1, "mesh_size": size, "algo2d": a2, "algo3d": a3})
+        if r["status"] == "done":
+            r["seconds"] = round(time.time() - t0, 1)
+            print("STATUS " + json.dumps(r)); return
+        print(f"[rung {i+1} size={size} algo=({a2},{a3})] {r['status']}: {r.get('error','')}", flush=True)
+    print("STATUS " + json.dumps({"case": case, "status": "failed",
+          "error": "all rungs failed", "seconds": round(time.time() - t0, 1)}))
+
+
+if __name__ == "__main__":
+    main()

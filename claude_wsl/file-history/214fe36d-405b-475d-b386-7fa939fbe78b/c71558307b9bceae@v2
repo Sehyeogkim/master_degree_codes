@@ -1,0 +1,101 @@
+"""cofounder에게 '우리가 진행한 실험 전체' 정리 메일. p_email creds 재사용.
+사용: python3 send_experiments_summary.py [--dry-run] [--to a@b,c@d]"""
+import os, sys, ssl, smtplib, argparse
+from email.message import EmailMessage
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+from p_email import _load_creds
+
+DEFAULT_TO = ["kimse991228@gmail.com", "limsung7969@naver.com"]
+
+GRID, MUTE, WIN, WARN = "#D9D3C7", "#6B5E54", "#2E7D32", "#C2493C"
+
+
+def row(num, axis, what, verdict, color):
+    return (f"<tr>"
+            f"<td style='padding:6px 9px;border-bottom:1px solid {GRID};text-align:center'>{num}</td>"
+            f"<td style='padding:6px 9px;border-bottom:1px solid {GRID};color:{MUTE}'>{axis}</td>"
+            f"<td style='padding:6px 9px;border-bottom:1px solid {GRID}'>{what}</td>"
+            f"<td style='padding:6px 9px;border-bottom:1px solid {GRID};color:{color};font-weight:600'>{verdict}</td>"
+            f"</tr>")
+
+
+ROWS = "".join([
+    row("13", "재진입", "월요일 리버설 플립 (보유 중 반대신호 뜨면 손절 후 방향 전환)", "❌ 기각 (whipsaw 65%, −0.37%p)", WARN),
+    row("14", "재진입", "플립 확장 (월 2회 / 화 10시까지 2회)", "❌ 기각 (넓힐수록 손해 단조)", WARN),
+    row("15", "재진입", "플립 창×컷오프×횟수 64조합 전수 스윕", "⚠️ ‘개장 25분’ 후보 발견", MUTE),
+    row("16", "검증", "위 플립·게이트 후보를 walk-forward(OOS)로 검증", "❌ 플립 기각 · 게이트만 생존", WARN),
+    row("17", "진입/손절/재진입", "돌파 확인 마진 + (진단으로 진입요일·시간손절·재진입횟수 동시 검증)", "❌ 4건 모두 기각", WARN),
+    row("18", "익절", "신호 조건부 게이트 (강한 종목만 게이트 상향)", "❌ 기각 (인샘플 P=97%도 OOS서 무너짐)", WARN),
+    row("19", "<b>배분</b>", "<b>갭 크기 자본 필터 — 월 시가가 ±3% 이상 튄 종목만 배분</b>", "✅ <b>양 관문 통과 — 유일 생존</b>", WIN),
+    row("20", "익절", "갭필터 × 게이트10 결합 (더 오르나?)", "🔶 게이트는 잉여 (갭필터가 이미 포착)", MUTE),
+    row("21", "익절/배분", "피보 익절 사다리 2~5단·비중 변형 + 갭필터 방향·가중 정교화", "❌ 기각 (3단 균등·±3% 양방향이 최적)", WARN),
+    row("22", "진입", "갭 종목 첫봉 즉시진입 / 고정선 돌파진입", "❌ 기각 (신고점 대기가 압도)", WARN),
+])
+
+BODY = f"""<div style="font-family:sans-serif;max-width:720px;line-height:1.7;color:#211D18">
+<p>형,</p>
+<p>“live2 만들 때 실험 여러 개 했다며, 뭐뭐 했고 live2엔 뭐가 들어간 거냐”고 물었잖아.
+정확하게 정리해서 보내.</p>
+
+<h3 style="margin:22px 0 6px">먼저 결론 — live2에 들어간 건 ‘갭필터’ 딱 하나</h3>
+<p>live2 = <b>기존 281 엔진 그대로 + 갭필터(±3%) 하나만.</b>
+매매 규칙(진입·익절·청산)은 하나도 안 건드렸고, 게이트 상향·플립 같은 다른 시도는
+<b>전부 검증에서 떨어져서 안 넣었어.</b> (그것들은 대조군 live3에 넣어 비교 중)</p>
+
+<h3 style="margin:22px 0 6px">우리가 실제로 돌린 실험 10개 (이번 라운드)</h3>
+<p style="font-size:14px;color:{MUTE}">전략을 4개 축(진입·익절·손절·재진입) + 배분으로 나눠서 훑었어.
+각 실험은 <b>부트스트랩 + walk-forward 2단계 검증</b>을 거쳤고, 통과 못 하면 기각.</p>
+<table style="border-collapse:collapse;font-size:13px;width:100%">
+<tr style="background:#E6E0D4">
+<th style="padding:7px 9px;text-align:center">#</th>
+<th style="padding:7px 9px;text-align:left">축</th>
+<th style="padding:7px 9px;text-align:left">무엇을 시도했나</th>
+<th style="padding:7px 9px;text-align:left">결과</th></tr>
+{ROWS}
+</table>
+<p style="font-size:13.5px;color:{MUTE};margin-top:8px">
+※ 여기에 지난 라운드(7월 초) 실험 12개까지 합치면 총 <b>20개 넘는 아이디어</b>를 같은 방식으로 검증했어.</p>
+
+<h3 style="margin:22px 0 6px">핵심 메시지</h3>
+<ul>
+<li><b>19개를 던져서 갭필터 하나만 살아남았다.</b> 나머지는 다 근거와 함께 기각 기록으로 남김
+    (다음에 누가 같은 아이디어 또 팔 필요 없게).</li>
+<li>특히 실험 16이 중요해 — <b>부트스트랩만 봤을 땐 좋아 보이던 플립·게이트가
+    walk-forward(실전 순서 검증)에선 무너졌어.</b> 갭필터만 두 관문 다 통과.</li>
+<li>그래서 live2엔 <b>가장 단순하고 유일하게 검증된 것(갭필터)만</b> 넣었고,
+    애매하게 떨어진 후보들은 live3에서 “정말 죽는지” 전방 관찰 중.</li>
+</ul>
+
+<p style="margin-top:14px">요약하면 — <b>많이 시도했고, 대부분 버렸고, 살아남은 하나가 live2</b>야.
+그래서 믿을 만한 거고. 궁금한 실험 있으면 그거 하나만 자세히 풀어서 또 보내줄게.</p>
+<p style="color:{MUTE};font-size:12.5px">— bullet281 · 실험 요약</p>
+</div>"""
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--to"); ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+    to = [x.strip() for x in a.to.split(",")] if a.to else DEFAULT_TO
+    subject = "[bullet281] 우리가 돌린 실험 전체 정리 — live2엔 ‘갭필터’ 하나만 들어감"
+
+    msg = EmailMessage()
+    msg["To"] = ", ".join(to); msg["Subject"] = subject
+    msg.set_content("HTML 지원 클라이언트에서 보세요.")
+    msg.add_alternative(BODY, subtype="html")
+
+    if a.dry_run:
+        print(f"[dry-run] → {to}\n제목: {subject}\n실험 행: {BODY.count('<tr>')-1}개")
+        return
+    sender, pw = _load_creds()
+    msg["From"] = sender
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context()) as s:
+        s.login(sender, pw); s.send_message(msg)
+    print(f"전송 완료 → {', '.join(to)} | {subject}")
+
+
+if __name__ == "__main__":
+    main()

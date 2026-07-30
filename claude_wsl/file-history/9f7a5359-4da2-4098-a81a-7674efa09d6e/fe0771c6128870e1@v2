@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""WSL LAP mesh CHECK worker: mesh one case from a geometry dir and report
+pass/fail + quality. Validation mode -> deletes the .msh after (we only want
+the verdict, keeps WSL disk low). Prints a final `STATUS {json}` line.
+
+Usage: wsl_lap_check.py <geo_root> <case> <nproc> [size] [csv]
+  geo_root/case_<case>/{lumen,solid,lipid,fc}.stp
+"""
+import sys, os, io, json, time, shutil, contextlib, tempfile
+from pathlib import Path
+import pandas as pd
+
+HERE = Path(__file__).resolve().parent
+DEFAULT_CSV = "/mnt/c/Users/jeff/project_inventor/33_0605_final_analysis/parameter_0728.csv"
+
+
+def main():
+    geo_root = Path(sys.argv[1])
+    case = int(sys.argv[2])
+    nproc = int(sys.argv[3]) if len(sys.argv) > 3 else 3
+    size = float(sys.argv[4]) if len(sys.argv) > 4 else 0.055
+    csv = sys.argv[5] if len(sys.argv) > 5 else DEFAULT_CSV
+
+    d = geo_root / f"case_{case}"
+    need = ["lumen.stp", "solid.stp", "lipid.stp", "fc.stp"]
+    miss = [f for f in need if not (d / f).exists()]
+    if miss:
+        print("STATUS " + json.dumps({"case": case, "status": "no_geo", "missing": miss}))
+        return
+
+    lesion = float(pd.read_csv(csv).loc[case, "lesion_length"])
+    out = Path(tempfile.mkdtemp(prefix=f"lapchk_{case}_"))
+    import HXT_meshing_I_dist as M
+    t0 = time.time()
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            msh = M.gmshing_solid(d / "lumen.stp", d / "solid.stp", d / "lipid.stp",
+                                  d / "fc.stp", out, nproc, True, False, size, lesion, 5, 10)
+    except Exception as e:
+        sys.stdout.write(buf.getvalue()[-3000:])
+        print("STATUS " + json.dumps({"case": case, "status": "failed",
+              "error": f"{type(e).__name__}: {e}", "seconds": round(time.time() - t0, 1)}))
+        shutil.rmtree(out, ignore_errors=True)
+        return
+
+    q = {}
+    qj = out / "quality.json"
+    if qj.exists():
+        try: q = json.loads(qj.read_text())
+        except Exception: pass
+    shutil.rmtree(out, ignore_errors=True)  # validation: discard the mesh
+    print("STATUS " + json.dumps({
+        "case": case, "status": "done", "mesh_size": size,
+        "num_elements": q.get("num_elements"), "min_quality": q.get("min_quality"),
+        "neg_jacobian": q.get("neg_jacobian_count"), "seconds": round(time.time() - t0, 1)}))
+
+
+if __name__ == "__main__":
+    main()

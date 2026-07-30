@@ -1,0 +1,24 @@
+#!/bin/bash
+# 순차 메싱 (Simmetrix 라이선스 1석).
+# 대기는 pgrep -x (프로세스명 정확일치) -> 명령줄 문자열 자기매치 없음.
+# 사용법: mesh_indep_run.sh 0.02 0.01
+cd /home/jeff/project/54_analysis || exit 1
+PY=/home/jeff/miniconda3/envs/ansys_new/bin/python
+L=mesh_independent_test_fluid/logs
+mkdir -p "$L"
+
+for g in "$@"; do
+  done_file="mesh_independent_test_fluid/mesh/$g/meshing/mesh-complete/mesh-complete.mesh.vtu"
+  if [ -f "$done_file" ]; then echo "$g 이미 완료, skip"; continue; fi
+  while pgrep -x mesh_generator > /dev/null; do sleep 5; done
+  rm -rf "mesh_independent_test_fluid/mesh/$g"
+  echo "=== $g START $(date +%T) ==="
+  $PY -u mesh_indep_fluid.py "$g" > "$L/mesh_${g}.log" 2>&1
+  rc=$?
+  if [ -f "$done_file" ]; then
+    echo "=== $g OK $(date +%T) ==="
+  else
+    echo "=== $g FAIL rc=$rc $(date +%T) ==="
+  fi
+done
+echo "RUN DONE $(date +%T)"

@@ -1,0 +1,179 @@
+# -*- coding: utf-8 -*-
+"""A/B(/C) experiment: BC application method speed on ONE case.
+  map     = current /MAP with PLGEOM/PLMAP plots (baseline)
+  mapnp   = /MAP without the plot calls
+  sfe     = SFE-direct: KDTree-map col7 pressure onto SURF154 nodes in Python,
+            write mapped.sfe ourselves, skip the /MAP processor entirely.
+For each method: time prep_bc, then solve (PCG tol 1e-5) + FC extract, and report
+max/mean EQV stress so we can confirm the methods agree (correctness), not just speed.
+
+Usage: exp_sfe.py <case> <methods csv e.g. map,mapnp,sfe> <nproc> <baseport>
+Runs in scratch dirs ansys_LAP_0728/case_<c>/_exp_<method>/ (does NOT touch the
+production FC_case_<c>_low.vtk). Distinct port/tag per method -> safe beside even/odd.
+"""
+import sys, os, time, pathlib
+import numpy as np
+import pandas as pd
+from scipy.spatial import cKDTree
+
+HERE = pathlib.Path("/home/jeff/project/54_analysis")
+sys.path.insert(0, str(HERE))
+import pymapdl_sim_LAP_0728 as M           # __main__ guarded -> only imports the class
+import utils.utils_ansys.utils_prep as utils_prep
+
+W = M.PYMAPDL_worker
+BC = "low"
+
+
+def _prep_common(self):
+    """prep_bc setup shared by all methods: cdread, etdele, fix BC, CMs, SURF154 esurf.
+    Returns after SURF154 exists and is selected (still in PREP7)."""
+    self.mapdl.prep7()
+    cdb_name = pathlib.Path(self.cdb_path).name
+    self.mapdl.cdread("db", cdb_name)
+    for et in [1, 3, 4]:
+        self.mapdl.etdele(et)
+    self.mapdl.nlgeom("OFF")
+    self.mapdl.shpp("OFF")
+    self.mapdl.allsel()
+    utils_prep.fix_bc_from_nid_list(self.mapdl, self.nodes_by_tag[6])
+    utils_prep.Create_cm_from_nid_list(self.mapdl, self.nodes_by_tag[4], "WALL_IN_VESSEL", False)
+    utils_prep.Create_cm_from_nid_list(self.mapdl, self.nodes_by_tag[5], "WALL_IN_FC", False)
+    self.mapdl.et(7, "SURF154")
+    self.mapdl.keyopt(7, 2, 0); self.mapdl.keyopt(7, 4, 0)
+    self.mapdl.keyopt(7, 7, 1); self.mapdl.keyopt(7, 11, 2)
+    for wall in ["WALL_IN_FC", "WALL_IN_VESSEL"]:
+        self.mapdl.cmsel(type_='S', name=wall, entity='NODE')
+        self.mapdl.type(7)
+        self.mapdl.esurf()
+    self.mapdl.esel('S', 'TYPE', '', 7)
+
+
+def prep_bc_map(self, wall_csv_path, plots=True):
+    _prep_common(self)
+    n = len(self.mapdl.mesh.enum)
+    print(f"[map] SURF154: {n} elems")
+    self.mapdl.nsle()
+    self.mapdl.cm('TARGET_NODES', 'NODE')
+    self.mapdl.allsel()
+    self.mapdl.finish()
+    t = time.time()
+    self.mapdl.run('/MAP')
+    self.mapdl.target('TARGET_NODES')
+    self.mapdl.ftype('CSV', 0)
+    self.mapdl.read(str(wall_csv_path), 1, '', 1, 2, 3, 7)
+    if plots:
+        self.mapdl.run('PLGEOM')
+    self.mapdl.run('MAP,,2,,0,20')
+    if plots:
+        self.mapdl.run('PLMAP')
+    self.mapdl.run("WRITEMAP,'mapped.sfe'")
+    self.mapdl.finish()
+    dt = time.time() - t
+    print(f"[map{'' if plots else '-noplot'}] /MAP time: {dt:.2f}s")
+    return dt
+
+
+def prep_bc_sfe(self, wall_csv_path):
+    _prep_common(self)
+    self.mapdl.esel('S', 'TYPE', '', 7)
+    surf_enum = set(int(x) for x in self.mapdl.mesh.enum)
+    print(f"[sfe] SURF154: {len(surf_enum)} elems")
+    t = time.time()
+    grid = self.mapdl.mesh.grid
+    aen = np.asarray(grid.cell_data['ansys_elem_num'])
+    mask = np.isin(aen, list(surf_enum))
+    sg = grid.extract_cells(mask)
+    pts = np.asarray(sg.points)
+    en = np.asarray(sg.cell_data['ansys_elem_num'])
+    # KDTree: map col7 pressure of the wall CSV onto each SURF154 point (nearest)
+    df = np.loadtxt(str(wall_csv_path), delimiter=",", skiprows=1)
+    tree = cKDTree(df[:, :3])
+    _, idx = tree.query(pts, k=1)
+    node_p = df[idx, 6]                     # pressure per SURF154 point (aligned to sg.points)
+    # write SFE per element: corner-node pressures (VAL1..4)
+    lines = []
+    ncell = sg.n_cells
+    for i in range(ncell):
+        pids = sg.get_cell(i).point_ids
+        corners = list(pids[:4]) if len(pids) >= 4 else list(pids[:3])
+        vals = [float(node_p[p]) for p in corners]
+        while len(vals) < 4:
+            vals.append(vals[-1])
+        lines.append(f"sfe,{int(en[i])},1,pres,0,{vals[0]:.6f},{vals[1]:.6f},{vals[2]:.6f},{vals[3]:.6f}")
+    sfe_path = pathlib.Path(self.ansys_exec_dir) / "mapped.sfe"
+    sfe_path.write_text("\n".join(lines) + "\n")
+    self.mapdl.finish()
+    dt = time.time() - t
+    print(f"[sfe] KDTree+write ({ncell} SFE lines) time: {dt:.2f}s")
+    return dt
+
+
+def run_one(case, method, nproc, port):
+    tag = f"LAPX{method[:1].upper()}"
+    exec_dir = HERE / "ansys_LAP_0728" / f"case_{case}" / f"_exp_{method}"
+    exec_dir.mkdir(parents=True, exist_ok=True)
+    param = HERE / "pre_data" / "parameter_0728.csv"
+    matjson = HERE / "pre_data" / "material.json"
+    wall_dir = HERE / "post_data" / "wall_no_hyperemia"
+    wall_csv = wall_dir / BC / f"wall_{BC}_case_{case}.csv"
+    msh = HERE / "LAP_mesh" / f"solid_LAP_{case}.msh"
+
+    w = W(case, wall_dir, exec_dir, param, port_num=port, nproc=nproc, tag=tag)
+    cdb = w.pymapdl_msh_to_cdb(msh); w.cdb_path = cdb
+    w.bc_type = BC; w.casename = f"{tag}_case_{case}_{BC}"
+    w.pymapdl_launch(); w.mapdl.jobname = w.casename
+
+    t0 = time.time()
+    if method == "map":
+        prep_dt = prep_bc_map(w, wall_csv, plots=True)
+    elif method == "mapnp":
+        prep_dt = prep_bc_map(w, wall_csv, plots=False)
+    elif method == "sfe":
+        prep_dt = prep_bc_sfe(w, wall_csv)
+    else:
+        raise ValueError(method)
+    prep_total = time.time() - t0
+
+    w.pymapdl_prep_mat(str(matjson))
+    ts = time.time()
+    w.pymapdl_solve(solver="PCG")
+    solve_dt = time.time() - ts
+    out_vtk = exec_dir / f"FC_{method}.vtk"
+    w._save_fc_results_rst(str(out_vtk))
+    w.safe_mapdl_exit()
+    os.system(f"pkill -9 -f '\\-j {tag}_' 2>/dev/null; true")
+
+    # correctness: FC EQV stress stats
+    import pyvista as pv
+    g = pv.read(str(out_vtk))
+    eqv = np.asarray(g.point_data["EQV_stress"])
+    eqv = eqv[np.isfinite(eqv)]
+    return dict(method=method, prep_bc=round(prep_dt, 2), prep_total=round(prep_total, 2),
+               solve=round(solve_dt, 2), eqv_max=float(eqv.max()), eqv_mean=float(eqv.mean()),
+               vtk=str(out_vtk))
+
+
+if __name__ == "__main__":
+    case = int(sys.argv[1])
+    methods = sys.argv[2].split(",") if len(sys.argv) > 2 else ["map", "mapnp", "sfe"]
+    nproc = int(sys.argv[3]) if len(sys.argv) > 3 else 20
+    baseport = int(sys.argv[4]) if len(sys.argv) > 4 else 50300
+    results = []
+    for k, m in enumerate(methods):
+        print(f"\n\n########## case {case} method={m} ##########")
+        try:
+            r = run_one(case, m, nproc, baseport + 4 * k)
+            results.append(r); print("RESULT", r)
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            print(f"[{m}] FAILED: {e}")
+    print("\n\n================ SUMMARY case", case, "================")
+    base = next((r for r in results if r["method"] == "map"), None)
+    for r in results:
+        line = f"{r['method']:>6}: prep_bc={r['prep_bc']:>7.2f}s  solve={r['solve']:>7.2f}s  eqv_max={r['eqv_max']:.3e}  eqv_mean={r['eqv_mean']:.3e}"
+        if base and r["method"] != "map":
+            dprep = base["prep_bc"] - r["prep_bc"]
+            dstress = (r["eqv_max"] - base["eqv_max"]) / base["eqv_max"] * 100
+            line += f"   | prep -{dprep:.1f}s   eqv_max vs map {dstress:+.2f}%"
+        print(line)

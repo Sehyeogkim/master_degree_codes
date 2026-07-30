@@ -1,0 +1,36 @@
+#!/bin/bash
+# LAP (Type-1, no-cal) distance-field meshing for the 86 missing id>500 cases.
+# Runs in 54_analysis, geometry from solid_data/, output LAP_mesh/solid_LAP_<id>.msh.
+set -u
+cd /home/jeff/project/54_analysis
+export PATH=/home/jeff/miniconda3/envs/ansys_new/bin:$PATH
+export PY=/home/jeff/miniconda3/envs/ansys_new/bin/python
+export TMO=${TMO:-900}
+export PROG=/home/jeff/project/54_analysis/LAP_dist_progress.log
+mkdir -p LAP_mesh_logs
+: > "$PROG"
+
+run_one() {
+  local c=$1
+  local t0=$SECONDS
+  timeout -k 20 "$TMO" "$PY" -u run_LAP_dist.py "$c" 20 0.05 \
+      > "LAP_mesh_logs/case_${c}.log" 2>&1
+  local rc=$?
+  local el=$(( SECONDS - t0 ))
+  local st
+  if [ $rc -eq 0 ]; then
+    if grep -q "\[skip\]" "LAP_mesh_logs/case_${c}.log"; then st=SKIP; else st=OK; fi
+  elif [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
+    if [ $el -ge $(( TMO - 30 )) ]; then st=TIMEOUT; else st=KILLED; fi
+    echo "[timeout] killed after ${el}s" >> "LAP_mesh_logs/case_${c}.log"
+  elif grep -q "STEP4 Failed" "LAP_mesh_logs/case_${c}.log"; then st=STEP4
+  elif grep -q "STEP1 Failed\|STEP3 Failed" "LAP_mesh_logs/case_${c}.log"; then st=BOOL
+  else st=FAIL; fi
+  # clean stray work dir on failure
+  [ "$st" = OK ] || [ "$st" = SKIP ] || rm -rf "LAP_mesh/work_case_${c}" 2>/dev/null
+  echo "$(date +%m-%d\ %H:%M:%S) case ${c} rc=${rc} ${el}s ${st}" >> "$PROG"
+}
+export -f run_one
+
+xargs -a LAP_missing_gt500.txt -P 6 -I{} bash -c 'run_one {}'
+echo "$(date +%m-%d\ %H:%M:%S) LAP BATCH COMPLETE" >> "$PROG"

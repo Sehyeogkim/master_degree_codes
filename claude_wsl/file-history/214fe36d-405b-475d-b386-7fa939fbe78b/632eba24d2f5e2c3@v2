@@ -1,0 +1,45 @@
+"""리버설밴드 미세 컷오프 스윕 — 월요일 09:05~10:30 5분 단위 × flip_max{1,∞}.
+사용: python3 sweep_band_fine.py → sweep_band_fine_results.json"""
+import os, sys, json, time
+import multiprocessing as mp
+import sweep_band as S   # load_dataset·run_config·BASE 재사용
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+def _cuts():
+    out = []
+    h, m = 9, 5
+    while (h, m) <= (10, 30):
+        out.append(f"{h:02d}:{m:02d}")
+        m += 5
+        if m >= 60:
+            m -= 60; h += 1
+    return out
+
+CUTS = _cuts()                       # 18개
+MAXS = [1, 999]                      # x1 주력 + x무한 대조
+GRID = [("281", None, 0)]
+GRID += [(f"{c}·x{'inf' if m>10 else m}", c, m) for c in CUTS for m in MAXS]
+OUT = os.path.join(HERE, "sweep_band_fine_results.json")
+
+
+def main():
+    t0 = time.time()
+    S.DS = S.load_dataset()
+    print(f"{len(S.DS)} 종목-주 로드 {time.time()-t0:.0f}s · 미세 스윕 {len(GRID)}설정 (컷오프 {len(CUTS)}개)")
+    with mp.Pool(8) as pool:
+        results = pool.map(S.run_config, GRID)
+    json.dump(results, open(OUT, "w", encoding="utf-8"), ensure_ascii=False)
+    base = next(r for r in results if r["label"] == "281"); b0 = base["square_mean"]
+    print(f"\n기준 281 square {b0:+.3f}%")
+    print(f"{'컷오프':8} {'x1 square':>10} {'CI':>18} {'P':>5} {'플립율':>7} | {'x∞ square':>10} {'플립율':>7}")
+    for c in CUTS:
+        r1 = next(r for r in results if r["cut"] == c and r["max"] == 1)
+        ri = next(r for r in results if r["cut"] == c and r["max"] == 999)
+        print(f"  ~{c}  {r1['square_mean']:+8.3f}% [{r1['ci_lo']:+.2f},{r1['ci_hi']:+.2f}] "
+              f"{r1['p_pos']*100:4.0f}% {r1['flip_rate']:6.1f}% | {ri['square_mean']:+8.3f}% {ri['flip_rate']:6.1f}%")
+    print("saved →", OUT)
+
+
+if __name__ == "__main__":
+    main()

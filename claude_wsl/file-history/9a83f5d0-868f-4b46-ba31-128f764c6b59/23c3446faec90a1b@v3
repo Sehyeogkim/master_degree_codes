@@ -1,0 +1,41 @@
+"""255주 × 선정종목 → 종목별 (신호=직전주변동율, F0, net수익률 r, 진입gap) 레코드.
+F0 정합성: yfinance 직전금종가 vs CREON 매매주 월요일 첫봉 시가 괴리>35%면 분할조정
+불일치로 보고 그 종목-주 제외(bad_f0). 결과 weekly_records.json.
+
+각 종목-주는 causal — 신호(직전주)·F0(직전금)는 매매주 시작 전 확정, 엔진은 봉순서 판단."""
+import blib, json, os
+
+MISMATCH = 0.35     # |F0/월첫시가 − 1| 초과 → yfinance 분할조정 불일치로 제외
+
+def build():
+    recs = {}
+    stats = dict(weeks=0, stock_weeks=0, no_daily=0, bad_f0=0, kept=0)
+    for wk in blib.weeks():
+        stats["weeks"] += 1
+        stocks = []
+        for code, path in blib.week_stocks(wk):
+            stats["stock_weeks"] += 1
+            chg, F0 = blib.prior_signal(wk, code)
+            if F0 is None:
+                stats["no_daily"] += 1; continue
+            r, gap, mon_open = blib.stock_week(path, F0)
+            if r is None:
+                stats["no_daily"] += 1; continue
+            if mon_open and abs(F0 / mon_open - 1) > MISMATCH:
+                stats["bad_f0"] += 1; continue         # 분할조정/스케일 불일치
+            stats["kept"] += 1
+            stocks.append(dict(code=code, signal=chg, F0=F0, r=r,
+                               gap=gap, mon_open=mon_open))
+        if stocks:
+            recs[wk] = stocks
+    return recs, stats
+
+
+if __name__ == "__main__":
+    recs, stats = build()
+    out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weekly_records.json")
+    json.dump(dict(stats=stats, weeks=recs), open(out, "w", encoding="utf-8"),
+              ensure_ascii=False, indent=1)
+    usable = sum(1 for v in recs.values() if len(v) >= 1)
+    print("stats:", stats)
+    print(f"사용가능 주: {usable}, 저장 → {out}")

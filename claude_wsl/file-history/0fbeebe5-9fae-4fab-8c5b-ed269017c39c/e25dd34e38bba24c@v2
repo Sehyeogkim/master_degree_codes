@@ -1,0 +1,43 @@
+"""p_backtest (Process 2) — 과거데이터 확인: 종목선정(f_select_stocks) → 종목별 엔진(f_run_engine) → 1 HTML(f_build_report 병합).
+
+사용: python3 p_backtest.py 2026-06-29 [--out out.html]   (2026-06-29 주를 선정·검증)
+"""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from weekcal import week_bounds
+from f_select_stocks import select_stocks
+from f_run_engine import run_engine, STRAT281
+from f_build_report import build_report
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def backtest(target_monday, *, out_path, strat=STRAT281, stamp=None):
+    top = select_stocks(target_monday, with_names=True)
+    ws, we = week_bounds(target_monday)
+    sections = []
+    for sel in top:
+        code = sel["code"]; name = sel.get("name", code)
+        sec = run_engine(code, ws, we, sel["fri_close"], strat=strat)
+        if not sec:
+            print(f"  {code} {name}: 5분봉 없음(스킵)"); continue
+        sec["name"] = name; sec["label"] = f"{name} ({code})"; sec["sel"] = sel
+        sections.append(sec)
+    html = build_report(sections, meta=dict(
+        stamp=stamp or f"{target_monday} 주 마감", live=False, intro=True,
+        doctitle=f"281 과거주 · {target_monday}",
+        h1=f"281 과거주 확인 — {target_monday} 주",
+        subtitle="선정 → 그 주 5분봉 281 가동 · TradingView-Screener + yfinance · F0=직전 금종가"))
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    open(out_path, "w", encoding="utf-8").write(html)
+    print("wrote", os.path.abspath(out_path), f"({len(sections)}종목)")
+    return html
+
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("monday", help="검증할 주의 월요일 YYYY-MM-DD")
+    ap.add_argument("--out", default=os.path.join(HERE, "..", "report", "p_backtest.html"))
+    a = ap.parse_args()
+    backtest(a.monday, out_path=a.out)

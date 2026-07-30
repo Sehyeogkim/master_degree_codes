@@ -1,0 +1,76 @@
+# -*- coding: utf-8 -*-
+"""이번 주 성능(TradingView Perf.W) 기준 top5 선정 → 리포트 생성 (비교용, 프로덕션 미변경).
+시총 필터 → Perf.W Top20 → 거래대금 Top5. F0·월시가·chg는 tvDatafeed 통일."""
+import sys, os, warnings, logging, datetime
+warnings.filterwarnings("ignore"); logging.disable(logging.CRITICAL)
+sys.path.insert(0, "/home/jeff/bullet281/pipeline")
+sys.path.insert(0, "/home/jeff/bullet281/pipeline/screeners")
+from tradingview_screener import Query, col
+import yfinance as yf
+from weekcal import prior_week
+from data_source import prior_week_open_close
+import momentum_v1 as M
+from f_build_report import selection_report
+
+MON = "2026-07-20"
+CAP, TOPCH, TOPV = 500_000_000_000, 20, 5
+pm, pf, dl0, dl1 = prior_week(MON)
+
+# 1) 시총 필터 유니버스 + Perf.W (한 번의 스크리너 콜) → Perf.W 내림차순
+_, uni = (Query().set_markets("korea").select("name", "market_cap_basic", "Perf.W")
+          .where(col("market_cap_basic") > CAP)
+          .order_by("Perf.W", ascending=False).limit(1500).get_scanner_data())
+rows = []
+for _, r in uni.iterrows():
+    c = str(r["name"])
+    pw = r["Perf.W"]
+    if c.isdigit() and len(c) == 6 and pw is not None and pw == pw:
+        rows.append((c, float(r["market_cap_basic"]), float(pw)))
+top_perf = rows[:TOPCH]                          # Perf.W 상위 20
+codes = [c for c, _, _ in top_perf]
+print(f"시총 {CAP/1e8:,.0f}억↑ 유니버스 {len(rows)}개 → Perf.W Top{TOPCH}")
+
+# 2) 그 20종목 직전주 일봉 → 거래대금 = Σ(종가×거래량)
+dd = yf.download([c + ".KS" for c in codes], start=dl0, end=dl1, interval="1d",
+                 progress=False, group_by="ticker", threads=True)
+liq, yfoc = {}, {}
+for c in codes:
+    try:
+        d = dd[c + ".KS"].dropna()
+        liq[c] = float((d["Close"] * d["Volume"]).sum())
+        yfoc[c] = (float(d["Open"].iloc[0]), float(d["Close"].iloc[-1]))
+    except Exception:
+        liq[c] = 0.0; yfoc[c] = (None, None)
+
+# 3) 거래대금 Top5
+final = sorted(top_perf, key=lambda x: -liq[x[0]])[:TOPV]
+fcodes = [c for c, _, _ in final]
+names = M.resolve_names(fcodes)
+print(f"→ 거래대금 Top{TOPV}: {fcodes}")
+
+# 4) 최종 5종목 F0·월시가·chg tvDatafeed 통일 + perf_w(스크리너) + days(yf)
+recs = []
+for c, cap, pw in final:
+    fbo, fbc = yfoc.get(c, (None, None))
+    mo, f0, src = prior_week_open_close(c, pm, pf, fb_open=fbo, fb_close=fbc)
+    mo = mo or fbo; f0 = f0 or fbc
+    chg = (f0 / mo - 1) * 100 if mo else 0.0
+    recs.append(dict(code=c, name=names.get(c, c), chg=chg, val=liq[c],
+                     fri_close=f0, mon_open=mo, mktcap=cap, perf_w=pw,
+                     days=M._prior_days(dd, c, pm, pf)))
+    print(f"  {c} {names.get(c,c)[:16]:16} Perf.W {pw:+.1f}% | 우리chg {chg:+.1f}% "
+          f"거래대금 {liq[c]/1e8:,.0f}억 F0 {f0:,.0f} [{src}]")
+recs.sort(key=lambda r: -r["perf_w"])            # Perf.W 순 정렬(표시)
+
+now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+html = selection_report(recs, meta=dict(
+    project="live_project1 · Perf.W 랭킹(비교용)", monday=MON, stamp=now,
+    engine="engine281", screener="momentum_perfw (TradingView 주간성능 랭킹)",
+    cap_min=CAP, top_change=TOPCH, top_value=TOPV, direction="up",
+    desc="TradingView Perf.W(주간성능) 기준 top5 — 기존 chg 기준 선정과 비교용.\n"
+         "Perf.W = 최신종가 / 7일전바 시가 − 1 (롤링 주간성능)."))
+out = "/tmp/claude-1000/-home-jeff-bullet281/0fbeebe5-9fae-4fab-8c5b-ed269017c39c/scratchpad/selection_perfw_2026-07-20.html"
+open(out, "w", encoding="utf-8").write(html)
+print("saved", out)
+import json
+json.dump(recs, open(out.replace(".html", ".json"), "w"), ensure_ascii=False, default=str)

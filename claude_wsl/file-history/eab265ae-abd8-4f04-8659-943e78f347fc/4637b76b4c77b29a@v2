@@ -1,0 +1,16 @@
+import pandas as pd
+import numpy as np
+from scipy.stats import spearmanr
+
+D = "/home/jeff/project/66_post_processing_journal/LAP_data"
+radii = [("r0005", 0.005), ("r001", 0.01), ("r0015", 0.015), ("r002", 0.02)]
+d = {s: pd.read_csv(f"{D}/PSS_result_0727_{s}.csv").set_index("case_id").sort_index() for s, _ in radii}
+pairs = [("r0005", "r001"), ("r001", "r0015"), ("r0015", "r002")]
+
+print(f"{'pair':<14}{'median_rel_PSS':>16}{'median_rel_dPSS':>18}{'Spearman_PSS':>15}{'Spearman_dPSS':>16}")
+for a, b in pairs:
+    rel_p = ((d[b].PSS_Principal - d[a].PSS_Principal).abs() / d[a].PSS_Principal.abs()) * 100
+    rel_d = ((d[b].del_PSS_Principal - d[a].del_PSS_Principal).abs() / d[a].del_PSS_Principal.abs()) * 100
+    s_p, _ = spearmanr(d[a].PSS_Principal, d[b].PSS_Principal)
+    s_d, _ = spearmanr(d[a].del_PSS_Principal, d[b].del_PSS_Principal)
+    print(f"{a+'->'+b:<14}{rel_p.median():>15.2f}%{rel_d.median():>17.2f}%{s_p:>15.4f}{s_d:>16.4f}")

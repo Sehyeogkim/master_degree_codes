@@ -1,0 +1,18 @@
+#!/bin/bash
+# Mesh case 0 with the BOX recipe at the three independence-test sizes, sequentially.
+# 0.04 first: it doubles as the calibration point against the March production mesh
+# (LAP_mesh/solid_LAP_0.msh = 2,291,813 nodes).
+R=/mnt/hdd/jeff/mesh_indep_solid
+PY=$HOME/miniconda3/envs/ansys_new/bin/python
+CASE=${CASE:-0}
+NPROC=${NPROC:-24}
+LOG=$R/logs/mesh.log
+
+cd $HOME/project/54_analysis || exit 1
+for S in 0.04 0.05 0.0625; do
+  echo "===== $(date '+%F %T')  size=$S  nproc=$NPROC =====" >> "$LOG"
+  timeout -k 30 3600 "$PY" -u "$R/scripts/mesh_one_box.py" "$CASE" "$NPROC" "$S" "$R/mesh" >> "$LOG" 2>&1
+  echo "----- exit=$? -----" >> "$LOG"
+done
+echo "ALL MESHING DONE $(date '+%F %T')" >> "$LOG"
+grep '^STATUS' "$LOG" | tail -5 >> "$LOG"

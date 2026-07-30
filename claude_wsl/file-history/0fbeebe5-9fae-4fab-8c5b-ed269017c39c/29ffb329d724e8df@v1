@@ -1,0 +1,69 @@
+"""1단계 — 종목 선정 (지난주 기준).
+규칙: ① 시총 5,000억↑  ② 주간변동율(금종가−월시가)/월시가 '상승' Top20  ③ 그중 거래대금 Top5.
+데이터: tradingview-screener(시총) + yfinance(지난주 일봉). 결과 → _top5.json.
+
+사용: python3 select_stocks.py  (아래 SEL_START/SEL_END = 지난주 월~금)
+※ pykrx·tvDatafeed는 이 환경에서 불가 → 스크리너+yfinance로 대체. yfinance는 .KS 접미사로
+  KOSPI/KOSDAQ 무관하게 6자리 코드를 올바르게 해석하므로 전 종목 '.KS' 통일.
+"""
+import os, json, warnings, logging, signal
+warnings.filterwarnings("ignore"); logging.disable(logging.CRITICAL)
+signal.signal(signal.SIGALRM, lambda s, f: (_ for _ in ()).throw(TimeoutError()))
+from tradingview_screener import Query, col
+import yfinance as yf
+import pandas as pd
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = os.path.join(HERE, "_top5.json")
+# ── 설정: 지난주(선정 기준 주) 월~금 ──
+SEL_START = "2026-06-29"     # 지난주 월
+SEL_FRI = "2026-07-03"       # 지난주 금 (F0 기준일)
+CAP_MIN = 500_000_000_000    # 시총 5,000억
+TOP_CHANGE = 20              # 변동율 상위
+TOP_VALUE = 5                # 그중 거래대금 상위
+DL_START, DL_END = "2026-06-27", "2026-07-05"   # yfinance 다운로드 범위(여유)
+
+
+def main():
+    signal.alarm(60)
+    _, uni = (Query().set_markets("korea").select("name", "market_cap_basic")
+              .where(col("market_cap_basic") > CAP_MIN)
+              .order_by("market_cap_basic", ascending=False).limit(1500).get_scanner_data())
+    signal.alarm(0)
+    codes = [n for n in uni["name"].tolist() if str(n).isdigit() and len(str(n)) == 6]
+    print(f"시총 {CAP_MIN/1e8:,.0f}억↑ 유니버스: {len(codes)}개")
+
+    signal.alarm(300)
+    dd = yf.download([c + ".KS" for c in codes], start=DL_START, end=DL_END,
+                     interval="1d", progress=False, group_by="ticker", threads=True)
+    signal.alarm(0)
+    rows = []
+    for c in codes:
+        try:
+            d = dd[c + ".KS"].dropna()
+            if len(d) < 2:
+                continue
+            mo = float(d["Open"].iloc[0]); fc = float(d["Close"].iloc[-1])
+            rows.append(dict(code=c, mon_open=mo, fri_close=fc,
+                             chg=(fc / mo - 1) * 100, val=float((d["Close"] * d["Volume"]).sum())))
+        except Exception:
+            pass
+    df = pd.DataFrame(rows)
+    up = df[df.chg > 0].sort_values("chg", ascending=False).head(TOP_CHANGE)
+    top = up.sort_values("val", ascending=False).head(TOP_VALUE)
+    print(f"일봉 확보 {len(df)}개 → 상승 Top{TOP_CHANGE} → 거래대금 Top{TOP_VALUE}")
+    # F0(지난주 금 종가)는 5분봉과 동일한 tvDatafeed 기준으로 재설정(가격 불일치 방지). 실패 시 yfinance 값 유지.
+    import json as _json
+    from data_source import f0_close
+    out = []
+    for _, r in top.iterrows():
+        f0, src = f0_close(r.code, SEL_FRI, fallback=r.fri_close)
+        f0 = f0 if f0 else r.fri_close
+        out.append(dict(code=r.code, chg=r.chg, val=r.val, fri_close=f0, mon_open=r.mon_open))
+        print(f"  {r.code} 변동율 {r.chg:+.1f}% 거래대금 {r.val/1e8:,.0f}억 F0(금종가) {f0:,.0f} [{src}]")
+    _json.dump(out, open(OUT, "w"))
+    print("saved", OUT)
+
+
+if __name__ == "__main__":
+    main()

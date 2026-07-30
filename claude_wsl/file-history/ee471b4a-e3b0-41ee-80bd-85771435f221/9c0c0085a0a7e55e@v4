@@ -1,0 +1,40 @@
+#!/bin/bash
+# Batch Type-2 quad meshing for geo_0723 cases 0..383 on cvbml02.
+#   quad (SOL=1, second_order_linear=True), mesh_size=0.06, nproc=20, .msh only (no .vtu)
+#   3 cases concurrent (3 x 20 = 60 cores), resumable (runner skips existing .msh).
+#   NEW: per-case wall-clock timeout -- gmsh boundary recovery can hang forever on bad
+#        geometry (cases 13/43/48 hung 12-17h on 2026-07-23). Timed-out cases are killed,
+#        logged as TIMEOUT, and their scratch files removed.
+set -u
+cd /home/jeff/project/65_final_0723
+export PATH=/home/jeff/miniconda3/envs/ansys_new/bin:$PATH
+export PY=/home/jeff/miniconda3/envs/ansys_new/bin/python
+export TMO=${TMO:-1800}          # seconds per case (normal case ~230s)
+export PROG=/home/jeff/project/65_final_0723/mesh_batch_progress.log
+mkdir -p mesh_logs
+: >> "$PROG"
+
+run_one() {
+  local c=$1
+  timeout -k 20 "$TMO" "$PY" -u run_type2_0723.py "$c" 20 1 0 0.06 > "mesh_logs/case_${c}.log" 2>&1
+  local rc=$?
+  local st
+  if [ $rc -eq 0 ]; then
+    if grep -q "\[skip\]" "mesh_logs/case_${c}.log"; then st=SKIP; else st=OK; fi
+  elif [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
+    st=TIMEOUT
+    echo "[timeout] killed after ${TMO}s" >> "mesh_logs/case_${c}.log"
+  elif grep -q "\[invalid\]" "mesh_logs/case_${c}.log"; then st=INVALID
+  else st=FAIL; fi
+  # on any non-success, drop scratch files (keep only a final .msh if it exists)
+  if [ "$st" != OK ] && [ "$st" != SKIP ]; then
+    rm -f "solid_0723/case_${c}/type2_mesh/cal_subdomain.msh" \
+          "solid_0723/case_${c}/type2_mesh/"*.stl \
+          "solid_0723/case_${c}/type2_mesh/"*.step 2>/dev/null
+  fi
+  echo "$(date +%m-%d\ %H:%M:%S) case ${c} rc=${rc} ${st}" >> "$PROG"
+}
+export -f run_one
+
+seq 0 383 | xargs -P 3 -I{} bash -c 'run_one {}'
+echo "$(date +%m-%d\ %H:%M:%S) BATCH COMPLETE" >> "$PROG"

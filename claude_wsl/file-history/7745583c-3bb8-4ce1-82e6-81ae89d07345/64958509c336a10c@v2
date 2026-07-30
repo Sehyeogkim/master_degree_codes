@@ -1,0 +1,85 @@
+#!/usr/bin/env python
+"""Single-case LAP solid mesher, BOX size-field recipe (mesh independence test).
+
+Uses lap_0729/HXT_meshing_I_box.py (Box field, VIn=mesh_size, VOut=0.2, Thickness=3mm,
+order 2 / SecondOrderLinear / Algo2D=5 / Algo3D=10 HXT, + HighOrder optimize + quality.json)
+-- the same Box recipe as the March production cohort, with the HighOrder untangling pass
+that the dist recipe also uses.
+
+Reads solid_data/case_<c>/{lumen,solid,lipid,fc}.stp and lesion_length from
+pre_data/parameter_0728.csv (row index == case_id).
+
+Usage: mesh_one_box.py <case> <nproc> <mesh_size> <outdir>
+Writes <outdir>/solid_LAP_<case>_box_<size>.msh + <outdir>/quality_box_<size>.json
+Prints one final `STATUS {json}` line (incl. node count read back from the .msh header).
+"""
+import sys, os, io, json, time, shutil, contextlib
+from pathlib import Path
+import pandas as pd
+
+Q = Path("/home/jeff/project/54_analysis")
+sys.path.insert(0, str(Q / "lap_0729"))
+CSV = Q / "pre_data" / "parameter_0728.csv"
+
+
+def node_count(msh):
+    with open(msh, "r") as f:
+        for line in f:
+            if line.startswith("$Nodes"):
+                return int(f.readline().split()[1])
+    return None
+
+
+def main():
+    case = int(sys.argv[1])
+    nproc = int(sys.argv[2])
+    size = float(sys.argv[3])
+    outdir = Path(sys.argv[4])
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    tag = f"{size:g}"
+    out = outdir / f"solid_LAP_{case}_box_{tag}.msh"
+    if out.exists():
+        print("STATUS " + json.dumps({"case": case, "size": size, "status": "skipped",
+                                      "nodes": node_count(out)}), flush=True)
+        return
+
+    src = Q / "solid_data" / f"case_{case}"
+    work = outdir / f"work_box_{tag}"          # gmsh writes solid_type_1.msh here
+    work.mkdir(parents=True, exist_ok=True)
+
+    lesion = float(pd.read_csv(str(CSV)).loc[case, "lesion_length"])
+
+    import HXT_meshing_I_box as M
+    t0 = time.time()
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(buf):
+            msh = M.gmshing_solid(
+                src / "lumen.stp", src / "solid.stp", src / "lipid.stp", src / "fc.stp",
+                work, nproc, True, False, size, lesion,
+            )
+    except Exception as e:
+        sys.stdout.write(buf.getvalue()[-4000:])
+        print("STATUS " + json.dumps({"case": case, "size": size, "status": "failed",
+                                      "error": f"{type(e).__name__}: {e}",
+                                      "seconds": round(time.time() - t0, 1)}), flush=True)
+        return
+
+    sys.stdout.write(buf.getvalue()[-4000:])
+
+    st = {"case": case, "size": size, "status": "done", "recipe": "box",
+          "lesion_length": lesion, "seconds": round(time.time() - t0, 1)}
+    qj = work / "quality.json"
+    if qj.exists():
+        st.update(json.loads(qj.read_text()))
+        shutil.copy(str(qj), str(outdir / f"quality_box_{tag}.json"))
+
+    shutil.move(str(msh), str(out))
+    st["nodes"] = node_count(out)
+    st["msh"] = str(out)
+    print("STATUS " + json.dumps(st), flush=True)
+
+
+if __name__ == "__main__":
+    main()

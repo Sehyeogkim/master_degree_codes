@@ -1,0 +1,62 @@
+#!/usr/bin/env python
+"""
+2D-algorithm sweep for Type-1 solid meshing (original lipid.stp, no optimization).
+The 2D Mesh.Algorithm is read from env ALGO2D by HXT_meshing_I_algo.
+
+Usage: ALGO2D=6 python run_solid_0723_algo.py <case> <nproc> <mesh_size>
+Outputs are tagged solid_type_1_algo<ALGO2D>.{msh,vtu}.
+"""
+import os
+import sys
+import time
+from pathlib import Path
+
+import pandas as pd
+import meshio
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from HXT_meshing_I_algo import gmshing_solid
+
+CASE = int(sys.argv[1])
+NPROC = int(sys.argv[2])
+MESH_SIZE = float(sys.argv[3])
+ALGO2D = os.environ.get("ALGO2D", "2")
+
+geo = HERE / "geo_0723" / f"case_{CASE}"
+out = HERE / "solid_0723" / f"case_{CASE}"
+out.mkdir(parents=True, exist_ok=True)
+
+CSV = Path("/home/jeff/project/54_analysis/pre_data/bin/parameter.csv")
+lesion_length = float(pd.read_csv(CSV).loc[CASE, "lesion_length"])
+
+print(f"[cfg] case={CASE} nproc={NPROC} mesh_size={MESH_SIZE} ALGO2D={ALGO2D} lipid=lipid.stp")
+
+t0 = time.time()
+msh = gmshing_solid(
+    geo / "lumen.stp",
+    geo / "solid.stp",
+    geo / "lipid.stp",
+    geo / "fc.stp",
+    str(out),
+    nproc=NPROC,
+    Terminal_display=True,
+    save_vtu=False,
+    mesh_size=MESH_SIZE,
+    lesion_length=lesion_length,
+)
+total = time.time() - t0
+
+tag = f"algo{ALGO2D}"
+msh_tag = out / f"solid_type_1_{tag}.msh"
+Path(msh).replace(msh_tag)
+vtu_tag = out / f"solid_type_1_{tag}.vtu"
+mesh = meshio.read(str(msh_tag))
+mesh.points *= 0.1
+if mesh.cell_sets:
+    mesh.cell_sets = {}
+meshio.write(str(vtu_tag), mesh)
+print(f"[msh] {msh_tag}")
+print(f"[vtu] {vtu_tag}")
+print(f"[total_time_s] {total:.1f}")
+print("[done]")

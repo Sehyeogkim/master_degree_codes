@@ -1,0 +1,139 @@
+# -*- coding: utf-8 -*-
+"""255주 × 7규칙 주간수익률/누적 시계열 인터랙티브 HTML 생성."""
+import json
+
+SP = "/tmp/claude-1000/-home-jeff-bullet281/9a83f5d0-868f-4b46-ba31-128f764c6b59/scratchpad"
+D = json.load(open(f"{SP}/series.json"))
+
+COLORS = {"equal": "#0072B2", "linear": "#56B4E9", "square": "#009E73",
+          "quartic": "#E69F00", "sigmoid": "#CC79A7", "softmax": "#D55E00",
+          "lookahead_gap4": "#8A7E70"}
+
+data_js = json.dumps(D, ensure_ascii=False)
+colors_js = json.dumps(COLORS)
+
+HTML = """<style>
+:root{--bg:#F0EEE6;--card:#fff;--ink:#1A1A1A;--muted:#6B5E54;--acc:#CC785C;--border:#D9D2C6;--grid:#EDE7DB}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
+font-family:-apple-system,"Apple SD Gothic Neo",sans-serif;line-height:1.5}
+main{max-width:1060px;margin:0 auto;padding:30px 18px 80px}
+h1{font-size:22px;margin:0 0 4px}.sub{color:var(--muted);font-size:13px;margin:0 0 16px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin:14px 0;position:relative}
+.ctitle{font-weight:800;font-size:15px;margin-bottom:2px}.cnote{color:var(--muted);font-size:12px;margin-bottom:8px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 10px;margin:4px 0 10px}
+.lg{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border:1px solid var(--border);
+border-radius:20px;font-size:12.5px;cursor:pointer;user-select:none;background:#FAF7F1}
+.lg.off{opacity:.38;text-decoration:line-through}
+.sw{width:14px;height:3px;border-radius:2px;display:inline-block}
+.sw.dash{background:none!important;border-top:3px dotted}
+.chartwrap{position:relative;overflow-x:auto}
+svg{display:block}.tip{position:absolute;pointer-events:none;background:#1A1A1A;color:#fff;font-size:11.5px;
+padding:7px 9px;border-radius:7px;white-space:nowrap;opacity:0;transition:opacity .08s;z-index:5;max-width:230px}
+.tip b{color:#F0EEE6}.trow{display:flex;justify-content:space-between;gap:10px}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:4px}
+th,td{border-bottom:1px solid var(--border);padding:6px 8px;text-align:right}th:first-child,td:first-child{text-align:left}
+th{background:#E6E0D4}.tag{font-size:10.5px;color:var(--muted)}
+.g{color:#2E7D32;font-weight:700}.r{color:#C25744;font-weight:700}
+.hint{font-size:11.5px;color:var(--muted);margin-top:6px}
+</style>
+<main>
+<h1>281 자본배분 — 방법별 주간수익률 (255주)</h1>
+<p class="sub">2021-05 ~ 2026-06 · 원자=주 · rᵢ=net(수수료·세금·슬리피지) · 배분규칙별 색상 · 범례 클릭=토글 · 마우스 올리면 값</p>
+
+<div class="card">
+  <div class="ctitle">① 주별 포트폴리오 수익률 <span class="tag">(방법별 Σwᵢrᵢ · %/주)</span></div>
+  <div class="cnote">고변동 노이즈 — 방법들이 거의 겹칩니다. look-ahead는 스케일 압도라 기본 OFF(점선).</div>
+  <div class="legend" id="leg"></div>
+  <div class="chartwrap"><div id="c1"></div><div class="tip" id="t1"></div></div>
+  <div class="hint">Y축 = 그 주 포트폴리오 net 수익률(%). 0선 회색.</div>
+</div>
+
+<div class="card">
+  <div class="ctitle">② 누적 복리수익률 <span class="tag">(같은 배분을 255주 굴렸을 때 · %)</span></div>
+  <div class="cnote">여기서 진짜 이야기가 나옵니다 — <b>평균은 square가 최고지만 누적은 equal이 압도</b>(변동성 드래그: 집중할수록 분산↑→복리 손해). look-ahead=+8,955%는 오프스케일이라 제외.</div>
+  <div class="chartwrap"><div id="c2"></div><div class="tip" id="t2"></div></div>
+  <div class="hint">Y축 = 누적 복리수익률(%). 6 causal 규칙만(비교 가능 스케일).</div>
+</div>
+
+<div class="card">
+  <div class="ctitle">③ 요약</div>
+  <table><thead><tr><th>배분 규칙</th><th>평균 %/주</th><th>누적 %(255주)</th><th>구분</th></tr></thead><tbody id="tb"></tbody></table>
+  <div class="hint">평균↔누적 역전(square 평균1위·누적5위, equal 평균공동4위·누적1위)이 핵심 — 실행 시 <b>변동성 관리가 평균수익률보다 중요</b>.</div>
+</div>
+</main>
+<script>
+const DATA=__DATA__, COLORS=__COLORS__;
+const CAUSAL=DATA.order.filter(k=>DATA.series[k].causal);
+const vis=new Set(DATA.order); vis.delete('lookahead_gap4');  // look-ahead 기본 OFF
+const W=980,H=360,padL=54,padR=112,padT=16,padB=34;
+const n=DATA.n, weeks=DATA.weeks;
+function xs(i){return padL+i*(W-padL-padR)/(n-1);}
+function niceDom(keys,vk){let mn=1e9,mx=-1e9;keys.forEach(k=>{if(!vis.has(k))return;DATA.series[k][vk].forEach(v=>{if(v<mn)mn=v;if(v>mx)mx=v;});});
+ if(mn===1e9){mn=0;mx=1;} const pad=(mx-mn)*0.06||1; mn-=pad;mx+=pad; return [mn,mx];}
+function ys(v,dom,h){const[a,b]=dom;return padT+(b-v)/(b-a)*(h-padT-padB);}
+function yticks(dom){const[a,b]=dom;const step=niceStep((b-a)/5);const out=[];let t=Math.ceil(a/step)*step;
+ for(;t<=b+1e-9;t+=step)out.push(+t.toFixed(6));return out;}
+function niceStep(x){const p=Math.pow(10,Math.floor(Math.log10(x)));const f=x/p;return (f<1.5?1:f<3?2:f<7?5:10)*p;}
+
+function draw(cid,vk,keys,H_){
+ const dom=niceDom(keys,vk);
+ let g=`<svg width="${W}" height="${H_}" viewBox="0 0 ${W} ${H_}">`;
+ g+=`<rect x="${padL}" y="${padT}" width="${W-padL-padR}" height="${H_-padT-padB}" fill="#fff"/>`;
+ // y grid + labels
+ yticks(dom).forEach(t=>{const y=ys(t,dom,H_);
+   g+=`<line x1="${padL}" x2="${W-padR}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${t===0?'#B7AC9B':'#EDE7DB'}" stroke-width="${t===0?1.3:1}"/>`;
+   g+=`<text x="${padL-7}" y="${(y+3).toFixed(1)}" text-anchor="end" font-size="10.5" fill="#98908a">${t}%</text>`;});
+ // x ticks: year starts
+ let py=null;
+ weeks.forEach((w,i)=>{const y=w.slice(0,4); if(y!==py){py=y;const x=xs(i);
+   g+=`<line x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${padT}" y2="${H_-padB}" stroke="#F1EBDF"/>`;
+   g+=`<text x="${x.toFixed(1)}" y="${H_-padB+15}" text-anchor="middle" font-size="10.5" fill="#98908a">${y}</text>`;}});
+ // series
+ keys.forEach(k=>{if(!vis.has(k))return;const arr=DATA.series[k][vk];
+   let d='';for(let i=0;i<n;i++){d+=(i?'L':'M')+xs(i).toFixed(1)+' '+ys(arr[i],dom,H_).toFixed(1)+' ';}
+   const dash=k==='lookahead_gap4'?'stroke-dasharray="2 3"':'';const wdt=k==='equal'?2.3:1.7;
+   g+=`<path d="${d}" fill="none" stroke="${COLORS[k]}" stroke-width="${wdt}" ${dash} opacity="0.9"/>`;
+   // 끝점 직접 라벨
+   const lx=xs(n-1),ly=ys(arr[n-1],dom,H_);
+   g+=`<text x="${(lx+5).toFixed(1)}" y="${(ly+3).toFixed(1)}" font-size="10.5" font-weight="700" fill="${COLORS[k]}">${DATA.series[k].label.split(' ')[0]}</text>`;});
+ g+=`<line id="${cid}-cx" x1="0" x2="0" y1="${padT}" y2="${H_-padB}" stroke="#1A1A1A" stroke-width="1" opacity="0"/>`;
+ g+=`<g id="${cid}-dots"></g></svg>`;
+ document.getElementById(cid).innerHTML=g;
+ const svg=document.getElementById(cid).firstChild;
+ svg._dom=dom; svg._vk=vk; svg._keys=keys; svg._H=H_;
+ svg.addEventListener('mousemove',ev=>hover(ev,cid,svg));
+ svg.addEventListener('mouseleave',()=>{document.getElementById(cid+'-cx').setAttribute('opacity','0');
+   document.getElementById(cid+'-dots').innerHTML='';document.getElementById(tipId(cid)).style.opacity=0;});
+}
+function tipId(cid){return cid==='c1'?'t1':'t2';}
+function hover(ev,cid,svg){const r=svg.getBoundingClientRect();const sx=(ev.clientX-r.left)*(W/r.width);
+ let i=Math.round((sx-padL)/((W-padL-padR)/(n-1)));i=Math.max(0,Math.min(n-1,i));
+ const x=xs(i);const cx=document.getElementById(cid+'-cx');cx.setAttribute('x1',x);cx.setAttribute('x2',x);cx.setAttribute('opacity','0.35');
+ let dots='',rows='';const dom=svg._dom,vk=svg._vk,keys=svg._keys,H_=svg._H;
+ keys.filter(k=>vis.has(k)).sort((a,b)=>DATA.series[b][vk][i]-DATA.series[a][vk][i]).forEach(k=>{
+   const v=DATA.series[k][vk][i];const y=ys(v,dom,H_);
+   dots+=`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="${COLORS[k]}" stroke="#fff" stroke-width="1"/>`;
+   rows+=`<div class="trow"><span><span class="sw" style="background:${COLORS[k]};display:inline-block;width:10px"></span> ${DATA.series[k].label.split(' ')[0]}</span><b>${v.toFixed(2)}%</b></div>`;});
+ document.getElementById(cid+'-dots').innerHTML=dots;
+ const tip=document.getElementById(tipId(cid));tip.innerHTML=`<b>${weeks[i]}</b> (${i+1}/${n}주)${rows}`;
+ const wrap=svg.parentElement.getBoundingClientRect();let tx=ev.clientX-wrap.left+14;
+ if(tx>wrap.width-150)tx=ev.clientX-wrap.left-150;
+ tip.style.left=tx+'px';tip.style.top=(ev.clientY-wrap.top+10)+'px';tip.style.opacity=1;
+}
+function legend(){document.getElementById('leg').innerHTML=DATA.order.map(k=>{
+ const off=vis.has(k)?'':'off';const dash=k==='lookahead_gap4'?'dash':'';
+ return `<span class="lg ${off}" data-k="${k}"><span class="sw ${dash}" style="${dash?'border-color:':'background:'}${COLORS[k]}"></span>${DATA.series[k].label}</span>`;}).join('');
+ document.querySelectorAll('.lg').forEach(el=>el.onclick=()=>{const k=el.dataset.k;
+   if(vis.has(k))vis.delete(k);else vis.add(k);render();});}
+function table(){document.getElementById('tb').innerHTML=DATA.order.map(k=>{const s=DATA.series[k];
+ return `<tr><td><span class="sw" style="background:${COLORS[k]};display:inline-block;width:12px;margin-right:5px"></span>${s.label}</td>
+ <td>${s.mean.toFixed(3)}%</td><td class="${s.final>=0?'g':'r'}">${s.final.toLocaleString()}%</td>
+ <td class="tag">${s.causal?'causal':'look-ahead'}</td></tr>`;}).join('');}
+function render(){draw('c1','r',DATA.order,H);draw('c2','cum',CAUSAL,H);legend();}
+render();table();
+</script>"""
+
+html = HTML.replace("__DATA__", data_js).replace("__COLORS__", colors_js)
+out = f"{SP}/timeseries_255w.html"
+open(out, "w", encoding="utf-8").write(html)
+print("wrote", out, len(html), "bytes")

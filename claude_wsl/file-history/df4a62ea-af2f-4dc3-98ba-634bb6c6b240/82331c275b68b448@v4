@@ -1,0 +1,21 @@
+---
+name: lap-cp-sim-54analysis
+description: "54_analysis LAP + CP solid ANSYS sim on cvbml02, cases 500-999, wall BC synced from harvey no-hyperemia"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: df4a62ea-af2f-4dc3-98ba-634bb6c6b240
+  modified: 2026-07-28T04:44:50.686Z
+---
+
+Solid ANSYS structural sim for **54_analysis** on cvbml02 (ws2), two plaque types **LAP** (low-attenuation) and **CP** (calcified), cases 500-999. Ported from the 65 sim (`pymapdl_simulation_ver5_fibrous.py`, PCG+OUTOFCORE+cell_sets patch) with paths only changed — see [[ansys-sim-cvbml02]], [[solid-dist-sim-cvbml01]].
+
+**Scripts (on ws2 in `/home/jeff/project/54_analysis/`):**
+- `pymapdl_sim_LAP.py` / `pymapdl_sim_CP.py` — differ only by `PLAQUE="LAP"|"CP"` constant in `__main__`.
+- `run_plaque_batch.sh <LAP|CP>` — infinite resumable loop (pass + 90s sleep), bracket-safe pkill, stops when `STOP_<PLAQUE>` file appears. Args: START=500 END=1000 NPROC=30.
+- Mesh: flat files `{PLAQUE}_mesh/solid_{PLAQUE}_{i}.msh`. Output: `ansys_{PLAQUE}_0728/case_{i}/FC_case_{i}_{peak,low}.vtk` (user-chosen naming 2026-07-28; vtk filename keeps 65's `FC_case_{i}` since plaque is already in the parent dir). Case dir IS the ANSYS exec/scratch dir; wipe leaves only the 2 FC vtks.
+- Params: `pre_data/parameter_0728.csv`. material.json in pre_data.
+
+**Wall BC (critical):** `post_data/wall_no_hyperemia/{peak,low}/wall_{bc}_case_{i}.csv`, cols x,y,z,Tx,Ty,Tz,Pressure (col 7). **ws2 has NO route to harvey** — sync runs on the LOCAL box: `sync_wall_harvey.sh` (scratchpad), 60s loop rsync `--ignore-existing` harvey->local->ws2, no --delete. Wall data is plaque-agnostic → same csv unlocks both LAP & CP case i. harvey fills sequentially from 500 (its own [[steady3d-nohyperemia-54analysis]] run). A case runs only when mesh + BOTH peak&low csv present, else skipped and retried next pass.
+
+**Order:** user chose SEQUENTIAL — LAP first. **As of 2026-07-28 the user said "just do LAP only now" → CP auto-handoff DISABLED; run LAP only, CP on hold until user decides.** Full-auto monitoring: Notion page `3ab2a46d-c68c-81ca-8894-fd852400d608`, email kimse991228@gmail.com on each plaque's completion, self-heal dead ANSYS scratch.

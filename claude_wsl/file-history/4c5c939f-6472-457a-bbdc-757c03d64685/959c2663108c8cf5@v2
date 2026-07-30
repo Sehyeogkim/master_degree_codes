@@ -1,0 +1,29 @@
+---
+name: harvey-qramp-pipeline
+description: How to run q_ramp 3D simulation on harvey for a fluid case after mesh copy (SLURM sbatch + Q_ramp_0723.py)
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: 4c5c939f-6472-457a-bbdc-757c03d64685
+  modified: 2026-07-23T03:21:36.523Z
+---
+
+Pipeline extends [[copy-mesh-to-harvey]]: after a case's mesh is on harvey, run q_ramp 3D sim.
+
+**Host paths (harvey.kaist.ac.kr:10022, user jeff):**
+- Project: `/home/jeff/project/65_final_0723`, driver `Q_ramp_0723.py`
+- svpre/svsolver: `/home/wj0220/svSolverPrivate/build/svSolver-build/bin/{svpre,svsolver}`
+- python: `/home/jeff/miniconda3/bin/python3` (3.13.7, numpy 2.3.3)
+
+**Q_ramp_0723.py** reads case from env `QRAMP_CASE`, nproc from `SLURM_NTASKS`. Per case: prepare (creates model.svpre, inflow.flow Q=0.371, copies pre_data/scripts/solver_ramp.inp + revises inp to 500 timesteps, copies xyzts.dat into q_ramp/) → svpre → mpirun svsolver → post. Requires `fluid_0723/case_N/meshing/mesh-complete` + `xyzts.dat`.
+
+**Outputs (success signal):** `post_data/slab/slab_N.txt` + `post_data/flowhist/FlowHist_N.dat` (+ `fluid_0723/case_N/q_ramp/{nproc}-procs_case/slab.txt`). Cases 0–4 already done.
+
+**Submit wrapper:** `q_ramp_auto.sh` (created 2026-07-23) — SLURM header minimal, loads modules `cmake/3.25.2 gcc/11.3.0 mpi/gcc-11.3.0/openmpi-4.1.5` + LD_LIBRARY_PATH, then `python3 Q_ramp_0723.py`. Submit per case:
+```
+sbatch -p harvey05 --nodelist=harvey07 -n 96 --ntasks-per-node=96 \
+  --job-name=qramp_c${N} --export=ALL,QRAMP_CASE=${N} q_ramp_auto.sh
+```
+Fallback node (if harvey07 busy): `-p harvey01 --nodelist=harvey01 -n 72 --ntasks-per-node=72` (harvey01 = 72 cores).
+
+**SLURM partitions = node groups:** `harvey05` partition = nodes harvey05/06/07 (96c each); `harvey01` = harvey01 (72c). Runtime ~3.5–5 min/case. steady_3d sims run separately on harvey05/06 (jobs steady_peak/low).

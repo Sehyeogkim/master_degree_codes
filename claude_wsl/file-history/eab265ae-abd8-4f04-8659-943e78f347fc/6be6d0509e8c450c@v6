@@ -1,0 +1,286 @@
+"""
+Post-processing for the 0723 solid (type1 / dist) simulation, fibrous cap domain.
+
+Reads FC_case_<i>_peak.vtk + FC_case_<i>_low.vtk from
+    solid_0723/case_<i>/ansys_results_dist_0723/
+filters to the lumen-FC interface nodes (WALL_IN_FC component, == old "Group == 5"),
+and outputs PSS / del_PSS + critical-node coords + z_MLA + circum_index.
+
+Axial location is reported RAW: z_MLA (= CAD z_peak, the minimum-lumen-area plane) and
+the critical node's z (PSS_crit_z / delPSS_crit_z).  No normalised loc_index is written
+- normalise downstream if needed.  circum_index is kept as its own column.
+
+Cases 0-383.
+
+Differences vs. the old 54_analysis post_processing.py
+------------------------------------------------------
+* .vtk (legacy binary, FC-only grid) instead of .vtu
+* node mask: point_data["WALL_IN_FC"] (bool) instead of point_data["Group"] == 5
+  -> the sim script tags wall_in_fc_tag = 5, so this is the same node set.
+* del_PSS uses the FULL range  amp = peak - low   (NOT (peak - low) / 2)
+* SPHERE RADIUS SENSITIVITY: every case is evaluated at r = 0.005 / 0.010 / 0.015 cm
+  and written to one CSV per radius (PSS_result_0727_r0005.csv, ..._r001.csv,
+  ..._r0015.csv).  The mesh is read and the KD-tree built ONCE per case and reused
+  for all three radii.
+* np.nanargmax instead of np.argmax when picking the critical node.  The FC grid is
+  SOLID187 (tet10) and ~75% of the nodes are mid-side nodes carrying NaN stress, so a
+  plain argmax can latch onto a NaN entry.
+"""
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import pyvista as pv
+from scipy.spatial import cKDTree
+from multiprocessing import get_context
+
+PROJECT_DIR = Path(__file__).parent
+SOLID_DATA_DIR = PROJECT_DIR / "solid_0723"
+RESULT_SUBDIR = "ansys_results_dist_0723"
+PARAMETER_CSV_PATH = PROJECT_DIR / "pre_data" / "parameter.csv"
+OUT_DIR = Path("/home/jeff/project/66_post_processing_journal/LAP_data")
+
+N_CASES = 384
+OUT_TAG = "0727"
+
+# --- sphere-radius sensitivity study ---------------------------------------
+# (radius in cm, filename suffix)
+# The sweep deliberately brackets BOTH failure modes of the averaging radius:
+#   r = 0.005      : TOO SMALL.  Median 3 (min 1) valid corner nodes inside the
+#                    sphere -> not an average at all; r/h = 1.3 with h ~ 40 um.
+#   r = 0.010-0.020: the plateau.  Candidate operating range.
+#   r = 0.030-0.080: TOO LARGE.  Included to expose the over-smoothing roll-off so
+#                    the plateau is visibly bounded on both sides rather than being
+#                    the flat tail of a monotone curve.
+# NOTE on suffixes: r0005 = 0.005 cm, r005 = 0.05 cm.  Easy to misread - the leading
+# zero count is what distinguishes them.
+SPHERE_RADII = [(0.005, "r0005"), (0.010, "r001"), (0.015, "r0015"), (0.020, "r002"),
+                (0.030, "r003"), (0.050, "r005"), (0.080, "r008")]
+
+STRESS_FIELDS = ["Principal_stress"]
+TOP_PERCENTILE = 95.0
+Z_EPSILON = 0.02
+WALL_MASK_FIELD = "WALL_IN_FC"
+
+N_PROC = 20
+
+
+from utils.utils_geo_mesh.main_CAD import CAD_instance_from_idx
+from utils.utils_geo_mesh.utils_CAD import y_center_lumen, alpha_theta
+
+
+def get_z_MLP(case_index: int, parameter_csv_path: str):
+    """z of the minimum-lumen point and the lesion length (cm)."""
+    cad_instance = CAD_instance_from_idx(case_index, parameter_csv_path)
+    return cad_instance.z_peak, cad_instance.lesion_length
+
+
+def get_circum_index(case_index: int, parameter_csv_path: str, rupture_location: tuple):
+    cad_instance = CAD_instance_from_idx(case_index, parameter_csv_path)
+    x, y, z = rupture_location
+    y_c = y_center_lumen(cad_instance, z)
+    vector1 = np.array([x, y - y_c])
+    vector2 = np.array([0, 1])
+    cos_val = np.dot(vector1, vector2) / (np.linalg.norm(vector1) * np.linalg.norm(vector2))
+    angle = np.arccos(np.clip(cos_val, -1, 1))
+    lipid_arc_angle = alpha_theta(cad_instance, z)  # half value, radian
+    return float(angle / lipid_arc_angle)
+
+
+def find_top_percentile_nodes(stress_array, percentile=95.0):
+    valid = ~np.isnan(stress_array)
+    if not valid.any():
+        return np.zeros(len(stress_array), dtype=bool), np.array([], dtype=int)
+    threshold = np.nanpercentile(stress_array, percentile)
+    mask = valid & (stress_array >= threshold)
+    return mask, np.where(mask)[0]
+
+
+def compute_sphere_top5_percentile(stress_sub, points_sub, kdtree_sub, radius):
+    """
+    stress_sub / points_sub : values and coords of the masked (wall & z-trimmed) nodes
+    kdtree_sub              : cKDTree built on points_sub
+
+    1. take the top-`TOP_PERCENTILE` nodes of stress_sub
+    2. for each of them, average stress over a sphere of `radius` (masked nodes only)
+    3. the node with the highest sphere average is the critical node
+    4. return the 95th percentile of the stress inside that node's sphere
+
+    Everything happens in the masked subspace, which is exactly what the old script
+    did via `group_mask` on a full-grid KD-tree, only much faster.
+    """
+    _, cand = find_top_percentile_nodes(stress_sub, TOP_PERCENTILE)
+    if len(cand) == 0:
+        return None
+
+    neighbours = kdtree_sub.query_ball_point(points_sub[cand], radius)
+    sphere_avg = np.full(len(cand), np.nan)
+    for k, idx in enumerate(neighbours):
+        if len(idx) == 0:
+            sphere_avg[k] = 0.0
+            continue
+        vals = stress_sub[idx]
+        if np.isnan(vals).all():
+            continue
+        sphere_avg[k] = np.nanmean(vals)
+
+    if np.isnan(sphere_avg).all():
+        return None
+
+    best = int(np.nanargmax(sphere_avg))
+    crit_sub_idx = int(cand[best])
+    sphere_idx = neighbours[best]
+    sphere_stress = stress_sub[sphere_idx]
+    return (float(np.nanpercentile(sphere_stress, 95.0)),
+            crit_sub_idx,
+            int(np.sum(~np.isnan(sphere_stress))))
+
+
+def process_case(case_index):
+    """Returns a dict {radius_suffix: row} for one case, or None if the case is skipped."""
+    case_index = int(case_index)
+    case_dir = SOLID_DATA_DIR / f"case_{case_index}" / RESULT_SUBDIR
+    peak_path = case_dir / f"FC_case_{case_index}_peak.vtk"
+    low_path = case_dir / f"FC_case_{case_index}_low.vtk"
+
+    if not peak_path.exists() or not low_path.exists():
+        print(f"[SKIP] case_{case_index}: VTK files not found", flush=True)
+        return None
+
+    fc_peak = pv.read(peak_path)
+    fc_low = pv.read(low_path)
+
+    if WALL_MASK_FIELD not in fc_peak.point_data:
+        print(f"[SKIP] case_{case_index}: no {WALL_MASK_FIELD} field", flush=True)
+        return None
+    mask_wall = np.asarray(fc_peak.point_data[WALL_MASK_FIELD]).astype(bool)
+    points = np.asarray(fc_peak.points)
+    if not mask_wall.any():
+        print(f"[SKIP] case_{case_index}: no {WALL_MASK_FIELD} nodes", flush=True)
+        return None
+
+    # Suspect-data filter (low must not exceed peak on the wall)
+    peak_eqv = np.asarray(fc_peak.point_data["EQV_stress"], dtype=np.float64)
+    low_eqv = np.asarray(fc_low.point_data["EQV_stress"], dtype=np.float64)
+    if np.nanmean(low_eqv[mask_wall]) > np.nanmean(peak_eqv[mask_wall]):
+        print(f"[SKIP] case_{case_index}: suspect data (low > peak)", flush=True)
+        return None
+
+    # Z masking: trim Z_EPSILON off both axial ends of the wall patch
+    wall_z = points[mask_wall][:, 2]
+    z_min, z_max = wall_z.min(), wall_z.max()
+    mask_z = (points[:, 2] > z_min + Z_EPSILON) & (points[:, 2] < z_max - Z_EPSILON)
+    mask_gz = mask_wall & mask_z
+    gz_indices = np.where(mask_gz)[0]
+    if len(gz_indices) == 0:
+        print(f"[SKIP] case_{case_index}: no nodes after z-masking", flush=True)
+        return None
+
+    points_sub = points[gz_indices]
+    kdtree_sub = cKDTree(points_sub)
+
+    # peak_* and amp_* stress in the masked subspace.  amp = peak - low (full range).
+    stress_sub = {}
+    for sf in STRESS_FIELDS:
+        p = np.asarray(fc_peak.point_data[sf], dtype=np.float64)[gz_indices]
+        l = np.asarray(fc_low.point_data[sf], dtype=np.float64)[gz_indices]
+        stress_sub[f"peak_{sf}"] = p
+        stress_sub[f"amp_{sf}"] = p - l
+
+    # Geometry (radius independent)
+    try:
+        z_mlp, lesion_length = get_z_MLP(case_index, str(PARAMETER_CSV_PATH))
+        z_mlp = float(z_mlp)
+        lesion_length = float(lesion_length)
+    except Exception as e:
+        print(f"[SKIP] case_{case_index}: get_z_MLP failed ({e})", flush=True)
+        return None
+
+    def fill_location(row, prefix, crit_sub_idx):
+        xyz = points_sub[crit_sub_idx]
+        row[f"{prefix}_crit_x"] = float(xyz[0])
+        row[f"{prefix}_crit_y"] = float(xyz[1])
+        row[f"{prefix}_crit_z"] = float(xyz[2])
+        try:
+            row[f"{prefix}_circum_index"] = get_circum_index(
+                case_index, str(PARAMETER_CSV_PATH),
+                (float(xyz[0]), float(xyz[1]), float(xyz[2])))
+        except Exception as e:
+            print(f"  [WARN] case_{case_index} {prefix} circum failed: {e}", flush=True)
+            row[f"{prefix}_circum_index"] = float("nan")
+
+    out = {}
+    for radius, suffix in SPHERE_RADII:
+        row = {"case_id": case_index, "sphere_radius": radius,
+               "n_wall_nodes": int(len(gz_indices)), "z_MLA": z_mlp}
+        ok = True
+        pss_crit = delpss_crit = None
+        for sf in STRESS_FIELDS:
+            label = "EQV" if sf == "EQV_stress" else "Principal"
+            pss_result = compute_sphere_top5_percentile(
+                stress_sub[f"peak_{sf}"], points_sub, kdtree_sub, radius)
+            delta_result = compute_sphere_top5_percentile(
+                stress_sub[f"amp_{sf}"], points_sub, kdtree_sub, radius)
+            if pss_result is None or delta_result is None:
+                print(f"[SKIP] case_{case_index} r={radius}: "
+                      f"insufficient candidates for {label}", flush=True)
+                ok = False
+                break
+            row[f"PSS_{label}"] = pss_result[0]
+            row[f"del_PSS_{label}"] = delta_result[0]
+            if label == "Principal":
+                pss_crit, delpss_crit = pss_result, delta_result
+        if not ok:
+            continue
+
+        row["PSS_n_sphere"] = pss_crit[2]
+        row["delPSS_n_sphere"] = delpss_crit[2]
+        fill_location(row, "PSS", pss_crit[1])
+        fill_location(row, "delPSS", delpss_crit[1])
+        out[suffix] = row
+
+        print(f"[OK] case_{case_index} r={radius}: PSS={row['PSS_Principal']:.3e}, "
+              f"dPSS={row['del_PSS_Principal']:.3e}, "
+              f"z_MLA={z_mlp:.4f}, z_crit={row['PSS_crit_z']:.4f}, "
+              f"circum={row['PSS_circum_index']:.3f}, "
+              f"n_sph={row['PSS_n_sphere']}", flush=True)
+
+    return out or None
+
+
+COLUMNS = [
+    "case_id", "sphere_radius", "n_wall_nodes", "z_MLA",
+    "PSS_Principal", "del_PSS_Principal",
+    "PSS_n_sphere", "delPSS_n_sphere",
+    "PSS_crit_x", "PSS_crit_y", "PSS_crit_z", "PSS_circum_index",
+    "delPSS_crit_x", "delPSS_crit_y", "delPSS_crit_z", "delPSS_circum_index",
+]
+
+
+if __name__ == "__main__":
+    case_indices = list(range(0, N_CASES))
+    out_dir = OUT_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with get_context("spawn").Pool(processes=N_PROC) as pool:
+            results = pool.map(process_case, case_indices)
+    except PermissionError:
+        print("Multiprocessing unavailable. Falling back to serial execution.")
+        results = [process_case(idx) for idx in case_indices]
+
+    results = [r for r in results if r]
+
+    all_rows = []
+    for radius, suffix in SPHERE_RADII:
+        rows = [r[suffix] for r in results if suffix in r]
+        df = pd.DataFrame(rows, columns=COLUMNS).sort_values("case_id")
+        output_path = out_dir / f"PSS_result_{OUT_TAG}_{suffix}.csv"
+        df.to_csv(output_path, index=False)
+        print(f"Saved {len(df)}/{N_CASES} rows to {output_path}")
+        all_rows.append(df)
+
+    # extra: long-format file with all three radii stacked, for the sensitivity plot
+    combined = pd.concat(all_rows).sort_values(["case_id", "sphere_radius"])
+    combined_path = out_dir / f"PSS_result_{OUT_TAG}_all_radii.csv"
+    combined.to_csv(combined_path, index=False)
+    print(f"Saved {len(combined)} rows to {combined_path}")

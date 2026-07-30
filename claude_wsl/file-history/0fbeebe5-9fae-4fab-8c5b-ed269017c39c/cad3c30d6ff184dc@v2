@@ -1,0 +1,211 @@
+# -*- coding: utf-8 -*-
+"""라이브 리포트 '자본배분 6규칙 대시보드' 설계 샘플 생성 (실제 2026-07-13 주 데이터)."""
+import json, csv, os
+
+BASE = "/home/jeff/bullet281/report/live/live_project1/2026-07-13"
+SP   = "/tmp/claude-1000/-home-jeff-bullet281/0fbeebe5-9fae-4fab-8c5b-ed269017c39c/scratchpad"
+alloc = json.load(open(f"{SP}/alloc_sample.json"))
+res   = {s["code"]: s for s in json.load(open(f"{BASE}/results.json"))["stocks"]}
+
+# 팔레트 (house)
+BG, INK, MUTED, ACC = "#F0EEE6", "#2D2D2D", "#6B5E54", "#CC785C"
+GREEN, RED = "#2E7D32", "#C25744"
+C_UP, C_DOWN = "#dc2626", "#2563eb"        # 캔들(한국관례) — 기존 chart.py와 동일
+C_E, C_T, C_S, C_F0 = "#111827", "#16a34a", "#b42318", "#111827"
+# 순차 램프(배정액 크기) — 밝기 단조감소, 셀에 ₩라벨 직접표기로 대비 확보
+RAMP = [(0xF4,0xEF,0xE7),(0xE7,0xC9,0xB4),(0xD8,0x9A,0x78),(0xCC,0x78,0x5C),(0xA8,0x56,0x38)]
+
+def lerp(a,b,t): return a+(b-a)*t
+def ramp(t):
+    t=max(0.0,min(1.0,t)); x=t*(len(RAMP)-1); i=int(x); f=x-i
+    a=RAMP[i]; b=RAMP[min(i+1,len(RAMP)-1)]
+    r,g,bl=(int(round(lerp(a[k],b[k],f))) for k in range(3))
+    return f"#{r:02x}{g:02x}{bl:02x}", (0.299*r+0.587*g+0.114*bl)  # hex, luma
+def won(x): return f"{x/1e4:,.0f}만"
+def pct(x, plus=True):
+    s=f"{x*100:+.2f}%" if plus else f"{x*100:.2f}%"; return s
+def col_ret(x): return GREEN if x>=0 else RED
+
+stocks = alloc["stocks"]; rules = alloc["rules"]; CAP = alloc["cap"]
+maxslice = max(s for ru in rules for s in ru["slices"])
+
+# ---------- 1층: 리더보드 ----------
+ranked = sorted(rules, key=lambda r: -r["val"])
+maxabs = max(abs(r["port"]) for r in rules) or 1
+lb_rows = []
+for i, r in enumerate(ranked):
+    c = col_ret(r["port"]); w = abs(r["port"])/maxabs*100
+    bar = (f"<div style='flex:1;height:9px;background:#E6E0D4;border-radius:5px;overflow:hidden'>"
+           f"<div style='width:{w:.0f}%;height:100%;background:{c}'></div></div>")
+    medal = ["①","②","③","④","⑤","⑥"][i]
+    lb_rows.append(
+      f"<div style='display:flex;align-items:center;gap:12px;padding:9px 4px;"
+      f"border-bottom:1px solid #E6E0D4'>"
+      f"<span style='width:22px;color:{MUTED};font-weight:700'>{medal}</span>"
+      f"<span style='width:88px;font-weight:700'>{r['label']}</span>"
+      f"<span style='width:150px;color:{MUTED};font-size:12.5px'>5,000만 → "
+      f"<b style='color:{INK}'>{r['val']/1e4:,.0f}만</b></span>"
+      f"{bar}"
+      f"<span style='width:74px;text-align:right;font-weight:800;color:{c}'>{pct(r['port'])}</span>"
+      f"</div>")
+leaderboard = ("<div class='card'><div class='cap'>규칙 리더보드 — 5,000만원이 지금 얼마?</div>"
+               + "".join(lb_rows) + "</div>")
+
+# ---------- 2층: 배분 매트릭스 ----------
+head = "<th class='lft'>종목</th><th>직전주<br>변동</th><th>rᵢ<br>(주수익)</th>" + \
+       "".join(f"<th>{r['label']}</th>" for r in rules)
+body = []
+for si, st in enumerate(stocks):
+    r_i = st["r"]; dcol = col_ret(r_i)
+    dirtag = "숏" if st["dir"]<0 else "롱"
+    cells = []
+    for ru in rules:
+        sl = ru["slices"][si]; t = sl/maxslice
+        bg, luma = ramp(t); fg = "#fff" if luma<140 else INK
+        cells.append(f"<td style='background:{bg};color:{fg};font-weight:600'>{won(sl)}</td>")
+    body.append(
+      f"<tr><td class='lft'><b>{st['name']}</b> "
+      f"<span style='color:{MUTED};font-size:11px'>{st['code']}·{dirtag}</span></td>"
+      f"<td style='color:{MUTED}'>+{st['sig']:.0f}%</td>"
+      f"<td style='color:{dcol};font-weight:800'>{pct(r_i)}</td>"
+      + "".join(cells) + "</tr>")
+# 푸터: 포트수익률 / 평가액
+foot_p = "<td class='lft' style='font-weight:800'>포트 수익률</td><td></td><td></td>" + \
+    "".join(f"<td style='font-weight:800;color:{col_ret(r['port'])}'>{pct(r['port'])}</td>" for r in rules)
+foot_v = "<td class='lft' style='color:%s'>현재 평가액</td><td></td><td></td>"%MUTED + \
+    "".join(f"<td style='color:{MUTED};font-size:12px'>{r['val']/1e4:,.0f}만</td>" for r in rules)
+matrix = (f"<div class='card'><div class='cap'>배분 매트릭스 — 종목별 '처음 넣은 돈'"
+          f"<span class='note'>진할수록 많이 배정 · 셀=₩ · 5,000만 기준</span></div>"
+          f"<div style='overflow-x:auto'><table class='mx'><thead><tr>{head}</tr></thead>"
+          f"<tbody>{''.join(body)}</tbody>"
+          f"<tfoot><tr>{foot_p}</tr><tr>{foot_v}</tr></tfoot></table></div></div>")
+
+# ---------- 3층: 종목 캔들 카드 ----------
+def load_bars(code):
+    out=[]
+    with open(f"{BASE}/bars/{code}_5m.csv") as f:
+        for row in csv.DictReader(f):
+            out.append((row["datetime"], float(row["open"]), float(row["high"]),
+                        float(row["low"]), float(row["close"])))
+    return out
+
+def candle_svg(code, F0, entries, exits):
+    bars = load_bars(code)
+    n=len(bars); cw=8; gap=2; padL=54; padR=14; padT=14; padB=26
+    W=padL+padR+n*(cw+gap); H=230
+    los=[b[3] for b in bars]; his=[b[2] for b in bars]
+    lo=min(los+[F0]); hi=max(his+[F0]); rng=hi-lo or 1
+    def y(p): return padT+(hi-p)/rng*(H-padT-padB)
+    def x(i): return padL+i*(cw+gap)
+    parts=[f"<svg width='{W}' height='{H}' viewBox='0 0 {W} {H}' xmlns='http://www.w3.org/2000/svg' style='font:11px sans-serif'>"]
+    parts.append(f"<rect width='{W}' height='{H}' fill='#fff'/>")
+    # y grid (3)
+    for k in range(4):
+        p=lo+rng*k/3; yy=y(p)
+        parts.append(f"<line x1='{padL}' y1='{yy:.1f}' x2='{W-padR}' y2='{yy:.1f}' stroke='#eef' />")
+        parts.append(f"<text x='{padL-6}' y='{yy+3:.1f}' text-anchor='end' fill='#98908a'>{p:,.0f}</text>")
+    # F0 line
+    yf=y(F0)
+    parts.append(f"<line x1='{padL}' y1='{yf:.1f}' x2='{W-padR}' y2='{yf:.1f}' stroke='{C_F0}' stroke-dasharray='5 3' />")
+    parts.append(f"<text x='{W-padR}' y='{yf-4:.1f}' text-anchor='end' fill='{C_F0}' font-weight='700'>F0 {F0:,.0f}</text>")
+    # day separators
+    prevday=None
+    for i,b in enumerate(bars):
+        day=b[0][:10]
+        if prevday and day!=prevday:
+            parts.append(f"<line x1='{x(i)-gap/2:.1f}' y1='{padT}' x2='{x(i)-gap/2:.1f}' y2='{H-padB}' stroke='#d9d2c6' stroke-dasharray='2 3'/>")
+            parts.append(f"<text x='{x(i)+2:.1f}' y='{H-padB+16}' fill='#98908a'>{day[5:]}</text>")
+        elif i==0:
+            parts.append(f"<text x='{x(i):.1f}' y='{H-padB+16}' fill='#98908a'>{day[5:]}</text>")
+        prevday=day
+    # candles
+    for i,b in enumerate(bars):
+        dt,o,h,l,c=b; up=c>=o; col=C_UP if up else C_DOWN
+        cx=x(i)+cw/2
+        parts.append(f"<line x1='{cx:.1f}' y1='{y(h):.1f}' x2='{cx:.1f}' y2='{y(l):.1f}' stroke='{col}' stroke-width='1'/>")
+        yo,yc=y(o),y(c); top=min(yo,yc); hgt=max(abs(yo-yc),1)
+        parts.append(f"<rect x='{x(i):.1f}' y='{top:.1f}' width='{cw}' height='{hgt:.1f}' fill='{col}'/>")
+    # markers
+    dtidx={b[0]:i for i,b in enumerate(bars)}
+    def marker(dt, price, letter, color):
+        i=dtidx.get(dt)
+        if i is None: return
+        cx=x(i)+cw/2; yy=y(price)
+        parts.append(f"<circle cx='{cx:.1f}' cy='{yy:.1f}' r='7' fill='{color}' />")
+        parts.append(f"<text x='{cx:.1f}' y='{yy+3:.1f}' text-anchor='middle' fill='#fff' font-weight='800' font-size='9'>{letter}</text>")
+    for e in entries: marker(e["dt"], e["price"], "E", C_E)
+    for e in exits:
+        m=e.get("marker","T"); marker(e["dt"], e["price"], m, C_S if m=="S" else C_T)
+    parts.append("</svg>")
+    return "".join(parts)
+
+cards=[]
+for st in stocks:
+    code=st["code"]; rr=res[code]; r_i=st["r"]; dcol=col_ret(r_i)
+    dirtag="숏" if st["dir"]<0 else "롱"
+    svg=candle_svg(code, rr["F0"], rr.get("entries",[]), rr.get("exits",[]))
+    # 이 종목의 규칙별 배정액 라인
+    chips="".join(
+        f"<span class='chip'>{ru['label']} <b>{won(ru['slices'][stocks.index(st)])}</b></span>"
+        for ru in rules)
+    nex=len(rr.get("exits",[]))
+    cards.append(
+      f"<div class='wk'><h2>{st['name']} <span style='color:{MUTED};font-size:13px'>{code} · {dirtag}</span>"
+      f"<span class='wr' style='color:{dcol}'>rᵢ {pct(r_i)}</span></h2>"
+      f"<div class='chipbar'>규칙별 배정액: {chips}</div>"
+      f"<div class='ch'>{svg}</div>"
+      f"<div class='meta'>진입 {rr['n_entries']}회 · 청산 {nex}건 · F0 {rr['F0']:,.0f} "
+      f"<span style='color:{MUTED}'>· 현재평가 = 배정액 ×(1{pct(r_i)})</span></div></div>")
+
+# ---------- 조립 ----------
+html = f"""<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LIVE 배분 대시보드 · 6규칙</title><style>
+*{{box-sizing:border-box}}body{{margin:0;background:{BG};color:{INK};
+font-family:-apple-system,"Apple SD Gothic Neo",sans-serif;line-height:1.55}}
+main{{max-width:1040px;margin:0 auto;padding:34px 20px 90px}}
+h1{{font-size:24px;margin:0 0 4px}}.sub{{color:{MUTED};font-size:13.5px;margin:0 0 18px}}
+h2{{font-size:18px;margin:8px 0;padding-left:10px;border-left:4px solid {ACC}}}h2 .wr{{float:right;font-weight:800}}
+.sec{{font-size:13px;font-weight:800;color:{ACC};letter-spacing:.03em;margin:26px 0 8px}}
+.card{{background:#fff;border:1px solid #D4C5B0;border-radius:14px;padding:14px 16px;margin:12px 0}}
+.cap{{font-weight:800;font-size:15px;margin-bottom:8px}}
+.cap .note{{float:right;font-weight:500;font-size:11.5px;color:{MUTED}}}
+table.mx{{border-collapse:collapse;font-size:13px;min-width:760px;width:100%}}
+table.mx th,table.mx td{{border-bottom:1px solid #EDE6D8;padding:8px 6px;text-align:center;white-space:nowrap}}
+table.mx thead th{{background:#E6E0D4;font-size:12px;color:{INK}}}
+table.mx .lft{{text-align:left}}
+table.mx tfoot td{{border-top:2px solid #D4C5B0;background:#FAF7F1}}
+.intro{{background:#fff;border:2px solid {ACC};border-radius:12px;padding:13px 17px;margin:6px 0 4px;font-size:13.6px}}
+.wk{{background:#fff;border:1px solid #D4C5B0;border-radius:14px;padding:14px 16px;margin:14px 0}}
+.ch{{overflow-x:auto;border:1px solid #EDE6D8;border-radius:8px;margin-top:8px}}.ch svg{{display:block}}
+.chipbar{{font-size:12px;color:{MUTED};margin:6px 0 2px}}
+.chip{{display:inline-block;background:#F4EFE7;border:1px solid #E6DcCB;border-radius:20px;
+padding:2px 9px;margin:2px 3px 2px 0}}
+.meta{{font-size:12.5px;color:{INK};margin-top:8px}}
+</style></head><body><main>
+<h1>🔴 LIVE — 자본배분 6규칙 대시보드</h1>
+<p class="sub"><b style="color:{ACC}">🕒 2026-07-14 (화) 14:15</b> · 가동주 2026-07-13 · 5,000만원 · engine281
+<br>시총 5,000억↑ 상승 롱 Top20→5 · 5분 갱신</p>
+
+<div class="intro"><b>읽는 법:</b> 6규칙 모두 <b>같은 진입·청산(종목별 rᵢ)</b>을 공유해요.
+차이는 오직 <b>5,000만원을 5종목에 어떻게 나누냐</b>뿐. 아래는 이번주 6규칙을 <b>동시에</b> 기록한 결과입니다.
+가중치는 <b>토요일 선정 때 직전주 변동율로 확정</b>(look-ahead 없음) → 각 종목은 배정액 안에서 독립 매매.</div>
+
+<div class="sec">① 규칙 리더보드</div>
+{leaderboard}
+
+<div class="sec">② 배분 매트릭스 (핵심)</div>
+{matrix}
+<p class="sub" style="margin-top:6px">▸ 균등은 전 종목 1,000만 <b>평평</b> · 신호⁴는 고신호 종목(금호건설 +76%)에 3,355만 <b>몰빵</b> —
+집중도가 한눈에. 이번주는 승자(금호타이어·금호건설)가 고신호와 겹쳐 집중형이 유리했지만,
+255주 평균으론 <b>집중형이 오히려 열세</b>(직전주 모멘텀은 약한 예측자).</p>
+
+<div class="sec">③ 종목별 캔들 + 규칙별 배정액</div>
+{''.join(cards)}
+
+<p class="sub" style="margin-top:30px">— bullet281 라이브 대시보드 설계 샘플 · 실제 2026-07-13 주 데이터로 렌더</p>
+</main></body></html>"""
+
+out=f"{SP}/live_dashboard_sample.html"
+open(out,"w").write(html)
+print("wrote", out, len(html), "bytes")

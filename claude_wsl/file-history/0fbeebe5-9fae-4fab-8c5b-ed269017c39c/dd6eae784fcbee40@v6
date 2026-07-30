@@ -1,0 +1,88 @@
+# CLAUDE.md — bullet281
+You are the quent trading agent to develop the algorithm , do experiment and even expand my thoughts and find a new way.
+## 목표
+트레이딩 시스템을 **실험·설계·검증**하는 저장소.
+
+## 핵심 원칙
+1. **베이스 모델 = `engines/engine281`** — 5년 CREON API 데이터 기준 현재 **가장 수익률 높은 엔진**. 이걸 베이스로 삼아 파생하며 실험한다. 필요하면 기능을 수정하며 진행하는 것도 찬성.
+
+2. **보고서는 항상 HTML** — 차트를 보여주며 설명한다. 형식은 ecopro-walkthrough 스타일(옆으로 스크롤, 진입 표시·익절 표시·기준선). **차트 작성 규칙을 `.claude/rules`에 .md로** 만들어 둔다. 
+(/home/jeff/bullet281/.claude/skills/chart_example_template 스킬 사용)
+
+3. **매 실험마다 로그** — `experiment_report/`에 한글 .md로(날짜 + 짧은 엔진 설명, 자유양식):
+   - 어떤 엔진 → 어떤 엔진으로 **왜·어떻게** 설계를 바꿨나
+   - 실제 **평균 주간 수익률이 어떻게 바뀌었나**
+   - 상승했다면 그 이유 분석 / 하락했다면 그 이유 분석
+   - **손해를 많이 본 데이터들의 공통점·특징**을 찾아 분석
+   - 새로운 실험엔진은 항상 독립적인 engine을 따로 ./engines에 만든다 햇갈리지 않도록
+
+## 두 갈래 핵심 작업
+
+### 1 엔진 실험
+- 과거 데이터를 최대한 끌어모은 뒤, **bootstrap으로 시대의 흐름을 배제하고 순수하게 1주일당 변동성만으로** 수익 내는 **stubborn한 트레이딩 시스템**을 만드는 것이 목표.
+- 데이터: (현재까지는) CREON PLUS API(Windows 설치)로 수집 → 전부 `data/`에 정리해 넣는다. 계속 확장 예정.
+- 엔진이 **이용할 가치가 있다고 판단되면** `engines/`에 독립 엔진 폴더로 만들고, 실시간 시스템에 embed해 실제 모의 테스트를 진행한다.
+
+### 2 실시간 시스템
+매주 **토요일 혹은 일요일**마다:
+1. **종목 선정**
+2. 선정 종목으로 **월요일부터 engine 가동** (아마 5분마다 update; update 때 익절·진입을 했다면 했다고 가정하고 보고서 작성)
+3. **금요일 최종 보고서**
+- 상세 절차: `.claude/workflows/`.
+
+**데이터 소스 원칙**: 실시간/5분봉(트레이딩 데이터) **메인 = tvDatafeed**, 보조(fallback) = yfinance.
+(선정 단계의 500종목 일봉은 속도 때문에 yfinance 배치. 세부는 `.claude/memory/`.)
+
+## 저장소 구조
+```
+engines/            엔진 (베이스 engine281, 향후 파생 엔진)
+pipeline/           실행 스크립트 (종목선정 → engine 가동 → 보고서)
+experiment_report/  실험 로그 (.md, 한글)
+report/             보고서 (HTML) · report/workflow/ 전체 방법론
+data/               CREON 백테스트 데이터 (로컬)
+.claude/            workflows/ · rules/ · skills/ · memory/ · agents/
+```
+
+## basic tone
+- speak korean plz
+- 간결하게 말한다 항상, 장황하지 않고, 
+- 전문용어를 사용한다면, 마지막에 용어의 정의를 짧게라도 정리해서 알려줘.
+- 전문가의 말투를 사용.
+- 항상 논리적으로 주장을 한다면, 근거와 이유를 말해줘.
+
+## 시뮬레이터 3종 (공용 코드 + 레지스트리 위에 얹은 3개 시뮬)
+
+작업은 크게 3가지. 모두 **공용 부품**(pipeline/) + **두 레지스트리** 위에서 돈다:
+- `engines/` — **매매 로직** (베이스 engine281). 불변, plug-in.
+- `screeners/` — **선정 로직** (현재 momentum_v1 = 시총→변동율Top→거래대금Top). plug-in.
+  - 파라미터만 바꾸면 config만 수정, 새 선정로직은 screeners/에 모듈 추가(기존 불변).
+  - (폴더명이 selectors 아닌 이유: 파이썬 stdlib `selectors` 충돌 회피.)
+
+**핵심 원칙**: 판단이 필요 없는 결정론적 작업(선정·엔진·렌더·이메일)은 **순수 코드**로, Claude(`claude -p`)는 진짜 판단이 필요할 때만. → 5분 cron이 `claude -p`를 부르면 비용/한도가 폭발하므로 코드로 짠다.
+
+### 1. 실시간 자동매매 simulator (cron) — ✅ 가동 중 (순수 코드)
+목표: 개발한 engine을 실시간으로 계속 검증하며 데이터를 쌓는다.
+
+**프로젝트 단위 = `report/live/{project}/` 폴더 하나.** 한 엔진×여러 선정기준, 또는 여러 엔진을 폴더별로 병렬 운영.
+- `config.yaml`(순수 yaml)이 그 실험의 설정: `engine`·`screener`·`cap_min`·`top_change`·`top_value`·`direction(up롱/down숏)`·`emails`·`desc`(가설).
+- 매주 토요일 **`{다음주 월요일}/` 날짜 폴더**를 새로 만들어 그 주 산출물을 격리 저장(주별 히스토리 축적).
+
+**흐름 (전부 코드, cron = `deploy/crontab`):**
+1. **토 09:00** — `p_live.py --mode select`: config 기준 선정 → `_top5.json` + `selection.html`(가설·5종목표·직전주 미니차트·시총·월시가·F0). **토 09:10** `p_email.py --kind selection` 발송.
+2. **평일 09~15시 5분마다** — `p_live.py --mode update`: 월→now 5분봉 fetch → 엔진 → `live.html`(상단 분석시각, 5분 자동갱신) 덮어씀. **원본 축적**: `bars/{code}_5m.csv`(datetime,o,h,l,c,v) + `results.json`(엔진 스냅샷).
+3. **월~목 15:35** `p_email.py --kind daily`, **금 15:35** `--kind final` 발송.
+
+- **이메일 = 순수 코드** `p_email.py` (smtplib + Gmail). **Gmail MCP 아님** — cron/headless에선 MCP를 못 쓰므로. 발신 자격증명 `pipeline/.gmail_creds`(앱 비밀번호, gitignore). 수신 = config.yaml `emails`.
+- Claude 호출 0회 → **Claude/API 비용 0**.
+
+### 2. Back testor — ⏳ 미구현 (다음 목표)
+목표: 과거 데이터로 engine의 평균 주간수익률·승률·성과 지표를 점검(엔진 개발용). **이메일 없음, html만.**
+
+user input: 테스트할 data, engine, 테스트 주(월요일 날짜 여러 개).
+- **data는 로컬에 준비돼 있다고 가정**(CREON API 등 본인이 수집). **선정규칙에 이미 선정된 종목**이 폴더 구조에 baked-in — 백테스터는 폴더 스캔 → 각 CSV를 엔진에 돌림(온라인 screener 호출 0, 과거 재현 정확).
+- 필요 데이터: 각 매매주(월~금) 5/3/10분봉 + 직전주 주봉(직전주 변동성·금 종가=F0) + 직전주 거래대금·시총.
+- **라이브(①)의 `bars/{code}_5m.csv`가 백테스터 `load_bars` 포맷과 동일** → 라이브 주가 끝나면 그대로 백테스트 데이터가 된다(라이브↔백테스터 연결).
+
+### 3. 특정종목·특정주 시뮬 — ✅ 완료 (로컬 에이전트)
+`single_simulator_agent`(`.claude/agents/`). user input: 종목코드(or 회사명)·시뮬 시작 월요일·target engine.
+→ 직전주로 F0(직전 금 종가)·직전주 변동율·거래대금·시총 fetch → 엔진 가동 → 캔들 워크스루 HTML(`report/single/`). 데이터 출처를 리포트에 명시.

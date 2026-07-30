@@ -1,0 +1,77 @@
+# Single-case PEAK solver: ver2 traction BC (wall_expB_new) on OUR LAP_mesh.
+# Reuses ver2's PYMAPDL_worker (traction prep_bc + _extract_fc_results + _build_fc_vtu),
+# monkeypatched so msh_to_cdb blanks cell_sets (LAP mesh meshio IndexError fix).
+# Usage: pymapdl_solve_peak.py <case> <nproc> <exec_dir> <port> <out_vtu>
+import sys, time, pathlib
+import numpy as np, pyvista as pv, meshio
+import ansys.mapdl.core as pymapdl
+from ansys.mapdl.reader import save_as_archive
+import pymapdl_simulation_ver2 as v2
+import utils.utils_ansys.utils_prep as utils_prep
+
+EXEC = "/opt/cvbml/softwares/ansys_inc/v251/ansys/bin/ansys251"
+case    = int(sys.argv[1])
+nproc   = int(sys.argv[2])
+exec_dir= pathlib.Path(sys.argv[3])
+port    = int(sys.argv[4])
+out_vtu = sys.argv[5]
+bc      = "peak"
+
+Q       = pathlib.Path("/home/jeff/project/54_analysis")
+mesh    = Q / f"LAP_mesh/solid_LAP_{case}.msh"        # OUR mesh (not solid_data type2)
+wall_dir= Q / "post_data" / "wall_expB_new"           # traction source (Tx,Ty,Tz)
+param   = Q / "pre_data" / "parameter_0728.csv"       # corrected material, 0-999
+matjson = Q / "pre_data" / "material.json"
+exec_dir.mkdir(parents=True, exist_ok=True)
+
+# --- monkeypatch msh_to_cdb: same as ver2 but blanks cell_sets (LAP mesh fix) ---
+def _msh_to_cdb(self, gmsh_path, type=1):
+    print("======= .msh to .cdb (peak/LAP, cell_sets blanked) ========", flush=True)
+    gmsh_mesh = meshio.read(gmsh_path, file_format="gmsh")
+    gmsh_mesh.cell_sets = {}
+    m = pv.from_meshio(gmsh_mesh)
+    tags = np.array(m.cell_data["gmsh:physical"])
+    print("gmsh:physical tags:", set(tags), flush=True)
+    for i in range(1, 8):   # LAP mesh = type1 tags 1..7
+        if i not in tags:
+            raise Exception(f"gmsh:physical tag {i} missing in {gmsh_path}")
+    m.points *= 0.1
+    self.nodes_by_tag, _ = utils_prep.surface_nid_dic(m, Linear=False, Terminal_display=False)
+    cdb = self.ansys_exec_dir / f"total_solid{type}.cdb"
+    if cdb.exists():
+        return str(cdb)
+    save_as_archive(cdb, m)
+    return str(cdb)
+v2.PYMAPDL_worker.pymapdl_msh_to_cdb = _msh_to_cdb
+
+# wall_folder_path = exec_dir so apply_traction_peak.txt is PER-CASE (no pool race)
+w = v2.PYMAPDL_worker(case, str(exec_dir), exec_dir, str(param), nproc=nproc)
+t0 = time.time()
+w.cdb_path = w.pymapdl_msh_to_cdb(mesh)
+# launch on explicit port (distinct per concurrent case)
+w.mapdl = None
+for attempt in range(4):
+    try:
+        w.mapdl = pymapdl.launch_mapdl(jobname=f"{case}_{bc}", exec_file=EXEC,
+                    run_location=str(exec_dir), loglevel="ERROR", override=True,
+                    port=port+attempt, nproc=nproc)
+        break
+    except Exception as e:
+        print(f"[peak {case}] launch attempt {attempt} port {port+attempt} FAILED: {e}", flush=True)
+        time.sleep(8)
+if w.mapdl is None:
+    raise SystemExit(f"[peak {case}] MAPDL failed to start")
+w.mapdl.units("CGS")
+w.bc_type = bc
+w.casename = f"case_{case}_{bc}"
+w.mapdl.jobname = w.casename
+w.pymapdl_prep_bc(wall_dir / bc / f"wall_{bc}_case_{case}.csv")   # TRACTION
+w.pymapdl_prep_mat(str(matjson))
+w.pymapdl_solve()
+data = w._extract_fc_results()
+w._build_fc_vtu(data, str(out_vtu))
+try:
+    w.mapdl.exit()
+except Exception:
+    pass
+print(f"[peak {case}] DONE in {time.time()-t0:.1f}s -> {out_vtu}", flush=True)

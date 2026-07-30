@@ -1,0 +1,134 @@
+"""f_build_report (Function 3) — 보고서 작성 (순수·오프라인·결정론).
+
+섹션 리스트(각 = 한 종목-한 주 엔진결과)를 받아 가로스크롤 캔들 + 알고리즘 논리 서술 HTML을 만든다.
+네트워크·파일쓰기 없음 — 드라이버가 write. week_chart/narrative/skeleton은 run_live_report에서 그대로 이전.
+
+sections: [{code, name, label, sel, bars, events, ctx, source}]  (label = h2 제목)
+meta: {stamp, doctitle, h1, subtitle, live:bool, intro:bool, refresh:int|None}
+  live=True  → ⚠️ '진행 중' note (미청산 ◆는 데이터로 자동 판정, 플래그 불필요)
+  intro=True → 선정규칙 + 요약 table 블록
+  refresh=N  → <meta http-equiv=refresh content=N> 주입 (None이면 미주입 → historical과 byte-동일)
+"""
+import os, sys, datetime
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "engines", "engine281"))
+from chart import Chart, Candle, legend_block, C_ENTRY, C_STOP, C_TP, C_F0, C_UPPER
+
+BG, INK, ACCENT, BORDER, MUTED, CODEBG, POS, NEG, TRAIL = (
+    "#F0EEE6", "#1A1A1A", "#CC785C", "#D4C5B0", "#6B5E54", "#E6E0D4", "#2E7D32", "#C25744", "#2E7D32")
+WD = ["월", "화", "수", "목", "금", "토", "일"]
+
+
+def week_chart(bars, events, ctx, reentry):
+    cs = [Candle(b.hm, b.o, b.h, b.l, b.c) for b in bars]
+    n = len(cs); W = max(940, n * 8 + 90); H = 430
+    ch = Chart(cs, width=W, height=H, pad_left=62, pad_right=22)
+    F0 = ctx["F0"]
+    for L in ctx["longL"]:
+        ch.hline(L, C_UPPER, f"진입기준선 {L:,.0f}", dash="6 5", width=1.2, opacity=0.8)
+    ch.hline(F0, C_F0, f"F0 {F0:,.0f}", dash="", width=1.4, opacity=0.7)
+    for e in events:
+        live = "데이터 종료" in e.reason
+        if e.kind == "ENTRY":
+            is_re = id(e) in reentry
+            ch.marker(e.idx, e.price, "E", (TRAIL if is_re else C_ENTRY),
+                      arrow=("up" if e.direction > 0 else "down"),
+                      note=("재진입" if is_re else "진입"), tip=f"{e.dt[11:16]} {e.reason}")
+        else:
+            ch.marker(e.idx, e.price, ("◆" if live else e.marker),
+                      (ACCENT if live else (C_TP if e.marker == "T" else C_STOP)),
+                      note=("현재가(미청산)" if live else e.note),
+                      tip=f"{e.dt[11:16]} {e.reason} ({e.pnl:+,.0f})")
+    svg = ch.svg()
+    x0, y0, x1, y1 = ch._plot; step = (x1 - x0) / n
+    ds = {}
+    for i, b in enumerate(bars):
+        ds.setdefault(b.day, i)
+    extra = ""
+    for d, si in ds.items():
+        bx = x0 + step * si; wd = WD[datetime.date(*map(int, d.split("-"))).weekday()]
+        if si > 0:
+            extra += f'<line x1="{bx:.1f}" x2="{bx:.1f}" y1="{y0}" y2="{y1}" stroke="{MUTED}" stroke-dasharray="3 5" opacity="0.55"/>'
+        extra += (f'<rect x="{bx+2:.1f}" y="{y0+2}" width="78" height="16" fill="{CODEBG}" rx="3"/>'
+                  f'<text x="{bx+7:.1f}" y="{y0+14}" font-size="11" fill="{INK}" font-weight="700">{d[5:]} ({wd})</text>')
+    extra += f'<text x="{x0+3}" y="{ch._y(F0)-3:.1f}" font-size="10.5" fill="{C_F0}" font-weight="700">F0 {F0:,.0f}</text>'
+    for L in ctx["longL"]:
+        extra += f'<text x="{x0+3}" y="{ch._y(L)-3:.1f}" font-size="10.5" fill="{C_UPPER}" font-weight="700">기준선 {L:,.0f}</text>'
+    return svg.replace("</svg>", extra + "</svg>").replace('class="chart"', f'style="width:{W}px;height:{H}px;display:block"')
+
+
+def narrative(name, code, sel, ctx, events, stamp):
+    fb = ctx["first_bar"]; wr = ctx["weekly_return"] * 100
+    ents = [e for e in events if e.kind == "ENTRY"]
+    tps = [e for e in events if e.kind == "EXIT" and e.marker == "T" and "데이터 종료" not in e.reason]
+    live = [e for e in events if "데이터 종료" in e.reason]
+    if ents:
+        e0 = ents[0]; gap = e0.direction * (e0.price / ctx["F0"] - 1) * 100
+        entry_txt = (f"<b>진입</b>: {e0.dt[5:16]} 종가 <b>{e0.price:,.0f}</b> 신고점 돌파 → "
+                     f"{'롱' if e0.direction>0 else '숏'} (gap {gap:+.1f}%)"
+                     + (f" · 재진입 {len(ents)-1}회" if len(ents) > 1 else ""))
+    else:
+        entry_txt = "<b>진입 없음</b>: 신고점 돌파 없어 관망."
+    tp_txt = ("<b>익절</b>: " + ", ".join(f"{e.dt[5:16]} {e.note}({e.pnl:+,.0f})" for e in tps) + " 실현."
+              if tps else "<b>익절</b>: 아직 +8% 게이트 미도달.")
+    pos_txt = (f"<b>현재</b>: 미청산 보유(현재가 {live[0].price:,.0f}), 무손절 홀드→금 15:15 청산 예정. 평가 {wr:+.2f}%."
+               if (ents and live) else (f"<b>현재</b>: 청산 완료 {wr:+.2f}%." if ents else "무포지션 0%."))
+    return f"""<div class="logic"><h3>🧠 {name}({code})</h3><ul>
+<li><b>선정</b>: 지난주 변동율 <b>{sel['chg']:+.1f}%</b>·거래대금 {sel['val']/1e8:,.0f}억·F0 {ctx['F0']:,.0f}. 첫봉 {fb.hm} {'양봉' if fb.bull else '음봉'}→base {'롱' if ctx['base']>0 else '숏'}·Case{ctx['case']}.</li>
+<li>{entry_txt}</li><li>{tp_txt}</li>
+<li><b>손절</b>: 없음(281). {pos_txt}</li>
+<li><b>현재 평가수익률: <span class="{'g' if wr>=0 else 'r'}">{wr:+.2f}%</span></b> ({stamp})</li></ul></div>"""
+
+
+def build_report(sections, meta):
+    """섹션 리스트 → 완성 HTML 문자열. meta 토글로 live/historical·single/multi를 렌더."""
+    stamp = meta["stamp"]
+    live = meta.get("live", False)
+    intro = meta.get("intro", True)
+    refresh = meta.get("refresh")
+    doctitle = meta.get("doctitle", "LIVE 281 · 이번 주")
+    h1 = meta.get("h1", f"🔴 LIVE — 281 이번 주 진행 ({stamp})")
+    subtitle = meta.get("subtitle", "선정 지난주 → 이번 주 5분봉 281 가동 · TradingView-Screener + yfinance · F0=지난주 금종가")
+
+    sections_html = ""; summ = []
+    for s in sections:
+        code, name, sel = s["code"], s["name"], s["sel"]
+        bars, events, ctx, src = s["bars"], s["events"], s["ctx"], s["source"]
+        ents = [e for e in events if e.kind == "ENTRY"]
+        reentry = set(id(e) for e in ents[1:])
+        wr = ctx["weekly_return"] * 100
+        d = "롱" if (ents and ents[0].direction > 0) else ("숏" if ents else "—")
+        nbar = len(bars)
+        summ.append((code, name, sel.get("chg", 0.0), wr, d, src, nbar))
+        label = s.get("label", f"{name} ({code})")
+        sections_html += f"""<section class="wk"><h2>{label} <span class="wr {'g' if wr>=0 else 'r'}">평가 {wr:+.2f}%</span></h2>
+<p class="hint">← 옆으로 스크롤 (월~현재) → · 데이터 {src} ({nbar}봉)</p><div class="ch">{week_chart(bars, events, ctx, reentry)}</div>
+{narrative(name, code, sel, ctx, events, stamp)}</section>"""
+
+    intro_html = ""
+    if intro:
+        srow = "".join(f"<tr><td>{n} ({c})</td><td>{ch:+.1f}%</td><td>{d}</td><td class='{'g' if w>=0 else 'r'}'>{w:+.2f}%</td><td style='font-size:11.5px;color:{MUTED}'>{src} {nb}봉</td></tr>"
+                       for c, n, ch, w, d, src, nb in summ)
+        note = ("⚠️ 진행 중 — 미청산은 평가손익(현재가), 금 15:15 실제청산. 거래대금 Σ(종가×거래량) 근사."
+                if live else "거래대금 Σ(종가×거래량) 근사. 금 15:15 강제청산으로만 손실 실현(한 주 제한).")
+        intro_html = f"""{legend_block()}
+<div class="intro">📋 <b>선정 규칙</b>: ① 시총 5,000억↑ → ② 주간변동율 상승 Top20 → ③ 거래대금 Top5.
+<table style="margin-top:8px"><thead><tr><th>선정 종목</th><th>지난주 변동율</th><th>방향</th><th>현재 평가</th><th>데이터</th></tr></thead><tbody>{srow}</tbody></table>
+<p style="margin:8px 2px 0;color:{MUTED};font-size:12.5px">{note}</p></div>
+"""
+    else:
+        intro_html = f"{legend_block()}\n"
+
+    refresh_meta = f'<meta http-equiv="refresh" content="{refresh}">' if refresh else ""
+
+    return f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">{refresh_meta}
+<title>{doctitle}</title><style>
+*{{box-sizing:border-box}}body{{margin:0;background:{BG};color:#2D2D2D;font-family:-apple-system,"Apple SD Gothic Neo",sans-serif;line-height:1.6}}
+main{{max-width:1000px;margin:0 auto;padding:38px 20px 90px}}h1{{font-size:24px;margin:0 0 4px}}.sub{{color:{MUTED};font-size:14px;margin:0 0 14px}}
+h2{{font-size:18px;margin:8px 0;padding-left:10px;border-left:4px solid {ACCENT}}}h2 .wr{{float:right}}
+.wk{{background:#fff;border:1px solid {BORDER};border-radius:14px;padding:14px 16px;margin:16px 0}}.hint{{color:{ACCENT};font-size:12.5px;font-weight:600;margin:2px 0 6px}}
+.ch{{overflow-x:auto;border:1px solid {BORDER};border-radius:8px}}.ch svg{{display:block}}
+.logic{{background:{CODEBG};border-radius:10px;padding:14px 17px;margin:10px 0}}.logic h3{{color:{ACCENT};margin:0 0 8px;font-size:15px}}.logic li{{font-size:13.8px;margin:5px 0}}
+.g{{color:{POS};font-weight:700}}.r{{color:{NEG};font-weight:700}}.intro{{background:#fff;border:2px solid {ACCENT};border-radius:12px;padding:15px 18px;margin:12px 0;font-size:14px}}
+table{{width:100%;border-collapse:collapse;font-size:13.5px}}th,td{{border-bottom:1px solid {BORDER};padding:7px 9px;text-align:right}}th:first-child,td:first-child{{text-align:left}}th{{background:{CODEBG}}}</style></head><body><main>
+<h1>{h1}</h1><p class="sub">{subtitle}</p>
+{intro_html}{sections_html}</main></body></html>"""

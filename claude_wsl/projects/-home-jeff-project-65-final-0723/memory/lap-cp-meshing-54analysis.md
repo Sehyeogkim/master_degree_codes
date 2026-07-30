@@ -1,0 +1,37 @@
+---
+name: lap-cp-meshing-54analysis
+description: "54_analysis LAP (Type1 no-cal) + CP (Type2 calcified plaque) meshing — TWO parallel efforts: id>500 on cvbml02/ws2, id<500 on cvbml01/ws1"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: ee471b4a-e3b0-41ee-80bd-85771435f221
+  modified: 2026-07-28T03:14:54.259Z
+---
+
+Meshing project in **`/home/jeff/project/54_analysis`**, started 2026-07-28, split across TWO machines: **id>500 on cvbml02 (ws2)** and **id<500 on cvbml01 (ws1)**. (This split is why the user's first message mixed up "<500" vs ">500" — ws1 does <500.) Both: params `pre_data/parameter_0728.csv` (1000 rows, **no case_id col → row index == case_id**, lesion_length = col 2), geometry `solid_data/case_<id>/{lumen,solid,lipid,fc}.stp`. Output `LAP_mesh/solid_LAP_<id>.msh` (Type-1) and `CP_mesh/solid_CP_<id>.msh` (Type-2).
+
+**== id<500 on cvbml01/ws1 (this session, 2026-07-28) ==**
+LAP Type-1 distance-field remesh of the **91 missing cases in 0-499** (409 already existed, box-field). Built **`HXT_meshing_I_dist.py`** = `HXT_meshing_I.py` with box field → fc-surface Distance+Threshold (SizeMin=mesh_size, SizeMax=0.2, DistMax=3.0, Sampling=1000) +Smoothing=10 +optimize('HighOrder') +quality.json +optional algo2d/algo3d(def 5/10). Boolean pipeline & hardcoded tags lipid=(3,3)/solid=(3,6) LEFT UNTOUCHED. Worker `mesh_one_LAP.py <case> <nproc> <size> [a2] [a3]`; batch `batch_LAP_0728_resume.py` **4 workers × nproc 5** (dropped from 12 because **ANSYS LAP structural sim runs concurrently on the same box, ~36 procs, job "LAP_0"**), 10-min/rung cap, ladder (0.055,5,10)→(0.06,6,10)→(0.06,5,1), early-break on STEP/overlapping-facets/Invalid-boundary. **Launch with `setsid nohup`** — first plain-nohup batch got SIGKILLed ~31min in on the shared 22-user machine (no OOM/traceback). Resumable via `LAP_mesh/remaining_resume.json`. Results: ~90s/success, 1.3-1.7M elem, min_q 0.006-0.33, neg-Jac 0. Failure taxonomy = all geometry (STEP1 lipid∩fc empty / STEP4 vol≠1 / overlapping-facets BSpline self-intersection) → regen candidates. fc_offset source for id<500: code path is `geo_0605/case_{i}/` (absent); candidate = **`C:\Users\jeff\project_inventor\32_calcification_Test\geo_exp_0515\case_<0..499>\fc_offset.stp`** (500 files, May-15; verified concentric ~0.1mm outward offset of solid_data fc, per-case z-COM tracks → strong match).
+
+**CP (Type-2) remesh for id<500 — NEXT (investigated 2026-07-28, not yet run).** Remesh ids missing from `CP_mesh/solid_CP_<id>.msh`: **113 missing in 0-499** (74 also LAP-missing = geometry defects; 39 CP-specific where LAP exists but Type-2 steps fail). Mesher `HXT_meshing_II_main.py <start> <end> [nproc=20]` (end EXCLUSIVE) + `HXT_type2_utils.py`. 5 steps: (1) lipid.stl=lipid−fc; (2) cal=`lipid−fc_offset`+Voronoi KDTree; (3) smooth(taubin)→×10 scale→step + **cal-inside-lipid validation (skip if outside)**; (4) `solid_gmshing_production` inserts cal as **physical tag 8**; (5) cleanup. Settings: **box field (NOT distance), Netgen optimize ON**, quadratic SecondOrderLinear=True, size ladder **0.05 HXT → Delaunay fallback → >6M tet coarsen 0.055 → bad-quality 0.045→0.04 → STEP-fail skip**, max_tet 6e6, nproc 20, **TIMEOUT 3600s/case**. Output `solid_data/case_i/type2_mesh/solid_type_2_quad.msh` → then `CP_mesh/solid_CP_i.msh` (sim `pymapdl_sim_CP_0728.py` reads CP_mesh). **TWO BLOCKERS, both absent on ws1, must be staged before any CP run:** (a) `geo_0605/case_{i}/fc_offset.stp` (geo_0605 dir doesn't exist → stage verified geo_exp_0515 there); (b) **`pre_data/input_0605.csv`** (Type-2 `para_csv_path`, MISSING → confirm source or repoint to parameter_0728.csv).
+
+**== id>500 on cvbml02/ws2 (session ee471b4a) ==**
+Geometry also from `geo_0303_500/case_<id>/`.
+
+- **LAP = Type-1 = no calcification** (HXT_meshing_I, HINT script `HXT_meshing_I_dist.py` from 65_final_0723). Distance-field sizing off the fibrous-cap (fc) surfaces (finer near fc, coarse far — ~43% fewer elems than box field). Inputs: 4 stp (lumen/solid/lipid/fc) — **fc_offset.stp NOT needed** (that's a Type2/CP input). Output `LAP_mesh/solid_LAP_<id>.msh`.
+  - Runner I built: `54_analysis/run_LAP_dist.py <case> <nproc> <mesh_size>` (geometry from solid_data, HXT→Delaunay fallback, output solid_LAP_<id>.msh). Driver `run_LAP_batch.sh` (xargs -P 6, TMO 900). Progress `LAP_dist_progress.log`, logs `LAP_mesh_logs/`.
+  - Missing before run: **86 cases** (id 501-999), list in `LAP_missing_gt500.txt`.
+  - **Failures are dominated by STEP4** = `occ.cut(solid, [lipid,fc,lumen])` boolean — a geometry defect, NOT fixable by mesh algo/field/size. ~20% succeed with dist, rest hit STEP4.
+- **fc_offset.stp** (needed for CP/Type2 later): lives in `geo_0303_500/case_<id>/` — 500/500 present for id 500-999. NOT in solid_data.
+
+**FUTURE WORK (user out to lunch 2026-07-28):**
+1. User will **re-make the geometry** for the failed LAP cases (STEP4 defects) → then I remesh LAP with the new geometry.
+2. Then I must **remesh CP (Calcified Plaque = Type2)** for id>500. CP settings hint is in **65_final_0723 on ws2** (our Type2 work: `run_type2_0723.py`, `HXT_type2_utils.py`, `HXT_meshing_II_cal_generation.py`). CP output dir is `54_analysis/CP_mesh/`.
+- See [[cvbml02-quad-batch]] (65_final Type2 settings: quad SOL=1, mesh_size 0.06, nproc, cal tag=8, STEP4=cal insertion) and [[solid-mesh-two-types]].
+
+**== id>500 LAP RESULT (ws2, 2026-07-28) ==**
+Used ws1's proven code (copied to ws2): `mesh_one_LAP.py` + `batch_LAP_0728_resume.py` (rung ladder RUNGS=[(0.055,5,10),(0.06,6,10),(0.06,5,1)], early-break on STEP/overlapping-facets/Invalid-boundary, 4-wide nproc=5) + ws1's `HXT_meshing_I_dist.py` (cleaner than the 65_final copy — box-field fully removed, algo2d default 5; ws2's prior copy backed up .bak_ws2_65final). Reads `LAP_mesh/remaining_resume.json` (I rebuilt it for 500-999). Launch via `setsid nohup`.
+- **Rung ladder recovered 23/86** (vs 9/86 my simple HXT→Delaunay retry). Total LAP id>=500 now **437/500**.
+- CAP matters: CAP=600 first, then user asked CAP=180 → more TIMEOUTs (big meshes cut at 180s per rung). The 6 CAP180-run successes came at rung 1-2 in 30-113s.
+- **63 still missing, split by cause:** TIMEOUT 15 (585 655 793 804 829 843 849 887 889 895 920 924 952 970 992 — geometry FINE, just slow, recover by raising CAP/nproc), STEP-defect 30 (needs geometry regen), other 18. Full lists in the session; `LAP_missing_gt500.txt` is the original 86.
+- write_status .tmp OSError warning is harmless (wrapped in except OSError, status json still written).
