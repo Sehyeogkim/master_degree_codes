@@ -1,0 +1,173 @@
+"""7/6~7/11 주 백테스트 HTML 리포트 — 5종목 캔들차트 + 이벤트 + 3전략 비교.
+사용: python3 make_week_report.py → report/backtest_week_2026-07-06.html"""
+import os, sys, json, html
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+import f_run_engine
+from p_live import _load_engine
+from data_source import load_bars_csv
+
+OUT = os.path.join(ROOT, "report", "backtest_week_2026-07-06.html")
+BARS_DIR = os.path.join(ROOT, "report", "live", "live_project1", "2026-07-06", "bars")
+TOP = {r["code"]: r for r in json.load(open(os.path.join(ROOT, "report", "live", "live_project1", "2026-07-06", "_top5.json")))}
+
+PAPER, INK, ACC, GRID = "#F0EEE6", "#211D18", "#CC785C", "#D9D3C7"
+MUTE, CARD = "#6B5E54", "#FBFAF6"
+UP, DOWN = "#D24B4B", "#3A6EA5"      # 한국식: 상승 적, 하락 청
+WIN, NEG = "#2E7D32", "#C2493C"
+esc = html.escape
+
+_, run = _load_engine("engine_fable3")
+S281 = dict(tp_gate=0.08, entries=("trail",), stop_mode="none", fee=0.00015, slip=0.0005, tax=0.0015, round_shares=True)
+S3 = dict(S281, tp_gate=0.10, flip_monday=True, flip_days=1, flip_cutoff_hm="09:30", flip_max=1)
+S4 = dict(S3, flip_cutoff_hm="10:00")
+CAP = 10_000_000.0
+
+
+def candle_svg(bars, events, F0):
+    n = len(bars); cw = 2.5
+    W = round(n * cw); padT, padB, padL, padR = 28, 40, 8, 8
+    H = 300; plotH = H - padT - padB
+    lo = min(min(b.l for b in bars), F0); hi = max(max(b.h for b in bars), F0)
+    span = hi - lo; lo -= span * 0.06; hi += span * 0.06; span = hi - lo
+    Y = lambda p: padT + plotH * (hi - p) / span
+    X = lambda i: padL + i * cw + cw / 2
+    el = [f'<svg viewBox="0 0 {W+padL+padR} {H}" width="{W+padL+padR}" height="{H}" font-family="ui-sans-serif,system-ui,sans-serif">']
+    el.append(f'<rect width="{W+padL+padR}" height="{H}" fill="{CARD}"/>')
+    days = ["월", "화", "수", "목", "금"]; prev = None; di = 0
+    for i, b in enumerate(bars):
+        d = b.dt[:10]
+        if d != prev:
+            if prev is not None:
+                el.append(f'<line x1="{X(i)-cw/2:.1f}" y1="{padT}" x2="{X(i)-cw/2:.1f}" y2="{padT+plotH}" stroke="{GRID}" stroke-width="1"/>')
+            el.append(f'<text x="{X(i)+2:.1f}" y="{padT+11:.0f}" font-size="10" fill="{MUTE}" font-weight="700">{days[di] if di<5 else d[5:]}</text>')
+            prev = d; di += 1
+    yF0 = Y(F0)
+    el.append(f'<line x1="{padL}" y1="{yF0:.1f}" x2="{padL+W}" y2="{yF0:.1f}" stroke="{MUTE}" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>')
+    el.append(f'<text x="{padL+W-4}" y="{yF0-3:.1f}" font-size="9.5" fill="{MUTE}" text-anchor="end">F0 {F0:,.0f}</text>')
+    bw = max(1.3, cw * 0.6)
+    for i, b in enumerate(bars):
+        up = b.c >= b.o; col = UP if up else DOWN; cx = X(i)
+        el.append(f'<line x1="{cx:.1f}" y1="{Y(b.h):.1f}" x2="{cx:.1f}" y2="{Y(b.l):.1f}" stroke="{col}" stroke-width="0.7"/>')
+        yo, yc = Y(b.o), Y(b.c); top = min(yo, yc)
+        el.append(f'<rect x="{cx-bw/2:.1f}" y="{top:.1f}" width="{bw:.1f}" height="{max(0.7,abs(yc-yo)):.1f}" fill="{col}"/>')
+    for e in events:
+        cx = X(e.idx); y = Y(e.price)
+        if e.kind == "ENTRY":
+            flip = "리버설" in e.reason
+            c = ACC if flip else INK
+            el.append(f'<circle cx="{cx:.1f}" cy="{y:.1f}" r="4.5" fill="{"#fff" if not flip else ACC}" stroke="{c}" stroke-width="1.6"/>')
+            el.append(f'<text x="{cx:.1f}" y="{y-8:.1f}" font-size="9.5" font-weight="700" fill="{c}" text-anchor="middle">{"FLIP" if flip else ("롱" if e.direction>0 else "숏")}</text>')
+        else:
+            el.append(f'<circle cx="{cx:.1f}" cy="{y:.1f}" r="3.5" fill="{INK}"/>')
+    el.append('</svg>')
+    return "".join(el), W + padL + padR
+
+
+def stock_block(code, sel):
+    bars = load_bars_csv(os.path.join(BARS_DIR, f"{code}_5m.csv"))
+    F0 = sel["fri_close"]; name = sel.get("name", code)
+    _, c281 = run(bars, F0, capital=CAP, **S281)
+    _, c3 = run(bars, F0, capital=CAP, **S3)
+    ev4, c4 = run(bars, F0, capital=CAP, **S4)
+    svg, w = candle_svg(bars, ev4, F0)
+    entries = [e for e in ev4 if e.kind == "ENTRY"]
+    d0 = entries[0].direction if entries else 0
+    r281, r3, r4 = c281["weekly_return"], c3["weekly_return"], c4["weekly_return"]
+    flip = c4["flips_used"]
+    evlog = "".join(
+        f'<li><b>{e.dt[5:16]}</b> · {("진입" if e.kind=="ENTRY" else "청산")} '
+        f'{"롱" if e.direction>0 else "숏"} @{e.price:,.0f} <span style="color:{MUTE}">— {esc(e.reason)}</span></li>'
+        for e in ev4)
+    win = "flip" if flip else ""
+    return f"""<div class="stock">
+<div class="sh"><span class="nm">{esc(name)} <span class="cd">({code})</span></span>
+<span class="dir">{'롱' if d0>0 else '숏'} 진입{' · 🔄 플립 '+str(flip)+'회' if flip else ''}</span></div>
+<div class="scores">
+  <span>281 <b style="color:{WIN if r281>=0 else NEG}">{r281*100:+.2f}%</b></span>
+  <span>live3(9:30) <b style="color:{WIN if r3>=0 else NEG}">{r3*100:+.2f}%</b></span>
+  <span class="hi">live4(10:00) <b style="color:{WIN if r4>=0 else NEG}">{r4*100:+.2f}%</b></span>
+</div>
+<div class="chart"><div class="scroll">{svg}</div></div>
+<details><summary>이벤트 로그 ({len(ev4)}건)</summary><ul class="ev">{evlog}</ul></details>
+</div>""", (r281, r3, r4, flip)
+
+
+def build():
+    blocks = []; agg = []
+    for code, sel in TOP.items():
+        b, r = stock_block(code, sel); blocks.append(b); agg.append((code, sel.get("name", code), *r))
+    n = len(agg)
+    a281 = sum(x[2] for x in agg)/n; a3 = sum(x[3] for x in agg)/n; a4 = sum(x[4] for x in agg)/n
+    trows = "".join(
+        f'<tr><td>{esc(nm)} ({c})</td>'
+        f'<td class="num" style="color:{WIN if r1>=0 else NEG}">{r1*100:+.2f}%</td>'
+        f'<td class="num" style="color:{WIN if r2>=0 else NEG}">{r2*100:+.2f}%</td>'
+        f'<td class="num" style="color:{WIN if r3>=0 else NEG};font-weight:700">{r3*100:+.2f}%</td>'
+        f'<td class="num">{f}회</td></tr>' for c, nm, r1, r2, r3, f in agg)
+    trows += (f'<tr class="avg"><td><b>평균</b></td>'
+              f'<td class="num"><b>{a281*100:+.2f}%</b></td><td class="num"><b>{a3*100:+.2f}%</b></td>'
+              f'<td class="num" style="font-weight:800">{a4*100:+.2f}%</td><td></td></tr>')
+
+    return f"""<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>백테스트 · 2026-07-06 주 (live4 / 플립10:00)</title>
+<style>
+*{{box-sizing:border-box}}
+body{{margin:0;background:{PAPER};color:{INK};font-family:ui-sans-serif,system-ui,-apple-system,"Apple SD Gothic Neo",sans-serif;line-height:1.6}}
+.wrap{{max-width:1000px;margin:0 auto;padding:36px 20px 70px}}
+.eyebrow{{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;color:{ACC};font-weight:800;margin:0 0 8px}}
+h1{{font-size:26px;margin:0 0 6px;font-weight:800;letter-spacing:-.02em}}
+.sub{{color:{MUTE};font-size:13.5px;margin:0 0 22px}}
+h2{{font-size:18px;margin:34px 0 10px;font-weight:800}}
+table{{border-collapse:collapse;width:100%;font-size:13.5px}}
+th,td{{border-bottom:1px solid {GRID};padding:8px 10px;text-align:left}}
+th{{background:#E6E0D4;font-size:12px}}
+td.num{{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}}
+tr.avg td{{background:#EDE8DD;border-top:2px solid {ACC}}}
+.stock{{background:{CARD};border:1px solid {GRID};border-radius:12px;padding:16px 18px;margin:14px 0}}
+.sh{{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px}}
+.nm{{font-size:16px;font-weight:800}} .cd{{color:{MUTE};font-weight:400;font-size:13px}}
+.dir{{font-size:12.5px;color:{MUTE}}}
+.scores{{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;margin:8px 0 4px;font-variant-numeric:tabular-nums}}
+.scores .hi b{{font-size:15px}}
+.chart{{margin:8px 0 4px;border:1px solid {GRID};border-radius:8px}}
+.scroll{{overflow-x:auto}}
+details{{font-size:12.5px;margin-top:6px}} summary{{cursor:pointer;color:{MUTE}}}
+ul.ev{{margin:6px 0;padding-left:18px}} ul.ev li{{margin:3px 0}}
+.legend{{font-size:12px;color:{MUTE};margin-top:8px}}
+.card{{background:{CARD};border:1px solid {GRID};border-radius:12px;padding:16px 18px;margin:12px 0}}
+.foot{{margin-top:30px;font-size:12px;color:{MUTE};border-top:1px solid {GRID};padding-top:14px}}
+.foot code{{background:#e7e1d5;padding:1px 5px;border-radius:4px}}
+</style></head><body><div class="wrap">
+<p class="eyebrow">bullet281 · 주간 백테스트</p>
+<h1>2026-07-06 주 (7/6~7/10) · live4 전략</h1>
+<p class="sub">스크리너 선정 5종목을 <b>281 / live3(플립 9:30) / live4(플립 10:00)</b> 세 전략으로 돌린 결과.
+완전한 주(금 15:30 청산 완료)라 확정 수익.</p>
+
+<h2>3전략 비교</h2>
+<div class="card"><table>
+<thead><tr><th>종목</th><th class="num">281(기존)</th><th class="num">live3(9:30)</th><th class="num">live4(10:00)</th><th class="num">플립</th></tr></thead>
+<tbody>{trows}</tbody></table>
+<div class="legend">이번 주는 live3=live4 — 유일한 플립(스피어)이 09:15에 걸려 두 창이 동일하게 잡음. 플립이 스피어를 −16.8%→+6.0%로 구제.</div>
+</div>
+
+<h2>종목별 캔들 · 이벤트 (live4 기준)</h2>
+<p class="sub" style="margin-bottom:8px">한국식 캔들(상승 <span style="color:{UP}">적</span>/하락 <span style="color:{DOWN}">청</span>) ·
+◯=진입 · <span style="color:{ACC};font-weight:700">주황 FLIP</span>=리버설 전환 · ●=청산 · 점선=F0. 가로 스크롤로 월~금.</p>
+{"".join(blocks)}
+
+<div class="foot">
+데이터 <code>report/live/live_project1/2026-07-06/bars</code> (CREON 5분봉, 금 15:30 청산 완료) ·
+엔진 <code>engine_fable3</code>(=fable2 + 플립 기본 10:00) · 게이트 10% · 무손절 · net(수수료·세금 반영).
+재현 <code>back_test/make_week_report.py</code>.
+</div>
+</div></body></html>"""
+
+
+if __name__ == "__main__":
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    open(OUT, "w", encoding="utf-8").write(build())
+    print("wrote", OUT)

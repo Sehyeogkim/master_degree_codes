@@ -1,0 +1,31 @@
+#!/bin/bash
+# Retry the resumable g015 meshing batch until all 384 cases have a
+# mesh-complete.mesh.vtu, OR a full pass adds zero new meshes (persistent
+# failure -> stop, don't loop forever). Handles the intermittent single-seat
+# Simmetrix license contention: a case that fails on a contended pass just
+# gets retried on a later pass when the seat is free.
+cd /home/jeff/project/65_final_0723
+PY=/home/jeff/miniconda3/envs/ansys_new/bin/python
+MAX_PASSES=15
+
+count_done() { ls fluid_0723/case_*/meshing/mesh-complete/mesh-complete.mesh.vtu 2>/dev/null | wc -l; }
+
+# If a pass is already running (pid 343695 from the manual relaunch), wait it out first.
+while ps -eo args | grep -q "[a]nsys_new/bin/python -u bin/mesh_all_g015.py"; do sleep 30; done
+
+prev=$(count_done)
+for pass in $(seq 1 $MAX_PASSES); do
+  now=$(count_done)
+  echo "[retry] pass=$pass start done=$now/384"
+  [ "$now" -ge 384 ] && { echo "[retry] COMPLETE 384/384"; break; }
+  if [ "$pass" -gt 1 ] && [ "$now" -le "$prev" ]; then
+    echo "[retry] STALLED: pass added 0 new meshes (done=$now). Failures look persistent, stopping."
+    break
+  fi
+  prev=$now
+  $PY -u bin/mesh_all_g015.py >> mesh_all_g015_retry.log 2>&1
+  sleep 5
+done
+
+final=$(count_done)
+echo "[retry] DONE loop final=$final/384"

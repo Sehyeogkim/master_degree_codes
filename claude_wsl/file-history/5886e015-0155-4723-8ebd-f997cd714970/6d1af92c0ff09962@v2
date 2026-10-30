@@ -1,0 +1,69 @@
+"""test_fetch_guard — fetch 오염/단조 가드 회귀 테스트 (plain 스크립트, pytest 불필요).
+
+배경: 2026-07-13 주 최종보고서에서 036930이 +0.00%·0진입으로 나감.
+원인: 어느 틱에 tvDatafeed가 순간 공백 → yfinance fallback이 1봉만 반환 →
+      그 1봉이 데이터로 채택되어 엔진이 0%·0진입을 확정 발표 → 이메일이 그대로 전송.
+가드: (1) data_source — 최소봉수 미만 yfinance는 tv를 대체 못 함(부실 신호).
+      (2) p_live — 이번 fetch가 직전 스냅샷(CSV)보다 짧으면 직전 데이터로 되돌림(단조).
+실행: python3 pipeline/test_fetch_guard.py
+"""
+import os, sys, tempfile
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "engines", "engine281"))
+import data_source as ds
+from engine import Bar
+
+FAILS = []
+
+
+def check(name, cond):
+    print(("PASS " if cond else "FAIL "), name)
+    if not cond:
+        FAILS.append(name)
+
+
+def mk(n, day="2026-07-13"):
+    """n개 더미 5분봉 (len·day만 의미 있음)."""
+    return [Bar(f"{day} 09:00", 100.0, 100.0, 100.0, 100.0, 1.0) for _ in range(n)]
+
+
+# ── (1) data_source.bars_5m: 1봉 yfinance 오염 차단 ──────────────────────
+_tv, _yf = ds._bars_tv, ds._bars_yf
+try:
+    ds._bars_tv = lambda c, s, e: []          # tv 순간 공백
+    ds._bars_yf = lambda c, s, e: mk(1)        # yfinance는 1봉만 (KRX 현실)
+    b, src = ds.bars_5m("X", "2026-07-13", "2026-07-18")
+    check("1) 1봉 yfinance를 유효 데이터로 채택하지 않음", src not in ("yfinance(fallback)", "tvDatafeed"))
+    check("1b) 1봉은 '부실/없음'으로 신호", src in ("부실", "없음"))
+
+    ds._bars_tv = lambda c, s, e: []
+    ds._bars_yf = lambda c, s, e: mk(300)      # 충분한 yfinance
+    b, src = ds.bars_5m("X", "2026-07-13", "2026-07-18")
+    check("2) 충분한 yfinance는 fallback 채택", src == "yfinance(fallback)" and len(b) == 300)
+
+    ds._bars_tv = lambda c, s, e: mk(300)      # 충분한 tv면 yfinance 미호출
+    ds._bars_yf = lambda c, s, e: (_ for _ in ()).throw(AssertionError("yf가 호출됨"))
+    b, src = ds.bars_5m("X", "2026-07-13", "2026-07-18")
+    check("3) 충분한 tv면 yfinance 미호출·tv 채택", src == "tvDatafeed" and len(b) == 300)
+finally:
+    ds._bars_tv, ds._bars_yf = _tv, _yf
+
+# ── data_source.load_bars_csv 라운드트립 ───────────────────────────────
+p = os.path.join(tempfile.gettempdir(), "t_fetch_guard_5m.csv")
+with open(p, "w", encoding="utf-8") as f:
+    f.write("datetime,open,high,low,close,volume\n2026-07-13 09:00,1,2,0.5,1.5,10\n")
+rb = ds.load_bars_csv(p)
+check("4) load_bars_csv 라운드트립", len(rb) == 1 and rb[0].dt == "2026-07-13 09:00" and rb[0].c == 1.5)
+check("4b) 없는 파일은 빈 리스트", ds.load_bars_csv(p + ".none") == [])
+
+# ── (2) p_live._pick_bars: 단조(직전 CSV 대비) 선택 ────────────────────
+import p_live
+picked, reused = p_live._pick_bars(mk(1), mk(308), ds.MIN_WEEK_BARS)
+check("5) 1봉 fetch는 직전 308봉으로 되돌림", reused and len(picked) == 308)
+picked, reused = p_live._pick_bars(mk(380), mk(308), ds.MIN_WEEK_BARS)
+check("6) 정상 성장 fetch는 최신 채택", (not reused) and len(picked) == 380)
+picked, reused = p_live._pick_bars(mk(5), [], ds.MIN_WEEK_BARS)
+check("7) 직전 없고 미달이면 fresh 유지(호출부가 스킵)", (not reused) and len(picked) == 5)
+
+print("\n" + ("ALL PASS" if not FAILS else f"{len(FAILS)} FAIL: {FAILS}"))
+sys.exit(1 if FAILS else 0)

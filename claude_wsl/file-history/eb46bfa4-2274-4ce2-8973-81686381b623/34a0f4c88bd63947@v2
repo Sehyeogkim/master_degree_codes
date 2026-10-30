@@ -1,0 +1,23 @@
+import csv, statistics as st, collections
+rows = list(csv.DictReader(open("/home/jeff/project/65_final_0723/FFR.csv")))
+vals = [float(r["FFR"]) for r in rows if r["status"] == "ok"]
+print("rows=%d  ok=%d" % (len(rows), len(vals)))
+print("min=%.4f  max=%.4f  mean=%.4f  median=%.4f" % (min(vals), max(vals), st.mean(vals), st.median(vals)))
+
+def ids(pred):
+    return [r["case_id"] for r in rows if r["status"] == "ok" and pred(float(r["FFR"]))]
+
+lt08 = ids(lambda v: v < 0.80)
+gt1  = ids(lambda v: v > 1.0)
+neg  = ids(lambda v: v <= 0)
+lt03 = ids(lambda v: 0 < v < 0.30)
+print("FFR<0.80 (significant): %d" % len(lt08))
+print("FFR<=0  (ANOMALOUS):    %d -> %s" % (len(neg), neg))
+print("FFR>1.0 (ANOMALOUS):    %d -> %s" % (len(gt1), gt1))
+print("0<FFR<0.30 (suspicious):%d -> %s" % (len(lt03), lt03))
+
+b = collections.Counter()
+for v in vals:
+    b[min(int(v * 10) / 10, 1.0)] += 1
+for k in sorted(b):
+    print("  [%.1f,%.1f) : %d" % (k, k + 0.1, b[k]))

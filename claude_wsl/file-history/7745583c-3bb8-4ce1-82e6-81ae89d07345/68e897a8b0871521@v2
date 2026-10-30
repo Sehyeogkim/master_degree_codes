@@ -1,0 +1,148 @@
+#!/usr/bin/env python
+"""PSS / del_PSS for the solid mesh-independence study.
+
+Algorithm is byte-for-byte the production definition from
+    65_final_0723/post_processing_0727.py
+i.e. the *neighbourhood mean* formulation:
+
+    sigma_n      max principal stress at a cap-surface node n
+    N_r(n)       cap-surface nodes within distance r of n
+    sigmabar_n   NaN-aware mean of sigma over N_r(n)
+
+    PSS     = max_n sigmabar_n   on  sigma(peak)
+    del_PSS = max_n sigmabar_n   on  sigma(peak) - sigma(low)     [FULL range, no /2]
+
+No top-5% pre-filter; the reported value IS the maximised statistic.
+Z_EPSILON = 0.02 axial trim on both ends of the cap patch.
+
+Only deviation from production: the cap-surface mask.  ver2 (_build_fc_vtu, the SFE
+traction path) writes .vtu with a `Group` tag array (5 = lumen-facing cap), whereas
+ver5 (/MAP path) writes .vtk with a boolean `WALL_IN_FC`.  post_processing_0727.py's
+own docstring states these are the same node set, so this script accepts either.
+
+Usage:  pss_mesh_indep.py <out_csv> <label>:<peak_vtu>:<low_vtu> [<label>:...] ...
+"""
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pyvista as pv
+from scipy.spatial import cKDTree
+
+STRESS_FIELD = "Principal_stress"
+Z_EPSILON = 0.02
+CHUNK = 1000
+# r = 0.01 cm is the production choice; the neighbours bracket it so a mesh-driven
+# change in PSS can be told apart from a radius-driven one.
+SPHERE_RADII = [0.005, 0.010, 0.015, 0.020]
+
+
+def cap_mask(mesh):
+    if "WALL_IN_FC" in mesh.point_data:
+        return np.asarray(mesh.point_data["WALL_IN_FC"]).astype(bool)
+    if "Group" in mesh.point_data:
+        return np.asarray(mesh.point_data["Group"]) == 5
+    raise KeyError("neither WALL_IN_FC nor Group present")
+
+
+def neighbourhood_means(points, tree, fields, valid, radius, chunk=CHUNK):
+    """NaN-aware mean of every field over the radius-r neighbourhood of every point."""
+    n = len(points)
+    filled = [np.where(valid, f, 0.0) for f in fields]
+    vf = valid.astype(np.float64)
+    tot = [np.empty(n) for _ in fields]
+    cnt = np.empty(n)
+    for a in range(0, n, chunk):
+        b = min(a + chunk, n)
+        nb = tree.query_ball_point(points[a:b], radius)
+        lens = np.fromiter((len(x) for x in nb), dtype=np.int64, count=b - a)
+        if lens.sum() == 0:
+            for t in tot:
+                t[a:b] = 0.0
+            cnt[a:b] = 0.0
+            continue
+        cols = np.concatenate([np.asarray(x, dtype=np.int64) for x in nb])
+        rows = np.repeat(np.arange(b - a), lens)
+        for t, f in zip(tot, filled):
+            t[a:b] = np.bincount(rows, weights=f[cols], minlength=b - a)
+        cnt[a:b] = np.bincount(rows, weights=vf[cols], minlength=b - a)
+    means = [np.divide(t, cnt, out=np.full(n, np.nan), where=cnt > 0) for t in tot]
+    return means, cnt
+
+
+def process(label, peak_path, low_path):
+    fc_peak = pv.read(peak_path)
+    fc_low = pv.read(low_path)
+
+    mask_wall = cap_mask(fc_peak)
+    points = np.asarray(fc_peak.points)
+
+    peak_eqv = np.asarray(fc_peak.point_data["EQV_stress"], dtype=np.float64)
+    low_eqv = np.asarray(fc_low.point_data["EQV_stress"], dtype=np.float64)
+    if np.nanmean(low_eqv[mask_wall]) > np.nanmean(peak_eqv[mask_wall]):
+        print(f"[WARN] {label}: suspect data (low > peak on the cap)", flush=True)
+
+    wall_z = points[mask_wall][:, 2]
+    mask_z = ((points[:, 2] > wall_z.min() + Z_EPSILON) &
+              (points[:, 2] < wall_z.max() - Z_EPSILON))
+    gz = np.where(mask_wall & mask_z)[0]
+
+    pts = points[gz]
+    s_peak = np.asarray(fc_peak.point_data[STRESS_FIELD], dtype=np.float64)[gz]
+    s_low = np.asarray(fc_low.point_data[STRESS_FIELD], dtype=np.float64)[gz]
+    s_delta = s_peak - s_low                       # full cyclic range, no /2
+    valid = ~np.isnan(s_peak)
+    valid_idx = np.where(valid)[0]
+    tree = cKDTree(pts)
+
+    rows = []
+    for radius in SPHERE_RADII:
+        (m_peak, m_delta), cnt = neighbourhood_means(pts, tree, [s_peak, s_delta], valid, radius)
+        row = {"label": label, "sphere_radius": radius,
+               "n_wall_nodes": int(len(gz)), "n_valid_nodes": int(valid.sum()),
+               # raw (un-averaged) extremes: the quantity the averaging is meant to tame,
+               # reported so mesh sensitivity of the raw peak can be seen separately
+               "raw_max_peak": float(np.nanmax(s_peak)),
+               "raw_max_delta": float(np.nanmax(s_delta))}
+        for prefix, mean in (("PSS", m_peak), ("delPSS", m_delta)):
+            m = mean[valid_idx]
+            k = valid_idx[int(np.nanargmax(m))]
+            xyz = pts[k]
+            row[f"{prefix}_value"] = float(mean[k])
+            row[f"{prefix}_n_sphere"] = int(cnt[k])
+            row[f"{prefix}_crit_x"] = float(xyz[0])
+            row[f"{prefix}_crit_y"] = float(xyz[1])
+            row[f"{prefix}_crit_z"] = float(xyz[2])
+        rows.append(row)
+        print(f"[OK] {label} r={radius}: PSS={row['PSS_value']:.4e} "
+              f"dPSS={row['delPSS_value']:.4e} n_sph={row['PSS_n_sphere']} "
+              f"crit_z={row['PSS_crit_z']:.4f}", flush=True)
+    return rows
+
+
+def main():
+    out_csv = Path(sys.argv[1])
+    rows = []
+    for spec in sys.argv[2:]:
+        label, peak_path, low_path = spec.split(":")
+        if not (Path(peak_path).exists() and Path(low_path).exists()):
+            print(f"[SKIP] {label}: missing vtu/vtk", flush=True)
+            continue
+        rows.extend(process(label, peak_path, low_path))
+    df = pd.DataFrame(rows)
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out_csv, index=False)
+    print(f"\nSaved {len(df)} rows -> {out_csv}")
+
+    # relative change vs the middle (production-candidate) mesh, at the production radius
+    r0 = 0.010
+    sub = df[np.isclose(df.sphere_radius, r0)]
+    if len(sub) > 1:
+        print(f"\n--- relative change at r={r0} cm ---")
+        print(sub[["label", "n_wall_nodes", "PSS_value", "delPSS_value",
+                   "PSS_crit_x", "PSS_crit_y", "PSS_crit_z"]].to_string(index=False))
+
+
+if __name__ == "__main__":
+    main()

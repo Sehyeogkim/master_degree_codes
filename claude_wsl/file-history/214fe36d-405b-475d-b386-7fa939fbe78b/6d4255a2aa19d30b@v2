@@ -1,0 +1,42 @@
+"""미세 컷오프 스윕 — 월요일·최대 1회 고정, 컷오프만 09:10~10:00 5분 단위.
+사용: python3 sweep_flip_fine.py  → sweep_flip_fine.json
+(sweep_flip.py 와 동일 데이터/베이스 설정. 요청 비교: 09:10/20/40/50 vs 09:30)"""
+import os, sys, json, time
+import multiprocessing as mp
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "engines", "engine_fable"))
+import engine_fable
+import allocation
+import sweep_flip as S
+
+CUTS = ["09:10", "09:15", "09:20", "09:25", "09:30",
+        "09:35", "09:40", "09:45", "09:50", "09:55", "10:00"]
+GRID = [(f"d1~{c}x1", 1, c, 1) for c in CUTS]
+OUT = os.path.join(HERE, "sweep_flip_fine.json")
+
+
+def _init():
+    S.DS = S.load_dataset()
+
+
+def main():
+    t0 = time.time()
+    S.DS = S.load_dataset()
+    print(f"{len(S.DS)} 종목-주 로드 {time.time()-t0:.0f}s. 미세 스윕 {len(GRID)}설정")
+    with mp.Pool(8) as pool:
+        results = pool.map(S.run_config, GRID)
+    json.dump(results, open(OUT, "w", encoding="utf-8"), ensure_ascii=False)
+    base = json.load(open(os.path.join(HERE, "sweep_flip_results.json")))
+    b = next(r for r in base if r["label"] == "281")
+    print(f"\n{'컷오프':10} {'square':>8} {'quartic':>8} {'sw평균':>8} {'플립율':>7}")
+    print(f"  {'281':8} {b['rules_mean']['square']:+7.3f}% {b['rules_mean']['quartic']:+7.3f}% {b['sw_mean']:+7.3f}%      —")
+    for r in results:
+        print(f"  {r['cutoff']:8} {r['rules_mean']['square']:+7.3f}% {r['rules_mean']['quartic']:+7.3f}% "
+              f"{r['sw_mean']:+7.3f}% {r['flip_rate']:6.1f}%")
+    print("saved →", OUT)
+
+
+if __name__ == "__main__":
+    main()

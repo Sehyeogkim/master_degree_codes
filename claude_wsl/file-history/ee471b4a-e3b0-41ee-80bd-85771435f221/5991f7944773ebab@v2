@@ -1,0 +1,18 @@
+import ast
+p = "/home/jeff/project/54_analysis/run_LAP_dist.py"
+s = open(p).read()
+if "ALGO_MODE" in s:
+    print("already patched")
+else:
+    a = 'MESH_SIZE = float(sys.argv[3]) if len(sys.argv) > 3 else 0.05'
+    b = a + '\nALGO_MODE = sys.argv[4] if len(sys.argv) > 4 else "hxt"   # hxt->(10,1), delaunay->(1,)'
+    assert a in s, "anchor1"
+    s = s.replace(a, b, 1)
+    c = 'for algo3d in (10, 1):  # HXT then Delaunay'
+    d = ('_ALGOS = (1,) if ALGO_MODE.lower().startswith("del") else (10, 1)\n'
+         'for algo3d in _ALGOS:  # HXT then Delaunay (or Delaunay-only)')
+    assert c in s, "anchor2"
+    s = s.replace(c, d, 1)
+    ast.parse(s)
+    open(p, "w").write(s)
+    print("patched OK")

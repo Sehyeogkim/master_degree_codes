@@ -1,0 +1,26 @@
+import sys
+sys.path.insert(0, "/home/jeff/bullet281/pipeline")
+sys.path.insert(0, "/home/jeff/bullet281/engines/engine281")
+import data_source as ds
+from strategy281 import STRAT281
+from engine import run as run281
+
+CODE = "036930"; START, END = "2026-07-13", "2026-07-18"; F0 = 191900.0
+full, _ = ds.bars_5m(CODE, START, END)
+
+def eng(bars, tag):
+    ev, ctx = run281(bars, F0, capital=10_000_000.0, **STRAT281)
+    ents = [e for e in ev if e.kind == "ENTRY"]; exs = [e for e in ev if e.kind == "EXIT"]
+    print(f"{tag:34s} {len(bars):>3}봉  wr={ctx['weekly_return']*100:+6.2f}%  진입={len(ents)} 청산={len(exs)}")
+
+# A) 정상 전체
+eng(full, "A) 전체(월~목)")
+# B) 월요일 제거 (화요일부터) — 부분 fetch가 월요일을 놓친 경우
+noMon = [b for b in full if b.day != "2026-07-13"]
+eng(noMon, "B) 월요일 없음(화~목)")
+# C) yfinance가 실제로 준 1봉 (07-16 09:00) 만
+one = [b for b in full if b.dt == "2026-07-16 09:00"]
+eng(one, "C) yfinance 1봉(07-16 09:00)")
+# D) 목요일 하루만
+thu = [b for b in full if b.day == "2026-07-16"]
+eng(thu, "D) 목요일 하루만")

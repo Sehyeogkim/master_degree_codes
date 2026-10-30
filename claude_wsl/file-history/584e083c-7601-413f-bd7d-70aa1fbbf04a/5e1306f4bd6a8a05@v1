@@ -1,0 +1,24 @@
+---
+name: lumen-mesh-mixed-grid-0723
+description: "fluid_0723 lumen meshes are mixed-resolution — case_0-164 @ grid 0.01, case_165-383 @ 0.015"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: f3f14530-1064-48cb-8a56-66f291e24cfb
+  modified: 2026-07-24T01:29:01.747Z
+---
+
+The `65_final_0723` lumen fluid mesh set in `fluid_0723/` is **mixed resolution by the user's decision (2026-07-24)**:
+
+| 구간 | grid | 평균 nodes | 평균 tets | case당 |
+|---|---|---|---|---|
+| case_0 – case_164 | **0.01** | 537,792 | 2,976,595 | 144 s |
+| case_165 – case_383 | **0.015** | ~221,000 | ~1,210,000 | 77 s |
+
+The 0.01 batch ran to case_164, then the user switched to 0.015 for the rest rather than re-meshing. 0.015 gives ~59% fewer elements and ~1.9× faster meshing. I flagged that this makes cross-case CFD comparison inconsistent; the user chose it anyway — do not "fix" it unsolicited.
+
+Runners: `bin/mesh_all_g010.py` (GRID=0.01, done) and `bin/mesh_all_g015.py` (GRID=0.015, active). Both iterate all geo_0723 cases and skip any with `meshing/mesh-complete/mesh-complete.mesh.vtu`, so they compose safely. Separate progress CSVs: `lumen_meshing_g0{10,15}_progress.csv`.
+
+Launch detached: `setsid nohup $PY -u bin/mesh_all_g015.py > mesh_all_g015.log 2>&1 < /dev/null &`. Survives terminal close but **not** a WSL shutdown (happened 7/24 overnight, cost 1 case).
+
+⚠️ When killing the batch, `pkill -f mesh_all_g015.py` also matches the killing shell's own command line — use a bracket pattern (`mesh_all_g015[.]py`) or kill by PID. Always kill the orphaned `mesh_generator` too or it keeps the Simmetrix license. See [[lumen-mesh-wsl-setup]], [[lumen-mesh-storage-sms]].

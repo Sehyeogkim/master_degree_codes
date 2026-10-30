@@ -1,0 +1,101 @@
+"""OOS(부트스트랩 vs walk-forward) 설명 메일 — cofounder에게. p_email creds 재사용.
+사용: python3 send_oos_explain.py [--dry-run] [--to a@b,c@d]"""
+import os, sys, ssl, smtplib, argparse
+from email.message import EmailMessage
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+from p_email import _load_creds
+
+DEFAULT_TO = ["kimse991228@gmail.com", "limsung7969@naver.com"]
+
+BODY = """<div style="font-family:sans-serif;max-width:680px;line-height:1.7;color:#211D18">
+<p>형,</p>
+<p>“부트스트랩으로 무작위 추출해서 검증하면 충분한 거 아니냐” 물어봤잖아.
+좋은 질문이라 정리해서 보내. 핵심은 <b>두 도구가 서로 다른 함정을 잡는다</b>는 거야.</p>
+
+<h3 style="margin:22px 0 6px">두 함정은 완전히 다른 종류다</h3>
+<p><b>함정 A — “이 수익이 시대빨/운빨인가?”</b> → 부트스트랩이 잡음 ✅<br>
+형이 이해한 그대로야. 5년치 주(週)를 무작위로 섞어 뽑아 “2021 하락장, 2023 반등장” 같은
+<b>순서</b>를 부숴. 순서를 없애도 수익이 나오면 시대 무관. 이건 부트스트랩이 완벽하게 해.</p>
+
+<p><b>함정 B — “이 규칙을 고른 것 자체가 운인가?”</b> → 부트스트랩이 <b>못 잡음</b> ❌<br>
+이게 핵심이야. 갭필터를 찾을 때 우리는 <b>아이디어를 19개 던졌어.</b>
+임계값도 0/1/2/3/4/5% 다 돌려보고 그중 3%가 제일 좋길래 고른 거고.</p>
+
+<h3 style="margin:22px 0 6px">왜 부트스트랩으론 함정 B를 못 잡나 — 로또 비유</h3>
+<p>로또 1등을 100명이 샀다고 하자. 그중 한 명은 진짜 당첨돼. 근데 그 사람이 “로또 실력자”는
+아니잖아? <b>많이 시도하면 순전히 운으로도 누군가는 대박</b>이 나.</p>
+<p>우리도 똑같아. 19개 아이디어 × 여러 임계값 = 수십 번 시도했으니,
+<b>진짜 실력이 없어도 그중 하나는 우연히 이 5년 데이터에 딱 맞아떨어져</b> 좋아 보여.</p>
+<p>여기서 부트스트랩을 돌리면? 같은 5년 주를 아무리 섞어 뽑아도
+<b>“갭필터를 좋아 보이게 만든 바로 그 주들”이 계속 뽑혀.</b>
+부트스트랩은 “이 규칙의 수익 분포”만 그려줄 뿐, <b>그 규칙을 고른 게 정당했는지는 검증 못 해.</b>
+재료가 같은 5년이니까.</p>
+<p style="background:#FBF3E9;border-left:3px solid #CC785C;padding:10px 14px;font-size:14px">
+비유하면: 시험문제 100개를 미리 다 보고 답을 외운 학생한테 <b>같은 100문제를 순서만 바꿔서</b>
+다시 시험 보게 하는 거야. 당연히 또 잘 봐. 근데 그게 실력인가?</p>
+
+<h3 style="margin:22px 0 6px">walk-forward = 안 본 문제로 시험</h3>
+<p>그래서 순서를 지켜서 자르는 거야:</p>
+<p style="font-family:monospace;background:#f4f1ea;padding:10px 14px;font-size:13px;border-radius:6px">
+[과거 2년만 보고 → 최적 임계 고름] → [그 다음 6개월에 적용해서 채점]<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↑ 채점할 땐 이 데이터 절대 안 봄</p>
+<p>이걸 6번 밀면서 반복해. <b>규칙을 고를 때 안 쓴 미래 데이터</b>에서 채점하니까,
+운으로 뽑힌 가짜는 여기서 무너져. 실제로 이번에 —</p>
+<ul>
+<li>리버설 플립, 게이트 조합 등은 <b>부트스트랩은 통과했는데</b> walk-forward에서 다 죽었어.</li>
+<li>갭필터만 <b>6구간 전부 살아남았지.</b></li>
+</ul>
+<p><b>그 차이가 “운”과 “실력”의 차이 그 자체</b>였어.</p>
+
+<h3 style="margin:22px 0 6px">정리</h3>
+<table style="border-collapse:collapse;font-size:13.5px;margin:6px 0">
+<tr style="background:#E6E0D4"><th style="padding:6px 10px;text-align:left">질문</th>
+<th style="padding:6px 10px">부트스트랩</th><th style="padding:6px 10px">walk-forward</th></tr>
+<tr><td style="padding:6px 10px;border-bottom:1px solid #D9D3C7">시대 순서 덕인가?</td>
+<td style="padding:6px 10px;border-bottom:1px solid #D9D3C7;text-align:center">✅ 잡음</td>
+<td style="padding:6px 10px;border-bottom:1px solid #D9D3C7;text-align:center">—</td></tr>
+<tr><td style="padding:6px 10px;border-bottom:1px solid #D9D3C7">수익 분포가 0보다 큰가?</td>
+<td style="padding:6px 10px;border-bottom:1px solid #D9D3C7;text-align:center">✅ 잡음</td>
+<td style="padding:6px 10px;border-bottom:1px solid #D9D3C7;text-align:center">—</td></tr>
+<tr><td style="padding:6px 10px;border-bottom:1px solid #D9D3C7"><b>여러 개 시도 중 고른 게 운인가?</b></td>
+<td style="padding:6px 10px;border-bottom:1px solid #D9D3C7;text-align:center;color:#C2493C"><b>❌ 못 잡음</b></td>
+<td style="padding:6px 10px;border-bottom:1px solid #D9D3C7;text-align:center;color:#2E7D32"><b>✅ 잡음</b></td></tr>
+<tr><td style="padding:6px 10px">실전과 같은 순서로 돈 버나?</td>
+<td style="padding:6px 10px;text-align:center;color:#C2493C">❌</td>
+<td style="padding:6px 10px;text-align:center;color:#2E7D32">✅</td></tr>
+</table>
+
+<p style="margin-top:16px"><b>한 줄로:</b> 부트스트랩은 “이 답이 맞나”를 검사하고, walk-forward는
+“이 답을 <b>고른 방법</b>이 맞나”를 검사해. 둘은 대체재가 아니라 <b>순서대로 통과해야 하는 두 관문</b>이야.
+갭필터는 그 둘 다 통과한 유일한 후보라 믿는 거고.</p>
+<p style="color:#6B5E54;font-size:12.5px">— bullet281 · 검증 방법론 설명</p>
+</div>"""
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--to"); ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+    to = [x.strip() for x in a.to.split(",")] if a.to else DEFAULT_TO
+    subject = "[bullet281] 왜 부트스트랩만으론 부족한가 — OOS(walk-forward) 검증 설명"
+
+    msg = EmailMessage()
+    msg["To"] = ", ".join(to); msg["Subject"] = subject
+    msg.set_content("HTML 지원 클라이언트에서 보세요.")
+    msg.add_alternative(BODY, subtype="html")
+
+    if a.dry_run:
+        print(f"[dry-run] → {to}\n제목: {subject}")
+        return
+    sender, pw = _load_creds()
+    msg["From"] = sender
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context()) as s:
+        s.login(sender, pw); s.send_message(msg)
+    print(f"전송 완료 → {', '.join(to)} | {subject}")
+
+
+if __name__ == "__main__":
+    main()

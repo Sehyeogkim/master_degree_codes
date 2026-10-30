@@ -1,0 +1,58 @@
+# engine_fable — 281 + 월요일 1회 리버설 (설계)
+
+작성 2026-07-19 · 브랜치 `fable_backtest`
+
+## 목표
+engine281(주간 모멘텀 5분봉)에 **월요일 한정 1회 포지션 전환(리버설 손절)** 규칙을
+추가한 실험 엔진 `fable`을 만들고, 기존 back_test 파이프라인(CREON cron 데이터 +
+7개 자본배분 규칙 + 부트스트랩)으로 **배분규칙별 주별 net 수익률과 평균**을 구해
+281과 비교한다. **engine281 폴더는 불변** — 통째로 복사해 새 모듈에서 작업.
+
+## 새 규칙 (포지션 전환)
+- **롱 보유 중**, 5분봉 **종가**가 **숏 진입 기준선**을 하향 돌파 → 롱 전량 손절 후 즉시 전량 숏 전환.
+- **숏 보유 중**, 5분봉 **종가**가 **롱 진입 기준선**을 상향 돌파 → 숏 전량 손절 후 즉시 전량 롱 전환.
+- 전환(롱↔숏)은 **월요일(= 그 주 첫 거래일)에만**, **최대 1회**.
+
+### "진입 기준선" 정의 — (A) 대칭/트레일링
+281은 진입선이 고정선이 아니라 **트레일링**(그 주 신고점/신저점 돌파). 따라서 플립 트리거 =
+**반대방향 트레일 진입신호의 발화**를 그대로 재사용:
+- 롱 보유 중 숏신호 = 음봉 & 종가 < run_low & 종가 < short_gate
+- 숏 보유 중 롱신호 = 양봉 & 종가 > run_high & 종가 > long_gate
+
+## 플립 후 관리 — 281 규칙 그대로
+전환된 포지션은 fresh 포지션으로 처리: 자기 +8% 익절게이트 · 무손절 · 금 15:15 강제청산.
+플립은 주당 1회(`flips_used`), 월요일만. 진입 gap(선정신호용)은 **최초 진입** 기준 유지.
+
+## 구현 (안 B: 별도 모듈)
+```
+engines/engine_fable/
+  engine_fable.py    # engine281/engine.py 복사 + run()에 flip_monday 파라미터/로직. 모듈명 충돌 회피 위해 파일명 engine_fable.
+  strategy_fable.py  # STRAT_FABLE(= STRAT281 값 + flip_monday=True), run_fable()
+  README.md          # 281 대비 diff
+  test_flip.py       # 회귀 + 골든
+```
+`run()` 루프에 `monday=bars[0].day`, `flips_used=0` 추가. 금강제청산 블록 뒤·진입 블록 앞에
+플립 판정 삽입: `flip_monday and pos and not forced and b.day==monday and flips_used==0` 이고
+`_check_triggers`가 **반대방향** 신호 반환 시 → 전량 청산(비용·현금 정산) → 반대 `_open` → `flips_used=1`.
+`flip_monday=False`(기본)면 281과 **코드 경로·수치 완전 동일**.
+
+## 파이프라인 배선 (최소 수정, 하위호환)
+- `blib.stock_week(csv, F0, strat=STRAT281, run_fn=None)` — run_fn None이면 281 `run`. (기본 동작 불변)
+- `build_weekly.build(strat=None, run_fn=None)` — 그대로 전달.
+- `run_all_fable.py` — fable 엔진/STRAT로 `weekly_records_fable.json` 생성 →
+  `allocation.RULES`(7규칙) + `bootstrap.analyze`(SEED=42, B=5000) →
+  `report.build_html`로 fable 단독 리포트 + **281 vs fable 비교표** HTML.
+
+## 산출물
+- `report/backtest_allocation_bootstrap_fable.html` — fable 단독(기존 포맷)
+- `report/backtest_281_vs_fable.html` — 규칙별 281 vs fable 평균/CI/Δ%p 비교
+- `back_test/weekly_records_fable.json` — 재현용
+
+## 테스트
+1. **회귀**: `flip_monday=False` engine_fable == engine281, 실데이터 전 종목-주 weekly_return 일치.
+2. **골든**: 합성 주(월 롱진입→오후 신저점 붕괴→숏전환). 비용 0·실수주로 이벤트열/부호/수익 손검증.
+3. **엣지**: 월요일 무포지션 / 화요일 이후 신호(플립X) / 2번째 반대신호 무시 / same-bar 진입→플립 없음.
+
+## 한계
+기존 back_test 한계 승계(과적합·레짐·시장충격 미반영). 플립은 손절 국면을 월요일 1회로만
+제한 — 나머지 요일은 여전히 무손절. "월요일=첫 거래일" 정의(공휴일 시 화요일)는 명세대로 채택.

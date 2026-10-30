@@ -1,0 +1,6 @@
+# Memory Index
+
+- [tvDatafeed nologin](tvdatafeed-nologin.md) — 실시간 5분봉 소스; 로그인은 깨져도 nologin으로 충분
+- [Live cron system](live-cron-system.md) — 라이브 시뮬 cron 가동 중; 프로젝트폴더·screeners·p_email 구조
+- [Portfolio allocation look-ahead](portfolio-allocation-lookahead.md) — gap⁴ 배분은 사후 계산·라이브 미호출; 실시간 실행정책 미정
+- [TradingView Perf.W formula](tradingview-perfw-formula.md) — 주간성능=최신종가/7일전바 시가−1; 우리 chg와 정의 다름(참고 병기)

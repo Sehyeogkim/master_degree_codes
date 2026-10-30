@@ -1,0 +1,60 @@
+"""fable4 리버설밴드 verify HTML을 본인+cofounder에게 발송. p_email creds 재사용.
+사용: python3 send_verify_fable4.py [--dry-run] [--to a@b,c@d]"""
+import os, sys, ssl, smtplib, argparse
+from email.message import EmailMessage
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+from p_email import _load_creds
+
+DEFAULT_TO = ["kimse991228@gmail.com", "limsung7969@naver.com"]
+HTML = os.path.join(ROOT, "report", "verify_fable4_cross_freeze.html")
+
+BODY = """<div style="font-family:sans-serif;max-width:680px;line-height:1.7;color:#211D18">
+<p>형,</p>
+<p>새 규칙 하나 실험 준비 중이라 <b>규칙 이해가 맞는지 먼저 눈으로 확인</b>하려고 보내.
+아직 백테스트 결과 아니고, <b>규칙이 캔들 위에 어떻게 찍히는지 그려본 검토용 문서</b>야.</p>
+
+<p><b>새 규칙 — ‘리버설 밴드’</b> (규칙 한 곳 수정 반영본)</p>
+<ul>
+<li>롱·숏 진입선은 첫 5분봉 기준으로 시작하고, <b>그 주 최초 진입 1회에 한해</b>(롱·숏 중 먼저 발생한 하나) 그 방향 선만 <b>실제 진입가로 고정</b>한다. 반대편 선은 첫봉 기준선 그대로 유지.</li>
+<li>보유 중 종가가 <b>반대편 선을 단순 돌파</b>하면 방향 전환(롱↔숏).</li>
+<li>기존 플립(fable)은 ‘신저점/신고점 갱신’ 조건이 붙었는데, 이건 <b>선만 넘으면 전환</b>이라 더 단순·자주 튕겨.</li>
+<li>최초 진입은 기존 281 방식(신고점 돌파) 그대로 유지 — 진입 엣지는 안 건드림.</li>
+</ul>
+
+<p><b>첨부 HTML</b>에 7/6 주 5종목 캔들 위에 롱선(초록)·숏선(빨강)·전환 지점(주황 FLIP)을
+그려놨어. 브라우저/폰에서 바로 열려.</p>
+
+<p>다음 단계는 <b>‘전환 몇 번까지 · 몇 시까지 허용’을 파라미터로 최적값을 찾는 백테스트</b>(부트스트랩+walk-forward)야.
+그 전에 이 그림이 우리가 생각한 규칙이랑 맞는지만 확인하려고. 보고 이상한 점 있으면 알려줘.</p>
+<p style="color:#6B5E54;font-size:12.5px">— bullet281 · fable4 리버설밴드 규칙 검토</p></div>"""
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--to"); ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+    to = [x.strip() for x in a.to.split(",")] if a.to else DEFAULT_TO
+    subject = "[bullet281] (수정 반영·재발송) 새 규칙 ‘리버설 밴드’ 규칙 확인 — 백테스트 전 검토용"
+
+    msg = EmailMessage()
+    msg["To"] = ", ".join(to); msg["Subject"] = subject
+    msg.set_content("HTML 지원 클라이언트에서 보세요. 첨부 HTML을 브라우저로 여세요.")
+    msg.add_alternative(BODY, subtype="html")
+    with open(HTML, "rb") as f:
+        msg.add_attachment(f.read(), maintype="text", subtype="html",
+                           filename="리버설밴드_규칙확인_7월6일주.html")
+
+    if a.dry_run:
+        print(f"[dry-run] → {to}\n제목: {subject}\n첨부: HTML")
+        return
+    sender, pw = _load_creds(); msg["From"] = sender
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context()) as s:
+        s.login(sender, pw); s.send_message(msg)
+    print(f"전송 완료 → {', '.join(to)} | {subject}")
+
+
+if __name__ == "__main__":
+    main()

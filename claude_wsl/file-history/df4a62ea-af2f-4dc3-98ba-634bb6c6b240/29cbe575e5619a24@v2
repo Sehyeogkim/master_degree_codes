@@ -1,0 +1,87 @@
+# Re-run PEAK + LOW for freshly re-meshed cases that arrived on ws2.
+# peak: pymapdl_solve_peak.py (ver2 vector traction, wall_expB_new) -> FC_case_{c}_peak.vtu
+# low : pymapdl_solve_bc.py c low ... (wall_no_hyperemia pressure)   -> FC_case_{c}_low.vtk
+# 12 jobs (6 cases x2), pool of 4, UNIQUE port per job (port-collision lesson), per-job logs.
+import os, sys, time as _t, signal, subprocess, shutil, pathlib
+from collections import defaultdict
+
+Q = pathlib.Path("/home/jeff/project/54_analysis")
+peak_solver = str(Q / "pymapdl_solve_peak.py")
+low_solver  = str(Q / "pymapdl_solve_bc.py")
+LOGDIR = Q / "rerun_logs"; LOGDIR.mkdir(exist_ok=True)
+CASES = [int(x) for x in (sys.argv[1].split(",") if len(sys.argv) > 1 else "540,601,653,664,666,754".split(","))]
+PARN = 4
+NPROC = 16
+TIMEOUT = 9000
+MIN_FREE_GB = 400
+
+def peak_ref(c): return Q/"solid_data"/f"case_{c}"/"ansys_results_type1_expB_new"
+def peak_out(c): return peak_ref(c)/f"FC_case_{c}_peak.vtu"
+def low_ref(c):  return Q/"ansys_LAP_0728"/f"case_{c}"
+def low_out(c):  return low_ref(c)/f"FC_case_{c}_low.vtk"
+
+# job = (case, kind); skip if output already exists
+JOBS = []
+for c in CASES:
+    if not peak_out(c).exists(): JOBS.append((c, "peak"))
+    if not low_out(c).exists():  JOBS.append((c, "low"))
+print(f"[RERUN] cases={CASES} -> {len(JOBS)} jobs (peak+low), POOL {PARN} @ nproc {NPROC}", flush=True)
+
+def free_gb():
+    st = os.statvfs(str(Q)); return st.f_bavail * st.f_frsize / 1e9
+
+def spawn(job, ji):
+    c, kind = job
+    port = 50600 + ji            # unique per job
+    lf = open(LOGDIR/f"case_{c}_{kind}.log", "w")
+    if kind == "peak":
+        rd = peak_ref(c); rd.mkdir(parents=True, exist_ok=True)
+        ex = rd/"rerun_peaktmp"; ex.mkdir(exist_ok=True)
+        out = peak_out(c)
+        cmd = ["python", peak_solver, str(c), str(NPROC), str(ex), str(port), str(out)]
+    else:
+        rd = low_ref(c); rd.mkdir(parents=True, exist_ok=True)
+        ex = rd/"rerun_lowtmp"; ex.mkdir(exist_ok=True)
+        out = low_out(c)
+        cmd = ["python", low_solver, str(c), "low", str(NPROC), str(ex), str(port), str(out), "LAP"]
+    p = subprocess.Popen(cmd, stdout=lf, stderr=subprocess.STDOUT, start_new_session=True)
+    return {"c": c, "kind": kind, "p": p, "ex": ex, "out": out, "lf": lf, "start": _t.time()}
+
+def classify(c, kind, out):
+    if out.exists(): return "SUCCESS"
+    try: txt = (LOGDIR/f"case_{c}_{kind}.log").read_text(errors="ignore")
+    except Exception: return "NOLOG"
+    if "negative Jacobian" in txt: return "NEGJAC"
+    if "cannot reshape" in txt or "not enough values to unpack" in txt: return "RESHAPE"
+    if "failed to start" in txt or "Error in instance GRPC" in txt: return "gRPC"
+    return "OTHER"
+
+running = {}; ji = 0; results = {}
+while ji < len(JOBS) or running:
+    while len(running) < PARN and ji < len(JOBS):
+        if running and free_gb() < MIN_FREE_GB:
+            print(f"[disk] {free_gb():.0f}GB < {MIN_FREE_GB} hold", flush=True); break
+        job = JOBS[ji]; key = f"{job[0]}_{job[1]}"
+        running[key] = spawn(job, ji)
+        print(f"[start] {key} (port {50600+ji}, {free_gb():.0f}GB free)", flush=True)
+        ji += 1; _t.sleep(3)
+    _t.sleep(5)
+    for key in list(running):
+        r = running[key]; rc = r["p"].poll()
+        if rc is None and (_t.time()-r["start"]) > TIMEOUT:
+            print(f"[timeout] {key}", flush=True)
+            try: os.killpg(os.getpgid(r["p"].pid), signal.SIGKILL)
+            except Exception: pass
+            r["p"].wait(); rc = -9
+        if rc is not None:
+            r["lf"].close()
+            res = classify(r["c"], r["kind"], r["out"]); results[key] = res
+            print(f"[done] {key} -> {res}", flush=True)
+            shutil.rmtree(r["ex"], ignore_errors=True)
+            del running[key]
+
+print("==== RERUN SUMMARY ====", flush=True)
+byres = defaultdict(list)
+for k, res in sorted(results.items()): byres[res].append(k)
+for res in ["SUCCESS","NEGJAC","RESHAPE","gRPC","OTHER","NOLOG"]:
+    if byres[res]: print(f"{res} ({len(byres[res])}): {' '.join(byres[res])}", flush=True)

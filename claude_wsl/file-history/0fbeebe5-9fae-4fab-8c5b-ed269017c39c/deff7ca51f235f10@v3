@@ -1,0 +1,54 @@
+# -*- coding: utf-8 -*-
+"""주-주 변동율 Top20 전체 + 일 거래대금(Value.Traded) + 시총. ★=일 거래대금 Top5(최종)."""
+import sys, warnings, logging
+warnings.filterwarnings("ignore"); logging.disable(logging.CRITICAL)
+sys.path.insert(0, "/home/jeff/bullet281/pipeline")
+sys.path.insert(0, "/home/jeff/bullet281/pipeline/screeners")
+from tradingview_screener import Query, col
+import yfinance as yf
+from weekcal import prior_week
+import momentum_v1 as M
+
+MON = "2026-07-20"; CAP, TOPCH, TOPV = 500_000_000_000, 20, 5
+prior_mon, prior_fri, dl_start, dl_end = prior_week(MON)
+prev_mon, prev_fri, prev_dl_start, _ = prior_week(prior_mon)
+pm, pf, xf = str(prior_mon)[:10], str(prior_fri)[:10], str(prev_fri)[:10]
+
+_, uni = (Query().set_markets("korea").select("name", "market_cap_basic", "Value.Traded")
+          .where(col("market_cap_basic") > CAP)
+          .order_by("market_cap_basic", ascending=False).limit(1500).get_scanner_data())
+codes = [n for n in uni["name"].tolist() if str(n).isdigit() and len(str(n)) == 6]
+caps = {str(k): float(v) for k, v in zip(uni["name"], uni["market_cap_basic"])}
+dayval = {}
+for k, v in zip(uni["name"], uni["Value.Traded"]):
+    try: dayval[str(k)] = float(v) if v is not None and v == v else 0.0
+    except Exception: dayval[str(k)] = 0.0
+
+daily = M._dl_daily(codes, prev_dl_start, dl_end)      # 수정된 코스피+코스닥 로직
+rows = []
+for c in codes:
+    try:
+        d = daily.get(c)
+        if d is None or len(d) < 2: continue
+        dts = [str(x)[:10] for x in d.index]
+        pw = [i for i, dt in enumerate(dts) if pm <= dt <= pf]
+        pv = [i for i, dt in enumerate(dts) if dt <= xf]
+        if not pw or not pv: continue
+        fc = float(d["Close"].iloc[pw[-1]]); prevfc = float(d["Close"].iloc[pv[-1]])
+        if prevfc <= 0: continue
+        rows.append(dict(code=c, chg=(fc/prevfc-1)*100, dval=dayval.get(c, 0.0), cap=caps.get(c, 0)))
+    except Exception:
+        pass
+
+rows.sort(key=lambda r: -r["chg"])
+top20 = rows[:TOPCH]
+final5 = set(r["code"] for r in sorted(top20, key=lambda r: -r["dval"])[:TOPV])
+dval_rank = {r["code"]: i+1 for i, r in enumerate(sorted(top20, key=lambda r: -r["dval"]))}
+names = M.resolve_names([r["code"] for r in top20])
+
+print(f"시총 {CAP/1e8:,.0f}억↑ · 주-주 변동율 Top20  (★=일 거래대금 Top5=최종 선정)\n")
+print(f"{'#':>3} {'종목':22} {'주-주chg':>8} {'일거래대금':>9} {'일대금순위':>6} {'시총':>7}")
+for i, r in enumerate(top20, 1):
+    star = "★" if r["code"] in final5 else " "
+    nm = (names.get(r["code"], r["code"]) or r["code"])[:20]
+    print(f"{star}{i:>2} {nm:22} {r['chg']:>+7.1f}% {r['dval']/1e8:>7,.0f}억 {dval_rank[r['code']]:>6}위 {r['cap']/1e12:>5,.1f}조")

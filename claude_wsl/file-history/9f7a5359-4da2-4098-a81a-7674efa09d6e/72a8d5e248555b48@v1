@@ -1,0 +1,22 @@
+---
+name: lap-cp-meshing-54analysis
+description: "54_analysis LAP (Type1 no-cal) + CP (Type2 calcified plaque) meshing on cvbml02, id>500"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: ee471b4a-e3b0-41ee-80bd-85771435f221
+  modified: 2026-07-28T03:06:33.900Z
+---
+
+New meshing project in **54_analysis on cvbml02 (ws2)**, started 2026-07-28. Two mesh types for cases id>500 (geometry from `solid_data/case_<id>/` and `geo_0303_500/case_<id>/`, params `pre_data/parameter_0728.csv` — 1000 rows, row==case id).
+
+- **LAP = Type-1 = no calcification** (HXT_meshing_I, HINT script `HXT_meshing_I_dist.py` from 65_final_0723). Distance-field sizing off the fibrous-cap (fc) surfaces (finer near fc, coarse far — ~43% fewer elems than box field). Inputs: 4 stp (lumen/solid/lipid/fc) — **fc_offset.stp NOT needed** (that's a Type2/CP input). Output `LAP_mesh/solid_LAP_<id>.msh`.
+  - Runner I built: `54_analysis/run_LAP_dist.py <case> <nproc> <mesh_size>` (geometry from solid_data, HXT→Delaunay fallback, output solid_LAP_<id>.msh). Driver `run_LAP_batch.sh` (xargs -P 6, TMO 900). Progress `LAP_dist_progress.log`, logs `LAP_mesh_logs/`.
+  - Missing before run: **86 cases** (id 501-999), list in `LAP_missing_gt500.txt`.
+  - **Failures are dominated by STEP4** = `occ.cut(solid, [lipid,fc,lumen])` boolean — a geometry defect, NOT fixable by mesh algo/field/size. ~20% succeed with dist, rest hit STEP4.
+- **fc_offset.stp** (needed for CP/Type2 later): lives in `geo_0303_500/case_<id>/` — 500/500 present for id 500-999. NOT in solid_data.
+
+**FUTURE WORK (user out to lunch 2026-07-28):**
+1. User will **re-make the geometry** for the failed LAP cases (STEP4 defects) → then I remesh LAP with the new geometry.
+2. Then I must **remesh CP (Calcified Plaque = Type2)** for id>500. CP settings hint is in **65_final_0723 on ws2** (our Type2 work: `run_type2_0723.py`, `HXT_type2_utils.py`, `HXT_meshing_II_cal_generation.py`). CP output dir is `54_analysis/CP_mesh/`.
+- See [[cvbml02-quad-batch]] (65_final Type2 settings: quad SOL=1, mesh_size 0.06, nproc, cal tag=8, STEP4=cal insertion) and [[solid-mesh-two-types]].

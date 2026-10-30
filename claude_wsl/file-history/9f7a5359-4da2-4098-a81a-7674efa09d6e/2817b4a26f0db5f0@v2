@@ -1,0 +1,130 @@
+#!/usr/bin/env python
+"""Batch LAP (Type-1 solid) distance-field meshing for the 91 missing cases
+in 0..499. 4 workers (nproc 12 each), 10-min per-rung cap. Rescue ladder
+varies mesh_size + 2D algorithm; boolean/geometry failures fall through fast.
+Resumable (worker skips if solid_LAP_<c>.msh exists). msh only."""
+import json
+import time
+import subprocess
+import threading
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+HERE = Path(__file__).resolve().parent
+PY = "/home/jeff/miniconda3/envs/ansys_new/bin/python"
+NPROC = 12
+WORKERS = 4
+CAP = 600  # 10 min per rung
+
+MISSING = [1, 3, 8, 13, 17, 23, 30, 31, 40, 48, 49, 51, 52, 54, 60, 66, 69, 73,
+           87, 88, 90, 100, 115, 121, 123, 126, 135, 148, 164, 171, 172, 176,
+           183, 189, 192, 194, 195, 196, 204, 205, 211, 215, 219, 222, 223, 228,
+           230, 239, 240, 246, 274, 278, 280, 285, 287, 290, 291, 296, 301, 312,
+           329, 331, 336, 338, 341, 345, 350, 351, 355, 357, 360, 379, 389, 393,
+           401, 403, 413, 414, 416, 426, 427, 429, 431, 438, 440, 443, 453, 484,
+           486, 494, 499]
+
+# rescue ladder (size, algo2d, algo3d): first success wins
+RUNGS = [(0.055, 5, 10), (0.06, 6, 10), (0.06, 5, 1)]
+
+LAPDIR = HERE / "LAP_mesh"
+LOGDIR = HERE / "LAP_mesh" / "logs"; LOGDIR.mkdir(parents=True, exist_ok=True)
+PROG = LAPDIR / "batch_0728_progress.jsonl"
+STATUS = LAPDIR / "batch_0728_status.json"
+MARKER = LAPDIR / "batch_0728.marker"
+
+_lock = threading.Lock()
+counts = {"total": len(MISSING), "done": 0, "failed": 0, "timeout": 0,
+          "skipped": 0, "running": 0}
+start_time = time.time()
+
+
+def msh_path(c):
+    return LAPDIR / f"solid_LAP_{c}.msh"
+
+
+def write_status():
+    with _lock:
+        s = dict(counts)
+        s["start_time"] = start_time
+        s["elapsed"] = round(time.time() - start_time, 1)
+        STATUS.write_text(json.dumps(s, indent=2))
+
+
+def record(entry):
+    entry["ts"] = time.time()
+    with _lock:
+        with open(PROG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+        st = entry.get("status")
+        if st in counts:
+            counts[st] += 1
+    write_status()
+
+
+def attempt(c, size, a2, a3, tag):
+    logf = LOGDIR / f"case{c}_{tag}.log"
+    try:
+        with open(logf, "w") as lf:
+            p = subprocess.run(
+                [PY, "mesh_one_LAP.py", str(c), str(NPROC), str(size), str(a2), str(a3)],
+                cwd=str(HERE), stdout=lf, stderr=subprocess.STDOUT, timeout=CAP,
+            )
+        for line in reversed(logf.read_text(errors="replace").splitlines()):
+            if line.startswith("STATUS "):
+                return json.loads(line[len("STATUS "):])
+        return {"status": "failed", "error": f"no STATUS line (exit {p.returncode})"}
+    except subprocess.TimeoutExpired:
+        return {"status": "timeout"}
+    except Exception as e:
+        return {"status": "failed", "error": f"{type(e).__name__}: {e}"}
+
+
+def run_case(c):
+    if msh_path(c).exists():
+        record({"case": c, "status": "skipped"})
+        return {"case": c, "status": "skipped"}
+    with _lock:
+        counts["running"] += 1
+    write_status()
+    entry = {"case": c}
+    try:
+        for i, (size, a2, a3) in enumerate(RUNGS):
+            st = attempt(c, size, a2, a3, f"r{i+1}")
+            st.update({"mesh_size": size, "algo2d": a2, "algo3d": a3, "rung": i + 1})
+            entry.update(st)
+            if st.get("status") == "done":
+                break
+            # boolean/geometry failure -> no point laddering, stop early
+            err = str(st.get("error", ""))
+            if st.get("status") == "failed" and "STEP" in err:
+                break
+    finally:
+        with _lock:
+            counts["running"] -= 1
+    record(entry)
+    return entry
+
+
+def main():
+    if MARKER.exists():
+        MARKER.unlink()
+    write_status()
+    print(f"[LAP-0728] {len(MISSING)} missing cases, {WORKERS}-wide, cap {CAP}s, "
+          f"ladder={RUNGS}", flush=True)
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        futs = [ex.submit(run_case, c) for c in MISSING]
+        for fut in as_completed(futs):
+            e = fut.result()
+            print(f"[case {e.get('case')}] {e.get('status')} rung={e.get('rung')} "
+                  f"size={e.get('mesh_size')} algo=({e.get('algo2d')},{e.get('algo3d')}) "
+                  f"elem={e.get('num_elements')} min_q={e.get('min_quality')} "
+                  f"neg={e.get('neg_jacobian')} {e.get('seconds')}s "
+                  f"{str(e.get('error',''))[:70]}", flush=True)
+    MARKER.write_text("DONE\n")
+    write_status()
+    print("[LAP-0728] COMPLETE", flush=True)
+
+
+if __name__ == "__main__":
+    main()

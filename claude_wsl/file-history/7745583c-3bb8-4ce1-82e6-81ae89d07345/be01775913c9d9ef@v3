@@ -1,0 +1,42 @@
+import json, shutil
+from pathlib import Path
+
+root = Path("fluid_0723")
+dst_dir = Path("post_data/1d_rst")
+dst_dir.mkdir(parents=True, exist_ok=True)
+MMHG = 1333.22
+
+copied, missing, anomalies = [], [], []
+for i in range(384):
+    src = root / f"case_{i}" / "pulsatile_1d" / "_1d_rst.json"
+    if not src.exists():
+        missing.append(i)
+        continue
+    shutil.copy2(src, dst_dir / f"_1d_rst_{i}.json")
+    copied.append(i)
+    d = json.load(open(src))
+    r = d.get(str(i), d)
+    reasons = []
+    for phase in ("systolic", "diastolic", "mean"):
+        p = r.get(phase, {})
+        Q, Pin, Pout = p.get("Q"), p.get("Pin"), p.get("Pout")
+        if Q is not None and Q <= 0:
+            reasons.append(f"{phase}.Q={Q:.3f}<=0")
+        if Pin is not None and Pin <= 0:
+            reasons.append(f"{phase}.Pin<=0")
+        if Pout is not None and Pout <= 0:
+            reasons.append(f"{phase}.Pout<=0")
+        for nm, val in (("Pin", Pin), ("Pout", Pout)):
+            if val is not None and val > 0:
+                mm = val / MMHG
+                if mm < 20 or mm > 300:
+                    reasons.append(f"{phase}.{nm}={mm:.0f}mmHg")
+    if reasons:
+        anomalies.append((i, reasons))
+
+print(f"copied={len(copied)}  missing={missing}")
+print(f"=== ANOMALOUS CASES: {len(anomalies)} ===")
+for i, reasons in anomalies:
+    print(f"case_{i}: {', '.join(reasons)}")
+open("bin/anomalous_cases.txt", "w").write(",".join(str(i) for i, _ in anomalies))
+print("LIST=" + ",".join(str(i) for i, _ in anomalies))

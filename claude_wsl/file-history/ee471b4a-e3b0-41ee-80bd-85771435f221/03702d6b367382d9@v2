@@ -1,0 +1,22 @@
+#!/bin/bash
+echo "=== dist script on ws2? ==="
+find /home/jeff/project -maxdepth 2 -name "HXT_meshing_I_dist.py" 2>/dev/null
+echo
+echo "=== candidate geo dirs on ws2 ==="
+for d in /home/jeff/project/54_analysis/geo_0303_500 \
+         /home/jeff/project/54_analysis/geo_0723 \
+         /home/jeff/project/65_final_0723/geo_0723 \
+         /home/jeff/project/54_analysis/geo_data ; do
+  if [ -d "$d" ]; then
+    n=$(ls -d "$d"/case_* 2>/dev/null | wc -l)
+    lo=$(ls -d "$d"/case_* 2>/dev/null | grep -o 'case_[0-9]*' | grep -o '[0-9]*' | sort -n | head -1)
+    hi=$(ls -d "$d"/case_* 2>/dev/null | grep -o 'case_[0-9]*' | grep -o '[0-9]*' | sort -n | tail -1)
+    echo "$d : $n case dirs, id range $lo..$hi"
+  fi
+done
+echo
+echo "=== find any case_700 geometry dir anywhere ==="
+find /home/jeff/project -maxdepth 3 -type d -name "case_700" 2>/dev/null | head
+echo
+echo "=== find geo dirs with high ids (grep any geo* holding case_5xx-9xx) ==="
+find /home/jeff/project -maxdepth 2 -type d -name 'geo*' 2>/dev/null

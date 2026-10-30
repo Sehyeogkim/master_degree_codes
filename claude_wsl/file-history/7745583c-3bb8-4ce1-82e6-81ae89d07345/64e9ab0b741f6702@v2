@@ -1,0 +1,54 @@
+#!/usr/bin/env python
+"""Add the minSICN quality.json block to the reconstructed Box mesher.
+
+ws1's lap_0729/HXT_meshing_I_box.py wrote quality.json right after
+utils.check_mesh_quality(0); the 65_final_0723 copy this was rebuilt from does not.
+mesh_one_box.py reads that file for element count / min quality / neg-Jacobian count.
+"""
+from pathlib import Path
+
+P = Path("/mnt/hdd/jeff/mesh_indep_solid/scripts/HXT_meshing_I_box.py")
+ANCHOR = "    utils.check_mesh_quality(0)\n"
+
+BLOCK = '''
+    # per-element minSICN quality + quality.json  (same block as the dist mesher)
+    try:
+        import json as _json
+        tet_tags = gmsh.model.mesh.getElementsByType(11)[0]
+        q_arr = np.array(gmsh.model.mesh.getElementQualities(tet_tags, qualityName="minSICN"))
+        quality_stats = {
+            "num_elements": int(len(q_arr)),
+            "min_quality": float(np.min(q_arr)),
+            "avg_quality": float(np.mean(q_arr)),
+            "neg_jacobian_count": int(np.sum(q_arr < 0)),
+            "poor_count": int(np.sum(q_arr < 0.3)),
+        }
+        print("Mesh quality: min={:.4f}, neg_jacobian={}, num_elements={}".format(
+            quality_stats["min_quality"], quality_stats["neg_jacobian_count"],
+            quality_stats["num_elements"]))
+        with open(os.path.join(save_folder_path, "quality.json"), "w") as _f:
+            _json.dump(quality_stats, _f, indent=2)
+    except Exception as _e:
+        print("Warning: could not extract mesh quality: {}".format(_e))
+'''
+
+src = P.read_text()
+if "quality.json" in src:
+    print("already patched")
+else:
+    n = src.count(ANCHOR)
+    assert n == 1, "anchor found {} times, expected 1".format(n)
+    P.write_text(src.replace(ANCHOR, ANCHOR + BLOCK))
+    print("patched")
+
+import ast
+ast.parse(P.read_text())
+print("AST OK")
+txt = P.read_text()
+for probe in ('setNumber("Mesh.SecondOrderLinear"  , 1)',
+              "optimize('HighOrder')",
+              'quality.json',
+              'solid_type_1.msh'):
+    print("{:<45} {}".format(probe, "present" if probe in txt else "MISSING"))
+print("numpy imported:", "import numpy as np" in txt)
+print("os imported   :", "import os" in txt)

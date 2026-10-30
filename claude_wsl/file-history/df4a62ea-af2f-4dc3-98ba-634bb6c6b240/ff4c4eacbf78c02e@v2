@@ -1,0 +1,66 @@
+# PEAK orchestrator: worker POOL of PARN over cases 0-999 that are MISSING
+# solid_data/case_{i}/ansys_results_type1_expB_new/FC_case_{i}_peak.vtu AND have a LAP mesh.
+# Each case is a subprocess: pymapdl_solve_peak.py (ver2 traction on LAP_mesh -> peak.vtu).
+# Mirrors the low pool: rotating ports, per-case timeout, disk guard, scratch cleanup.
+# Usage: pymapdl_peak_pool.py <start> <end> <nproc>   (end exclusive)
+import os, sys, time as _time, signal, subprocess, shutil, pathlib
+
+start = int(sys.argv[1]); end = int(sys.argv[2]); nproc = int(sys.argv[3])
+Q = pathlib.Path("/home/jeff/project/54_analysis")
+solver = str(Q / "pymapdl_solve_peak.py")
+PARN = 4
+TIMEOUT = 9000          # 2.5h per case
+MIN_FREE_GB = 450       # disk guard (peak out-of-core can be huge too)
+def refdir(ci): return Q / "solid_data" / f"case_{ci}" / "ansys_results_type1_expB_new"
+def peak_vtu(ci): return refdir(ci) / f"FC_case_{ci}_peak.vtu"
+def lap_mesh(ci): return Q / "LAP_mesh" / f"solid_LAP_{ci}.msh"
+
+eligible = []
+for ci in range(start, end):
+    if peak_vtu(ci).exists():        # already has peak
+        continue
+    if not lap_mesh(ci).exists():    # no LAP mesh (can't do here)
+        continue
+    eligible.append(ci)
+print(f"[PEAK] {len(eligible)} eligible (missing peak.vtu + have LAP mesh) in {start}-{end-1}, POOL {PARN} @ nproc {nproc}", flush=True)
+
+def free_gb():
+    st = os.statvfs(str(Q)); return st.f_bavail * st.f_frsize / 1e9
+
+def spawn(ci):
+    rd = refdir(ci); rd.mkdir(parents=True, exist_ok=True)
+    ex = rd / "peaktmp"; ex.mkdir(exist_ok=True)
+    out = peak_vtu(ci)
+    port = 50300 + (ci % 50)
+    p = subprocess.Popen(["python", solver, str(ci), str(nproc), str(ex), str(port), str(out)],
+                         start_new_session=True)
+    return {"ci": ci, "p": p, "ex": ex, "out": out, "start": _time.time()}
+
+def finalize(r, reason):
+    ci = r["ci"]
+    if r["out"].exists():
+        print(f"************ Finished PEAK case {ci} ************", flush=True)
+    else:
+        print(f"PEAK case {ci}: INCOMPLETE ({reason}) - retry next pass", flush=True)
+    shutil.rmtree(r["ex"], ignore_errors=True)
+
+running = {}; ei = 0
+while ei < len(eligible) or running:
+    while len(running) < PARN and ei < len(eligible):
+        if running and free_gb() < MIN_FREE_GB:
+            print(f"[disk] free {free_gb():.0f}GB < {MIN_FREE_GB} -> hold ({len(running)} running)", flush=True)
+            break
+        ci = eligible[ei]; ei += 1
+        running[ci] = spawn(ci)
+        print(f"[pool] started PEAK case {ci} ({len(running)}/{PARN}, {free_gb():.0f}GB free)", flush=True)
+    _time.sleep(5)
+    for ci in list(running):
+        r = running[ci]; rc = r["p"].poll()
+        if rc is None and (_time.time() - r["start"]) > TIMEOUT:
+            print(f"PEAK case {ci}: TIMEOUT >{TIMEOUT}s - killpg", flush=True)
+            try: os.killpg(os.getpgid(r["p"].pid), signal.SIGKILL)
+            except Exception: pass
+            r["p"].wait(); rc = -9
+        if rc is not None:
+            finalize(r, f"rc={rc}")
+            del running[ci]

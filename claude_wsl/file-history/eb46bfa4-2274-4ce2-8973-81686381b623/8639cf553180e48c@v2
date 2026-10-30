@@ -1,0 +1,37 @@
+import os, csv, math
+
+ROOT = "/home/jeff/project/65_final_0723/post_data/wall_0723"
+N = 384
+
+def mean_pressure(path):
+    tot = 0.0; n = 0
+    try:
+        with open(path) as f:
+            next(f)  # header
+            for line in f:
+                last = line.rsplit(",", 1)[-1].strip()
+                try:
+                    tot += float(last); n += 1
+                except ValueError:
+                    pass
+    except FileNotFoundError:
+        return math.nan
+    return tot / n if n else math.nan
+
+out = "/tmp/wall_meanP.csv"
+with open(out, "w", newline="") as g:
+    w = csv.writer(g)
+    w.writerow(["case_id", "peak_meanP_dyn", "low_meanP_dyn"])
+    for i in range(N):
+        pk = mean_pressure(f"{ROOT}/peak/wall_peak_case_{i}.csv")
+        lo = mean_pressure(f"{ROOT}/low/wall_low_case_{i}.csv")
+        w.writerow([i, pk, lo])
+
+# quick overall summary
+import statistics as st
+rows = list(csv.DictReader(open(out)))
+pk = [float(r["peak_meanP_dyn"]) for r in rows if r["peak_meanP_dyn"] not in ("", "nan")]
+lo = [float(r["low_meanP_dyn"]) for r in rows if r["low_meanP_dyn"] not in ("", "nan")]
+print("wrote", out)
+print("PEAK mean wall P over %d cases: %.1f dyn = %.1f mmHg" % (len(pk), st.mean(pk), st.mean(pk)/1333.22))
+print("LOW  mean wall P over %d cases: %.1f dyn = %.1f mmHg" % (len(lo), st.mean(lo), st.mean(lo)/1333.22))

@@ -1,0 +1,54 @@
+#!/bin/bash
+# Relay LAP meshes ws1 -> local WSL -> harvey with pigz compression (2.15x smaller).
+# ws1 has no route to harvey, so every file hops through here.
+# Measured: pigz -1 -p8 = 0.4s per 370MB file; raw transfer ~14s+12s per file.
+#
+# Order: DESCENDING from 499 (harvey chews from the top while ws1 works up from the
+# bottom -> the two never collide). Skips cases already on harvey (size-matched .msh).
+# 4 workers; each stages into its own dir and deletes as it goes.
+#
+# Usage: mesh_send.sh [FIRST] [LAST] [WORKERS]      e.g. mesh_send.sh 499 177 4
+BASE="/tmp/claude-1000/-home-jeff-project-65-final-0723/4c5c939f-6472-457a-bbdc-757c03d64685/scratchpad"
+STAGE="$BASE/msend"; LOG="$BASE/mesh_send.log"
+FIRST=${1:-499}; LAST=${2:-177}; W=${3:-4}
+WS1_MESH=/home/jeff/project/54_analysis/LAP_mesh
+HV_MESH=/home/jeff/project/54_analysis/LAP_mesh
+PIGZ_WS1=/home/jeff/miniconda3/bin/pigz   # ws1: only in the conda prefix
+PIGZ_HV=/usr/bin/pigz                     # harvey: system-wide
+
+mkdir -p "$STAGE"
+ssh harvey "mkdir -p $HV_MESH" 2>>"$LOG"
+
+send_one() {
+  local i=$1 sdir="$2"
+  local f="solid_LAP_${i}.msh"
+  mkdir -p "$sdir"
+  # source exists?
+  local sz_ws1
+  sz_ws1=$(ssh ws1 "stat -c%s $WS1_MESH/$f 2>/dev/null" 2>/dev/null)
+  [ -z "$sz_ws1" ] && return 0
+  # already on harvey at full size? skip
+  local sz_h
+  sz_h=$(ssh harvey "stat -c%s $HV_MESH/$f 2>/dev/null" 2>/dev/null)
+  [ "$sz_ws1" = "$sz_h" ] && { echo "$(date '+%T') $i skip(present)" >>"$LOG"; return 0; }
+
+  # 1) compress on ws1 into its /tmp (pigz -1: fast, ~2.15x)
+  ssh ws1 "mkdir -p /tmp/msend && $PIGZ_WS1 -1 -p 8 -c $WS1_MESH/$f > /tmp/msend/$f.gz" 2>>"$LOG" || { echo "$(date '+%T') $i GZ FAIL" >>"$LOG"; return 1; }
+  # 2) ws1 -> local  (no -z: payload is already compressed)
+  rsync -a --timeout=600 ws1:"/tmp/msend/$f.gz" "$sdir/" 2>>"$LOG" || { echo "$(date '+%T') $i PULL FAIL" >>"$LOG"; ssh ws1 "rm -f /tmp/msend/$f.gz"; return 1; }
+  ssh ws1 "rm -f /tmp/msend/$f.gz" 2>/dev/null
+  # 3) local -> harvey
+  rsync -a --timeout=600 "$sdir/$f.gz" harvey:"/tmp/" 2>>"$LOG" || { echo "$(date '+%T') $i PUSH FAIL" >>"$LOG"; rm -f "$sdir/$f.gz"; return 1; }
+  rm -f "$sdir/$f.gz"
+  # 4) decompress on harvey into LAP_mesh (atomic-ish: temp then mv)
+  ssh harvey "$PIGZ_HV -dc /tmp/$f.gz > $HV_MESH/.$f.part && mv $HV_MESH/.$f.part $HV_MESH/$f && rm -f /tmp/$f.gz" 2>>"$LOG" \
+    || { echo "$(date '+%T') $i UNGZ FAIL" >>"$LOG"; return 1; }
+  echo "$(date '+%T') $i OK" >>"$LOG"
+}
+export -f send_one
+export LOG WS1_MESH HV_MESH PIGZ_WS1 PIGZ_HV
+
+echo "START $(date '+%F %T') range ${FIRST}->${LAST} workers=$W" >>"$LOG"
+seq "$FIRST" -1 "$LAST" | xargs -P "$W" -I{} bash -c 'send_one {} '"$STAGE"'/w$(( {} % '"$W"' ))'
+echo "DONE $(date '+%F %T') sent=$(grep -c " OK$" "$LOG") skipped=$(grep -c "skip(present)" "$LOG")" >>"$LOG"
+touch "$BASE/mesh_send.done"

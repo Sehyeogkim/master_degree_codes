@@ -1,0 +1,2 @@
+# Large ParaView / simulation data files exceed GitHub's 100MB limit
+*.vtu

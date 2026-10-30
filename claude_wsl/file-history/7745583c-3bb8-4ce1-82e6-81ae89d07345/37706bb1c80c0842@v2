@@ -1,0 +1,50 @@
+#!/bin/bash
+# Full ladder on case 339 -- NEVER RAN (ws1's root disk failed first).
+#
+# Why 339: its production mesh is 2.220e6 second-order tets, against a Box-cohort median
+# of 2.222e6, so it is the cohort-median case. Case 0 -- which the completed study used --
+# sits at only the 13.6th percentile (1.52e6 tets). The fluid section of the manuscript
+# says "a case at the cohort median", so repeating the ladder here makes the fluid and
+# solid sections methodologically parallel.
+#
+# Inputs verified present on ws1 before the failure:
+#   solid_data/case_339/{lumen,solid,lipid,fc}.stp
+#   post_data/wall_expB_new/peak/wall_peak_case_339.csv
+#   post_data/wall_no_hyperemia/low/wall_low_case_339.csv
+#
+# Set R to wherever this study is staged before running.
+R=${R:-/mnt/hdd/jeff/mesh_indep_solid}
+Q=$HOME/project/54_analysis
+PY=$HOME/miniconda3/envs/ansys_new/bin/python
+C=339
+LOG=$R/logs/case339.log
+
+cd "$Q" || exit 1
+mkdir -p "$R/mesh339" "$R/results339" "$R/logs"
+
+for S in 0.0625 0.05 0.04 0.032; do
+  echo "===== $(date '+%F %T') MESH $S =====" >> "$LOG"
+  timeout -k 30 3600 "$PY" -u "$R/scripts/mesh_one_box.py" "$C" 24 "$S" "$R/mesh339" 6 10 >> "$LOG" 2>&1
+done
+
+p=50700
+for S in 0.0625 0.05 0.04 0.032; do
+  MSH=$R/mesh339/solid_LAP_${C}_box_${S}_a6_10.msh
+  [ -f "$MSH" ] || { echo "NO MESH $S" >> "$LOG"; continue; }
+  for bc in peak low; do
+    case $bc in
+      peak) csv=$Q/post_data/wall_expB_new/peak/wall_peak_case_$C.csv ;;
+      low)  csv=$Q/post_data/wall_no_hyperemia/low/wall_low_case_$C.csv ;;
+    esac
+    out=$R/results339/FC_case_${C}_a6_${S}_$bc.vtu
+    [ -f "$out" ] && continue
+    ex=$R/ansys/c339_${S}_$bc; rm -rf "$ex"; mkdir -p "$ex"
+    echo "=== $(date '+%F %T') START $S $bc ===" >> "$LOG"
+    timeout -k 60 21600 "$PY" -u "$R/scripts/solve_one.py" "$C" "$bc" "$MSH" "$csv" 20 "$ex" "$p" "$out" \
+        >> "$R/logs/solve339_${S}_$bc.log" 2>&1
+    rc=$?          # capture BEFORE $(date) below clobbers $?
+    echo "=== $(date '+%F %T') END $S $bc exit=$rc ===" >> "$LOG"
+    rm -rf "$ex"; p=$((p + 10))
+  done
+done
+echo "CASE339 ALL DONE $(date '+%F %T')" >> "$LOG"

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Continuously mirror completed meshes to harvey. Meshing outruns a per-tick copy,
+# so this runs standalone and keeps sweeping. Start with:
+#   setsid nohup bash harvey_sync/copy_daemon.sh >> harvey_sync/copy_daemon.log 2>&1 &
+SD="$(cd "$(dirname "$0")" && pwd)"
+INTERVAL=${COPY_INTERVAL:-45}
+while true; do
+  bash "$SD/copy_backlog.sh"
+  sleep "$INTERVAL"
+done

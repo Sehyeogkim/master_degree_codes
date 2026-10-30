@@ -1,0 +1,476 @@
+"""engine_fable4 — engine_fable2 복사본 + '리버설 밴드'(cross_freeze) 플립 모드.
+
+flip_mode="trail"(기본) → engine_fable2와 완전 동일(회귀 보장).
+flip_mode="cross_freeze" → 리버설 밴드:
+  · 롱/숏 진입선(L_line/S_line)을 각 방향 '첫 체결가'에 고정(1회).
+    초기값은 첫봉 기준선(long_gate/short_gate). 최초 롱 진입 시 L_line=진입가,
+    최초 숏 진입 시 S_line=진입가. 이후 재플립에도 다시 안 바꿈.
+  · 전환 트리거 = 단순 종가 돌파: 롱 보유 중 종가가 S_line 하향 돌파 → 숏,
+    숏 보유 중 종가가 L_line 상향 돌파 → 롱. (트레일링 신고/신저점 조건 없음)
+  · 최초 진입(flat→첫 포지션)은 281 트레일링 그대로 유지 — 진입 엣지 보존.
+  · flip_max(교체 횟수)·flip_days/flip_cutoff_hm(허용창)이 스윕 파라미터.
+
+드리프트 방지: 로직 변경 시 engine_fable2와 함께 맞출 것.
+
+[이하 fable2 원본 설명]
+engine_fable2 — engine_fable 복사본 + 익절 사다리 조건부 리셋 실험.
+
+engine_fable(= engine281 + 리버설 플립)을 그대로 복사한 뒤, 익절(TP) 규칙에
+**사다리 조건부 리셋**(tp_reset_pct)을 추가했다:
+
+  고점(롱)/저점(숏)이 갱신돼 익절 피보를 재작도하더라도 익절 순서는 유지하되,
+  '현재 사다리의 첫 익절이 발생한 시점의 피보 극값' 대비 새 극값이
+  tp_reset_pct(예: 3%) 이상 추가 갱신된 경우에만 **익절 횟수를 초기화**하고
+  남은 물량을 새 피보의 1단계부터 다시 1/3씩 분할 익절한다.
+  (리셋 시 남은 물량 = 새 사다리의 전량. 과매도 불가.)
+
+- tp_reset_pct=None (기본) → engine_fable 과 코드 경로·수치 완전 동일 (회귀 보장).
+  flip 까지 끄면 engine281 과 동일.
+- 리셋 판정은 익절(TP) 경로 전용 — stop_mode="none" 전제(281/fable 정식 설정과 동일).
+
+모듈명 충돌 회피 위해 파일명 engine_fable2.py. 자기완결(외부 엔진 import 없음).
+"""
+from __future__ import annotations
+from dataclasses import dataclass, field
+import csv
+
+FIB = (0.25, 0.5, 0.75)          # 손절: 진입봉 몸통 tier
+TP_FIB = (0.75, 0.5, 0.25)       # 익절: 트레일링 tier (되돌림 통과)
+EPS = 1e-9
+
+
+@dataclass
+class Bar:
+    dt: str
+    o: float
+    h: float
+    l: float
+    c: float
+    v: float = 0.0
+
+    @property
+    def day(self): return self.dt[:10]
+    @property
+    def hm(self): return self.dt[11:16]
+    @property
+    def bull(self): return self.c >= self.o
+
+
+@dataclass
+class Event:
+    idx: int
+    dt: str
+    price: float
+    kind: str          # "ENTRY" | "EXIT"
+    direction: int     # +1 long / -1 short
+    marker: str        # "E" | "S" | "T"
+    arrow: str         # "up" | "down" | ""
+    frac: float        # 이번 이벤트 청산 비율 (ENTRY=1.0 진입)
+    reason: str
+    pnl: float = 0.0
+    note: str = ""
+
+
+@dataclass
+class Position:
+    direction: int
+    entry_idx: int
+    entry_dt: str
+    entry_price: float     # = 진입봉 종가
+    entry_open: float      # 진입봉 시가
+    invested: float       # 주식 취득원가 = shares × 진입가
+    shares: float
+    leftover: float = 0.0  # 정수주 라운딩으로 못 투자한 현금(다음 진입으로 이월)
+    exited: float = 0.0
+    extreme_fav: float = 0.0
+    realized_pnl: float = 0.0
+    closed: bool = False
+    cash_after: float = 0.0
+    # [fable2] 익절 사다리 상태 — tp_reset_pct 활성 시에만 사용
+    ladder_base: float = 1.0     # 현재 사다리가 '전량'으로 보는 비율(리셋 시 = 잔량)
+    ladder_exited: float = 0.0   # 현재 사다리 내 누적 익절(사다리 기준 0~1)
+    ref_extreme: float | None = None  # 현재 사다리 첫 익절 시점의 extreme_fav(가격단위)
+    resets: int = 0              # 이 포지션의 사다리 리셋 횟수
+    gate_anchor: float = 0.0     # [v2-B] 게이트 재장전 기준(extreme_fav). 0=초기
+    # 거래비용(체결마다 누적) — 기본 0 이면 gross(비용 미반영)와 동일
+    fee: float = 0.0       # 편도 수수료율
+    slip: float = 0.0      # 편도 슬리피지율
+    tax: float = 0.0       # 매도측 거래세율
+    cost: float = 0.0      # 누적 체결비용(원)
+    buy_notional: float = 0.0
+    sell_notional: float = 0.0
+
+
+def classify(fb: Bar, F0: float):
+    """첫봉으로 base 방향·Case·트리거 레벨·즉시진입 여부 결정."""
+    o, c = fb.o, fb.c
+    if fb.bull:                                   # 양봉 → 롱 base
+        base = +1
+        if o > F0:      case, longL, shortL = 1, [c, o], [F0]
+        elif c >= F0:   case, longL, shortL = 2, [c], [o]
+        else:           case, longL, shortL = 3, [F0], [o]
+        initial = +1 if c >= F0 else 0            # case1,2 즉시 롱
+    else:                                         # 음봉 → 숏 base (mirror)
+        base = -1
+        if o < F0:      case, shortL, longL = 1, [c, o], [F0]
+        elif c <= F0:   case, shortL, longL = 2, [c], [o]
+        else:           case, shortL, longL = 3, [F0], [o]
+        initial = -1 if c <= F0 else 0            # case1,2 즉시 숏
+    return base, case, longL, shortL, initial
+
+
+def _open(direction, b: Bar, i, cash, fee=0.0, slip=0.0, tax=0.0, round_shares=False) -> Position:
+    shares = float(int(cash / b.c)) if round_shares else cash / b.c   # 정수주면 내림
+    invested = shares * b.c
+    leftover = cash - invested                                        # 미투자 현금(이월)
+    pos = Position(direction=direction, entry_idx=i, entry_dt=b.dt,
+                   entry_price=b.c, entry_open=b.o, invested=invested, shares=shares,
+                   leftover=leftover, fee=fee, slip=slip, tax=tax)
+    # 진입 체결비용: 롱=매수(세금X) / 숏=매도(거래세O). notional = shares × 진입가 = invested.
+    notional = invested
+    if direction > 0:
+        pos.buy_notional += notional
+        pos.cost += notional * (fee + slip)
+    else:
+        pos.sell_notional += notional
+        pos.cost += notional * (fee + slip + tax)
+    return pos
+
+
+def _entry_event(pos: Position) -> Event:
+    d = "롱" if pos.direction > 0 else "숏"
+    return Event(pos.entry_idx, pos.entry_dt, pos.entry_price, "ENTRY", pos.direction,
+                 "E", "up" if pos.direction > 0 else "down", 1.0,
+                 reason=f"{d} 진입", note=f"투입 {pos.invested:,.0f}")
+
+
+def _exit(pos: Position, b: Bar, i, frac, label, tier, reason) -> Event:
+    pnl = pos.direction * (b.c - pos.entry_price) * (frac * pos.shares)
+    pos.realized_pnl += pnl
+    # 청산 체결비용: 롱=매도(거래세O) / 숏=매수(세금X). notional = 청산주수 × 체결가.
+    notional = frac * pos.shares * b.c
+    if pos.direction > 0:
+        pos.sell_notional += notional
+        pos.cost += notional * (pos.fee + pos.slip + pos.tax)
+    else:
+        pos.buy_notional += notional
+        pos.cost += notional * (pos.fee + pos.slip)
+    pos.exited += frac
+    if pos.exited >= 1.0 - EPS:
+        pos.closed = True
+        # 취득원가 + 실현손익 − 비용 + 미투자 현금(이월) = 청산 후 총 현금
+        pos.cash_after = pos.invested + pos.realized_pnl - pos.cost + pos.leftover
+    fr = {1/3: "1/3", 2/3: "2/3", 1.0: "전량"}.get(round(pos.exited, 4), f"{pos.exited:.2f}")
+    return Event(i, b.dt, b.c, "EXIT", pos.direction, label,
+                 "", frac, reason=reason, pnl=pnl, note=fr)
+
+
+def _process(pos: Position, b: Bar, i, tp_gate=0.0, stop_mode="body", stop_pct=0.02,
+             tp_mode="pct", tp_body_frac=0.5, tp_reset_pct=None,
+             tp_reset_skip1=False, tp_regate=False, tp_frac=None,
+             tp_levels=None, tp_cum=None) -> list[Event]:
+    """진입 이후 봉에서 손절/익절 tier 판정 → 분할 청산.
+    익절 활성화(tp_mode):
+      'pct'  = 고점이 진입가 대비 tp_gate(고정%) 이상일 때 작동(현행).
+      'body' = 고점이 진입봉 몸통(|종가−시가|)의 tp_body_frac(기본 0.5) 이상 유리 이동 시 작동(적응형).
+    stop_mode: 'body'(진입봉 몸통 피보) / 'pct'(고정%) / 'none'(무손절) / 'chand'(샹들리에).
+    tp_reset_pct: [fable2] 사다리 리셋 임계. None=리셋 없음(fable/281과 동일).
+      첫 익절 시점 피보 극값 대비 새 극값이 임계 이상 추가 갱신 시 익절 순서 초기화.
+    tp_reset_skip1: [v2-A] 리셋된 새 사다리의 1단계 익절을 건너뜀(2단계부터).
+    tp_regate:      [v2-B] 리셋 시 익절 게이트 재장전 — 새 극값 기준 tp_gate 추가 상승 전까지 익절 비활성.
+    tp_frac:        [v2-C] 익절 단위 비율(기본 None=1/3). 예 0.25 → 단계당 1/4, 완주해도 1/4 잔량 홀드.
+    tp_levels: [F축] 익절 되돌림 레벨 튜플(내림차순, 기본 None=TP_FIB(0.75,0.5,0.25)). 2~5단 자유.
+    tp_cum:    [F축] 티어별 누적 익절 비중 튜플(오름차순, len=len(levels), 기본 None=균등 1/n씩).
+               tp_cum 지정 시 tp_frac 무시. 기본값 조합 = 기존과 완전 동일."""
+    if i <= pos.entry_idx:
+        return []
+    fav = pos.direction * (b.c - pos.entry_price)       # 유리 이동(양수=이익)
+    if fav > pos.extreme_fav + EPS:                     # 새 극값 → 밴드 재작도, 청산 없음
+        pos.extreme_fav = fav
+        # [fable2] 사다리 리셋 판정 — 현재 사다리에서 익절이 있었고, 임계 이상 추가 갱신 시
+        if (tp_reset_pct is not None and pos.ref_extreme is not None
+                and pos.ladder_exited > EPS):
+            if pos.direction > 0:
+                new_p = pos.entry_price + fav            # 새 피보 고점
+                ref_p = pos.entry_price + pos.ref_extreme
+                trig = new_p >= ref_p * (1.0 + tp_reset_pct) - EPS
+            else:
+                new_p = pos.entry_price - fav            # 새 피보 저점
+                ref_p = pos.entry_price - pos.ref_extreme
+                trig = new_p <= ref_p * (1.0 - tp_reset_pct) + EPS
+            if trig:
+                pos.ladder_base = 1.0 - pos.exited       # 잔량 = 새 사다리 전량
+                _f = tp_frac if tp_frac is not None else 1.0 / 3.0
+                pos.ladder_exited = _f if tp_reset_skip1 else 0.0  # [v2-A] 1단계 스킵
+                if tp_regate:
+                    pos.gate_anchor = fav                # [v2-B] 새 극값 기준 게이트 재장전
+                pos.ref_extreme = None                   # 새 사다리 첫 익절 때 재설정
+                pos.resets += 1
+        return []
+    tp_thr = (tp_body_frac * abs(pos.entry_price - pos.entry_open)   # 적응형: 몸통 비례
+              if tp_mode == "body" else tp_gate * pos.entry_price)   # 고정: 진입가 %
+    # [v2-B] 게이트 재장전: 재장전 후엔 (극값 − anchor)가 다시 tp_thr 이상이어야 익절 국면
+    if pos.extreme_fav > EPS and pos.extreme_fav - pos.gate_anchor >= tp_thr:  # 익절 국면
+        lr = fav / pos.extreme_fav                       # 1=극값, 0=진입가, <0=손실
+        levels = tp_levels if tp_levels is not None else TP_FIB   # [F축] 사다리 레벨
+        tier = sum(1 for f in levels if lr < f)
+        base = "익절피보"
+    elif stop_mode == "none":                           # 인트라데이 손절 없음
+        return []
+    elif stop_mode == "hard":                           # [REMOVABLE 추가기능] 진입가 대비 반대 stop_pct 도달 → 전량 손절
+        unfav = pos.direction * (pos.entry_price - b.c) / pos.entry_price   # >0 = 불리(진입 반대방향)
+        if unfav >= stop_pct:
+            frac = 1.0 - pos.exited
+            return [_exit(pos, b, i, frac, "S", 3, f"하드손절(진입가 -{stop_pct*100:.0f}%) → S")] if frac > EPS else []
+        return []
+    elif stop_mode == "chand":                          # 샹들리에: 고점 대비 stop_pct 되돌림 시 전량
+        dd = pos.extreme_fav - fav                       # 고점 대비 되돌림(가격). 미favorable이면 진입가 대비 하락폭.
+        if dd >= stop_pct * pos.entry_price:
+            frac = 1.0 - pos.exited
+            if frac <= EPS:
+                return []
+            label = "T" if fav > EPS else "S"
+            return [_exit(pos, b, i, frac, label, 3, f"샹들리에 손절(고점 -{stop_pct*100:.0f}%) → {label}")]
+        return []
+    elif stop_mode == "pct":                            # 고정 %손절 (진입가 대비)
+        unfav = pos.direction * (pos.entry_price - b.c) / pos.entry_price   # >0 불리
+        tier = sum(1 for f in (stop_pct / 3, stop_pct * 2 / 3, stop_pct) if unfav > f)
+        base = "손절%"
+    else:                                               # 손절 국면 (진입봉 몸통) · 게이트 미달 홀드
+        denom = pos.entry_price - pos.entry_open
+        ratio = (pos.entry_price - b.c) / denom if abs(denom) > EPS else \
+            (1e9 if pos.direction * (pos.entry_price - b.c) > 0 else 0)
+        tier = sum(1 for f in FIB if ratio > f)
+        base = "손절피보"
+    if tier == 0:
+        return []
+    tiers = {1: "1", 2: "1·2", 3: "1·2·3"}.get(tier, f"1~{tier}")
+    # [F축] TP 누적 목표: tp_cum 명시 > tp_frac 단위 > 레벨 수 균등(기본 1/3)
+    if base == "익절피보":
+        if tp_cum is not None:
+            cum_target = tp_cum[min(tier, len(tp_cum)) - 1]
+        else:
+            f_unit = tp_frac if tp_frac is not None else 1.0 / len(levels)
+            cum_target = tier * f_unit
+    # [fable2] 익절 사다리 경로 — 리셋 활성 시 tier 는 '현재 사다리' 기준으로 적용
+    if base == "익절피보" and tp_reset_pct is not None:
+        target_l = cum_target
+        if target_l <= pos.ladder_exited + EPS:
+            return []
+        frac = (target_l - pos.ladder_exited) * pos.ladder_base
+        if frac <= EPS:
+            return []
+        label = "T" if fav > EPS else "S"
+        tag = f"(사다리{pos.resets+1})" if pos.resets else ""
+        ev = _exit(pos, b, i, frac, label, tier, f"{base}{tag} {tiers}단계 통과 → {label}")
+        pos.ladder_exited = target_l
+        if pos.ref_extreme is None:                     # 현재 사다리의 첫 익절 → 기준점 기록
+            pos.ref_extreme = pos.extreme_fav
+        return [ev]
+    target = cum_target if base == "익절피보" else tier / 3.0   # 손절 경로는 1/3 유지
+    if target <= pos.exited + EPS:
+        return []
+    frac = target - pos.exited
+    label = "T" if fav > EPS else "S"                   # 체결가 vs 진입가 부호
+    reason = f"{base} {tiers}단계 통과 → {label}"
+    return [_exit(pos, b, i, frac, label, tier, reason)]
+
+
+def _check_triggers(b: Bar, prev_close, longL, shortL,
+                    run_high, run_low, long_gate, short_gate, entries,
+                    entry_margin=0.0):
+    """flat 상태에서 재진입 감지 (entries 로 유형 on/off).
+    ① 'cross' 기존 트리거 레벨의 방향성 돌파(종가 기준).
+    ② 'trail' 트레일링 트리거: 롱 트리거 위에서 최고가 갱신 시 롱 / 숏 트리거 아래 최저가 갱신 시 숏.
+    entry_margin(H2): trail 돌파 확인 마진 — 종가가 신고점×(1+δ)/신저점×(1−δ)를 넘어야 발화.
+      0.0(기본)이면 기존과 완전 동일."""
+    if b.bull:
+        if "cross" in entries and prev_close is not None:
+            for L in longL:
+                if prev_close <= L < b.c:
+                    return +1, f"롱 트리거 {L:,.0f} 양봉 상향 돌파"
+        if ("trail" in entries and run_high is not None
+                and b.c > run_high * (1.0 + entry_margin) and b.c > long_gate):
+            return +1, f"롱 트레일링(최고가 {run_high:,.0f}) 양봉 갱신"
+    else:
+        if "cross" in entries and prev_close is not None:
+            for L in shortL:
+                if prev_close >= L > b.c:
+                    return -1, f"숏 트리거 {L:,.0f} 음봉 하향 돌파"
+        if ("trail" in entries and run_low is not None
+                and b.c < run_low * (1.0 - entry_margin) and b.c < short_gate):
+            return -1, f"숏 트레일링(최저가 {run_low:,.0f}) 음봉 갱신"
+    return 0, None
+
+
+def run(bars: list[Bar], F0: float, capital=10_000_000.0, liquidate_hm="15:15", tp_gate=0.0,
+        entries=("first", "cross", "trail"), stop_mode="body", stop_pct=0.02,
+        fee=0.0, slip=0.0, tax=0.0, round_shares=False,
+        tp_mode="pct", tp_body_frac=0.5,
+        flip_monday=False, flip_days=1, flip_cutoff_hm=None, flip_max=1,
+        tp_reset_pct=None, tp_reset_skip1=False, tp_regate=False, tp_frac=None,
+        entry_margin=0.0, tp_levels=None, tp_cum=None,
+        flip_mode="trail"):
+    """fee/slip/tax = 편도 비용률(소수). 기본 0 이면 gross(비용 미반영).
+    거래세(tax)는 매도측만 부과: 롱=청산시, 숏=진입시.
+    round_shares=True 면 정수주(내림) 매수 + 미투자 현금 이월(cash drag 반영).
+
+    flip_monday=True(fable): 지정한 '플립 허용창' 안에서 최대 flip_max회, 보유 포지션이
+    반대방향 트레일 진입신호를 만나면 전량 손절 후 즉시 반대방향으로 전환한다.
+      flip_days      : 창에 포함할 선두 거래일 수 (1=월, 2=월+화)
+      flip_cutoff_hm : 창의 '마지막 날'에만 적용되는 시각 상한("10:00" → 그 시각까지). None=종일
+      flip_max       : 주당 최대 전환 횟수
+    tp_reset_pct(fable2): 익절 사다리 조건부 리셋 임계(예 0.03). None=리셋 없음.
+    flip_monday=False·tp_reset_pct=None 이면 281과 완전 동일."""
+    base, case, longL, shortL, initial = classify(bars[0], F0)
+    last_day = bars[-1].day
+    # 플립 허용창: 선두 flip_days 거래일 + 마지막 창일의 시각 상한
+    flip_window_days = []
+    for b in bars:
+        if b.day not in flip_window_days:
+            flip_window_days.append(b.day)
+            if len(flip_window_days) >= flip_days:
+                break
+    last_flip_day = flip_window_days[-1] if flip_window_days else None
+    flips_used = 0                       # 주당 플립 횟수 (fable)
+    total_resets = 0                     # [fable2] 사다리 리셋 총횟수
+    events: list[Event] = []
+    pos = None
+    cash = capital
+    total_cost = 0.0
+    buy_notional = sell_notional = 0.0
+    prev_close = None
+    long_gate = max(longL)               # 이 위에서 롱 트리거가 최고가로 트레일링
+    short_gate = min(shortL)             # 이 아래에서 숏 트리거가 최저가로 트레일링
+    run_high = run_low = None            # 현재까지 종가 최고/최저 (리셋 없음)
+    # [fable4] cross_freeze 리버설 밴드: 롱/숏 진입선을 각 방향 첫 체결가에 고정.
+    #   flip_mode="cross_freeze" 일 때만 사용. 초기값 = 첫봉 기준선(gate).
+    L_line, S_line = long_gate, short_gate
+    long_frozen = short_frozen = False
+
+    def _freeze(p):                      # 각 방향 첫 진입 시 그 방향 선을 진입가로 고정(1회)
+        nonlocal L_line, S_line, long_frozen, short_frozen
+        if p.direction > 0 and not long_frozen:
+            L_line = p.entry_price; long_frozen = True
+        elif p.direction < 0 and not short_frozen:
+            S_line = p.entry_price; short_frozen = True
+
+    for i, b in enumerate(bars):
+        forced = (b.day == last_day and b.hm >= liquidate_hm)
+
+        # 1) 보유 포지션 관리
+        if pos is not None:
+            events += _process(pos, b, i, tp_gate, stop_mode, stop_pct, tp_mode, tp_body_frac,
+                               tp_reset_pct, tp_reset_skip1, tp_regate, tp_frac,
+                               tp_levels, tp_cum)
+            if pos.closed:
+                total_cost += pos.cost; buy_notional += pos.buy_notional
+                sell_notional += pos.sell_notional
+                total_resets += pos.resets
+                cash = pos.cash_after; pos = None
+
+        # 1b) 금요일 강제 청산
+        if pos is not None and forced:
+            frac = 1.0 - pos.exited
+            fav = pos.direction * (b.c - pos.entry_price)
+            label = "T" if fav > EPS else "S"
+            events.append(_exit(pos, b, i, frac, label, 3,
+                                f"{liquidate_hm} 강제청산 → {label}"))
+            total_cost += pos.cost; buy_notional += pos.buy_notional
+            sell_notional += pos.sell_notional
+            total_resets += pos.resets
+            cash = pos.cash_after; pos = None
+
+        # 1c) 리버설 플립 — 허용창 안에서 보유 중 전환 조건 발화 시 반대방향 전환
+        in_flip_window = b.day in flip_window_days
+        if (in_flip_window and flip_cutoff_hm is not None and b.day == last_flip_day):
+            in_flip_window = b.hm <= flip_cutoff_hm      # 마지막 창일은 시각 상한 적용
+        if (flip_monday and pos is not None and not forced
+                and in_flip_window and flips_used < flip_max):
+            if flip_mode == "cross_freeze":
+                # [fable4] 단순 선 돌파: 보유 중 종가가 반대편 고정선을 넘으면 전환.
+                #   롱 보유 → 종가가 S_line 하향 돌파 시 숏 / 숏 보유 → L_line 상향 돌파 시 롱.
+                d = 0; reason = ""
+                if prev_close is not None:
+                    if pos.direction > 0 and prev_close >= S_line and b.c < S_line:
+                        d, reason = -1, f"숏선 {S_line:,.0f} 하향 돌파"
+                    elif pos.direction < 0 and prev_close <= L_line and b.c > L_line:
+                        d, reason = +1, f"롱선 {L_line:,.0f} 상향 돌파"
+            else:                                        # "trail" — 기존 fable 방식
+                d, reason = _check_triggers(b, prev_close, longL, shortL,
+                                            run_high, run_low, long_gate, short_gate, entries,
+                                            entry_margin)
+                if d == pos.direction:
+                    d = 0
+            if d != 0:
+                # ① 현 포지션 전량 손절
+                frac = 1.0 - pos.exited
+                if frac > EPS:
+                    fav = pos.direction * (b.c - pos.entry_price)
+                    label = "T" if fav > EPS else "S"
+                    events.append(_exit(pos, b, i, frac, label, 3,
+                                        f"플립 손절#{flips_used+1}({reason}) → {label}"))
+                total_cost += pos.cost; buy_notional += pos.buy_notional
+                sell_notional += pos.sell_notional
+                total_resets += pos.resets
+                cash = pos.cash_after; pos = None
+                # ② 즉시 반대방향 신규 진입 (현금 이월) + 선 고정
+                pos = _open(d, b, i, cash, fee, slip, tax, round_shares)
+                _freeze(pos)
+                events.append(_entry_event(pos))
+                events[-1].reason = f"{reason} → 리버설#{flips_used+1} " + events[-1].reason
+                flips_used += 1
+
+        # 2) 진입 (flat & 비강제)
+        if pos is None and not forced:
+            if i == 0 and initial != 0 and "first" in entries:
+                pos = _open(initial, b, i, cash, fee, slip, tax, round_shares)
+                _freeze(pos)
+                events.append(_entry_event(pos))
+                events[-1].reason = f"Case{case} 첫봉 종가 즉시 " + events[-1].reason
+            else:
+                d, reason = _check_triggers(b, prev_close, longL, shortL,
+                                            run_high, run_low, long_gate, short_gate, entries,
+                                            entry_margin)
+                if d != 0:
+                    pos = _open(d, b, i, cash, fee, slip, tax, round_shares)
+                    _freeze(pos)
+                    events.append(_entry_event(pos))
+                    events[-1].reason = reason + " → " + events[-1].reason
+
+        # 현재까지 최고/최저 갱신 (모든 봉)
+        run_high = b.c if run_high is None else max(run_high, b.c)
+        run_low = b.c if run_low is None else min(run_low, b.c)
+        prev_close = b.c
+
+    # 안전장치: 데이터가 15:15 전에 끝나 강제청산이 안 걸린 경우 마지막 봉에서 청산
+    if pos is not None:
+        b = bars[-1]
+        frac = 1.0 - pos.exited
+        fav = pos.direction * (b.c - pos.entry_price)
+        label = "T" if fav > EPS else "S"
+        events.append(_exit(pos, b, len(bars) - 1, frac, label, 3, f"데이터 종료 강제청산 → {label}"))
+        total_cost += pos.cost; buy_notional += pos.buy_notional
+        sell_notional += pos.sell_notional
+        total_resets += pos.resets
+        cash = pos.cash_after
+        pos = None
+
+    weekly_return = (cash - capital) / capital
+    ctx = dict(base=base, case=case, F0=F0, longL=longL, shortL=shortL,
+               first_bar=bars[0], final_cash=cash, capital=capital,
+               weekly_return=weekly_return, liquidate_hm=liquidate_hm,
+               flips_used=flips_used, tp_resets=total_resets,
+               L_line=L_line, S_line=S_line, flip_mode=flip_mode,
+               cost=total_cost, buy_notional=buy_notional, sell_notional=sell_notional)
+    return events, ctx
+
+
+# ── CSV 로더 ─────────────────────────────────────────────────────
+def load_bars(path) -> list[Bar]:
+    bars = []
+    with open(path, encoding="utf-8-sig") as f:
+        for r in csv.DictReader(f):
+            bars.append(Bar(r["datetime"], float(r["open"]), float(r["high"]),
+                            float(r["low"]), float(r["close"]), float(r.get("volume", 0))))
+    return bars

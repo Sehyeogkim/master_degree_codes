@@ -1,0 +1,36 @@
+#!/bin/bash
+# Retry the TIMEOUT_OTHER cases with HXT (original algo) + a generous timeout.
+# These were succeeding under HXT and only got cut off during Netgen-optimize / setOrder(2).
+set -u
+cd /home/jeff/project/65_final_0723
+export PATH=/home/jeff/miniconda3/envs/ansys_new/bin:$PATH
+export PY=/home/jeff/miniconda3/envs/ansys_new/bin/python
+export TMO=${TMO:-1500}
+export PROG=/home/jeff/project/65_final_0723/retry_hxt_progress.log
+mkdir -p mesh_logs_hxt
+: > "$PROG"
+
+run_one() {
+  local c=$1
+  local t0=$SECONDS
+  timeout -k 20 "$TMO" "$PY" -u run_type2_0723.py "$c" 20 1 0 0.06 hxt \
+      > "mesh_logs_hxt/case_${c}.log" 2>&1
+  local rc=$?
+  local el=$(( SECONDS - t0 ))
+  local st
+  if [ $rc -eq 0 ]; then
+    if grep -q "\[skip\]" "mesh_logs_hxt/case_${c}.log"; then st=SKIP; else st=OK; fi
+  elif [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
+    if [ $el -ge $(( TMO - 30 )) ]; then st=TIMEOUT; else st=KILLED; fi
+    echo "[timeout] killed after ${el}s" >> "mesh_logs_hxt/case_${c}.log"
+  else st=FAIL; fi
+  if [ "$st" != OK ] && [ "$st" != SKIP ]; then
+    rm -f "solid_0723/case_${c}/type2_mesh/cal_subdomain.msh" \
+          "solid_0723/case_${c}/type2_mesh/"*.stl 2>/dev/null
+  fi
+  echo "$(date +%m-%d\ %H:%M:%S) case ${c} rc=${rc} ${el}s ${st}" >> "$PROG"
+}
+export -f run_one
+
+xargs -a retry_hxt_cases.txt -P 8 -I{} bash -c 'run_one {}'
+echo "$(date +%m-%d\ %H:%M:%S) HXT-RETRY COMPLETE" >> "$PROG"

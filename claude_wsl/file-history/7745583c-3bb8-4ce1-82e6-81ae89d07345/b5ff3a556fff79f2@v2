@@ -1,0 +1,196 @@
+# 54_analysis — project notes
+
+1000-case Sobol DOE. CAD → lumen fluid mesh → 1D/3D hemodynamics → wall traction CSV →
+LAP/CP solid FEA (pymapdl) → FC vtu/vtk → PSS / ΔPSS.
+
+Hosts: `ws1` (cvbml01), `ws2` (cvbml02), `harvey` (SLURM), local WSL.
+**ws1 has no route to harvey — every transfer relays through local WSL.**
+
+---
+
+## ⚠️ TRAP #1: `utils_bc.Apply_Traction` differs between ws1 and ws2
+
+`~/repo/master_python/src/utils/utils_ansys/utils_bc.py` is **not the same file on the two
+workstations**, and the difference silently inflates fibrous-cap stress by ~100×.
+
+| host | what `Apply_Traction` writes | status |
+|---|---|---|
+| **ws2** | `sfe,e,1,PRES,0,Tx` + `sfe,e,2,…,Ty` + `sfe,e,3,…,Tz` (traction **vector**) | **CORRECT** |
+| **ws1** | `sfe,e,1,PRES,0,‖T‖` (magnitude on face 1 only) | **STALE / WRONG** |
+
+`pymapdl_simulation_ver2.py` sets `keyopt(7,2,1)`, so SURF154 faces 1/2/3 map to element
+**local x/y/z**. ws1's version therefore dumps the entire traction magnitude into the
+in-plane direction instead of resolving it into a normal + shear vector. Loading a thin,
+stiff cap in-plane rather than normally inflates cap stress enormously.
+
+Measured on case 0, same mesh, same wall CSV:
+
+| | cap max principal |
+|---|---|
+| ws2 / correct vector form | 1.1541e6 dyne/cm² = **115.4 kPa** ✅ |
+| ws1 / stale magnitude form | 1.2532e8 dyne/cm² = **12,532 kPa** ❌ (108×) |
+
+ws1's file still carries the vector form **commented out** below the magnitude form —
+easy to misread as "the vector form was rejected". It was not; ws1 is just behind.
+
+**Before any ver1/ver2 (SFE) run on ws1**, either sync the file from ws2 or override
+`utils_bc.Apply_Traction` in the driver script. `mesh_independent_test_solid/scripts/solve_one.py`
+does the latter (self-contained, no side effects on other jobs sharing the host).
+
+Verify with `md5sum ~/repo/master_python/src/utils/utils_ansys/utils_bc.py` on both hosts.
+
+### Which scripts are affected
+
+| BC path | scripts | affected by the trap? |
+|---|---|---|
+| `utils_bc.Apply_Traction` (SFE vector) | `pymapdl_simulation_ver1.py`, **`ver2.py`** | **YES** |
+| `/MAP` → `WRITEMAP` → `INPUT(mapped.sfe)` | `pymapdl_sim_LAP_0728.py`, `pymapdl_sim_CP_0728.py`, `pymapdl_simulation_ver5_fibrous*.py` | no |
+
+Production LAP **peak** = ver2 (SFE) and ran on **ws2** → correct.
+Production LAP **low** = ver4 `/MAP` on ws1 → does not touch `Apply_Traction` → correct.
+So the production dataset is clean; only ad-hoc ver2 runs launched on ws1 are at risk.
+
+### Sanity check for any cap-stress result
+
+Fibrous-cap principal stress lives at **1e2 – 1e3 kPa** (≈1e6 – 1e7 dyne/cm²).
+Applied wall traction is ~2.1e5 dyne/cm² (≈21 kPa ≈ 157 mmHg), so the stress
+concentration factor should be single digits. Anything in the MPa range is a bug.
+Output arrays are in **CGS: dyne/cm². Multiply by 0.1 for Pa.**
+
+---
+
+## ⚠️ TRAP #2: gmsh 2D Algorithm 5 fails at specific mesh sizes
+
+`HXT_meshing_I*.py` hardcodes `Mesh.Algorithm = 5` (2D Delaunay). On some
+size/geometry combinations it emits
+
+```
+Warning : N elements remain invalid in surface <k>
+```
+
+and then over-refines the surface trying to recover, so **a COARSER nominal size can
+produce far MORE elements**. Case 0, box recipe:
+
+| nominal size | algo2d=5 | algo2d=6 |
+|---|---|---|
+| 0.04 | 5,242,035 nodes | 4,567,767 |
+| **0.05** | **9,263,701** ← blow-up, min quality 0.096 | **2,560,116**, min quality 0.284 |
+| 0.055 | 2,293,357 | — |
+| 0.0625 | 1,674,647 | 1,461,883 |
+
+Reproducible across runs; it is not HXT's fault — switching 3D to Delaunay (`Algorithm3D=1`)
+does **not** help, because the damaged surface mesh is inherited from 2D. **`Algorithm = 6`
+(Frontal-Delaunay) fixes it**: recovery facets 1951 → 90, and monotonicity is restored.
+
+Same failure mode as the earlier solid-meshing sweep where the 5→6 ladder took the success
+rate from 84% → 95.8%.
+
+**Never treat nominal `mesh_size` as a proxy for resolution — always read back the actual
+node/element count.**
+
+---
+
+## Mesh recipes
+
+| script | size field | notes |
+|---|---|---|
+| `HXT_meshing_I.py` | **Box** — lipid-centred, `VIn=mesh_size`, `VOut=0.2`, `Thickness=3.0` mm | box spans ±10 mm in x,y and ±lesion_length/2·10 mm in z |
+| `HXT_meshing_I_dist.py` | **distance from fc** → threshold, `SizeMin=mesh_size` | takes `algo2d`/`algo3d` args |
+| `lap_0729/HXT_meshing_I_box.py` | Box, same as above **+ `optimize('HighOrder')` + `quality.json`** | preferred box variant |
+
+`mesh_size` is in **mm**; the msh is scaled `×0.1` → cm at `msh_to_cdb`.
+
+### Production LAP_mesh provenance
+
+| cohort | n | recipe | size |
+|---|---|---|---|
+| 2026-03 | ~845 | **Box, algo2d=5, size 0.055** | median 3.30M nodes |
+| 2026-07 | ~194 | dist | 0.05 / 0.055, median 1.74M nodes |
+
+The 0.055 figure was confirmed by re-meshing case 0: 2,293,357 nodes vs the stored
+`LAP_mesh/solid_LAP_0.msh` 2,291,813 — 0.067% apart (the residual is the added HighOrder
+pass). It also matches the hardcoded `mesh_size = 0.055  # 50million` in
+`HXT_meshing_I.py.__main__`.
+
+---
+
+## PSS / ΔPSS definition
+
+Authoritative implementation: **`65_final_0723/post_processing_0727.py`**
+(inside `ws1:~/project/65_final_0723.tar.gz`; extract with
+`tar -xzvf … --wildcards '*.py'` — gzip is one stream so the read is ~50 GB even though
+only a few MB are written).
+
+```
+sigma_n     max principal stress at a cap-surface node
+N_r(n)      cap-surface nodes within distance r of n
+sigmabar_n  NaN-aware MEAN of sigma over N_r(n)
+
+PSS     = max_n sigmabar_n   on sigma(peak)
+del_PSS = max_n sigmabar_n   on sigma(peak) - sigma(low)     <- FULL range, no /2
+```
+
+- **No top-5% pre-filter**, and the reported value *is* the maximised statistic
+  (an earlier version filtered to the top 5% and reported the sphere's Q95 — that is
+  `superseded_Q95def/`, do not reuse it).
+- Cap mask: `WALL_IN_FC` on the ver5 `.vtk` output, or `Group == 5` on the ver2 `.vtu`
+  output — the same node set.
+- Axial trim `Z_EPSILON = 0.02` off both ends of the cap patch.
+- Production radius **r = 0.01 cm**.
+- Mid-side nodes carry NaN and are excluded.
+
+Consumers: `66_post_processing_journal/LAP_data/{radius_sensitivity_analysis,lap_surrogate_convergence}.py`.
+
+---
+
+## Data locations
+
+| what | where |
+|---|---|
+| DOE inputs (1000 rows, authoritative) | `pre_data/parameter_0728.csv` (**not** `Sobol_sampling/parameter.csv`, only 384 rows) |
+| peak wall traction (hyperemia) | `post_data/wall_expB_new/peak/wall_peak_case_<i>.csv` — `x,y,z,Tx,Ty,Tz` |
+| low wall traction (resting) | `post_data/wall_no_hyperemia/low/wall_low_case_<i>.csv` — `x,y,z,Tx,Ty,Tz,Pressure` |
+| LAP solid meshes | `LAP_mesh/solid_LAP_<i>.msh` |
+| production peak FC | `solid_data/case_<i>/ansys_results_type1_expB_new/FC_case_<i>_peak.vtu` |
+| production low FC | `ansys_LAP_0728/case_<i>/FC_case_<i>_low.vtk` |
+
+Note the production pairing is **peak = ver2 SFE traction** but **low = ver4 `/MAP` scalar
+pressure**. They are not the same BC application path; keep that in mind before comparing
+peak and low absolute values.
+
+---
+
+## Mesh independence study (solid)
+
+`ws1:/mnt/hdd/jeff/mesh_indep_solid` (symlinked as `54_analysis/mesh_independent_test_solid`).
+It lives on `/mnt/hdd` because ws1's `/` is at 93% (263 GB free) while `/mnt/hdd/jeff` has ~11 TB.
+
+Ladder: case 0, box recipe, **algo2d=6**, sizes 0.032 / 0.04 / 0.05 / 0.0625, so that h is
+the only variable. Realized refinement ratio r ≈ 1.22 (near-geometric).
+
+Findings so far (before the Trap #1 fix, so values are being regenerated):
+
+- Raw nodal max principal stress varied **1.08%** over a 3.3× element-count range;
+  p99 and p99.9 varied **0.3%** — the FE solution itself is grid-converged.
+- `PSS` at r = 0.01 varied **9.3%** over the same range, and *non-monotonically*
+  (|mid−fine| = 7.3% > |coarse−mid| = 1.8%, observed order p = −6.6 → not asymptotic).
+  The `n_sphere` column explains it: the neighbourhood held 25 / 35 / 53 nodes across the
+  three meshes. `PSS` is an **unweighted nodal mean over a fixed physical radius**, so its
+  sample size — and hence its value — tracks mesh density. Area-weighting would fix this
+  but would change the published definition.
+- Critical-node **location** behaves the opposite way: PSS's argmax is stable
+  (0.024 mm between the two finer meshes) while the raw-max argmax scatters ~0.29 mm.
+  Value stability and location stability trade off against each other.
+
+---
+
+## Operational gotchas
+
+- **`pkill -f <pattern>` matches its own ssh command line** and kills the session
+  (exit 255). Use a bracket: `pkill -f 'solve_[o]ne.py'`.
+- `echo "$(date) exit=$?"` reports **date's** exit code — the command substitution runs
+  first. Capture `rc=$?` on its own line.
+- Scripts kept outside the project dir must `sys.path.insert(0, '/home/jeff/project/54_analysis')`;
+  cwd alone is not enough because `sys.path[0]` is the *script's* directory.
+- Python env for meshing + pymapdl on ws1: `~/miniconda3/envs/ansys_new/bin/python`.
+- harvey02 / harvey03 are released to other lab members — do not schedule on them.

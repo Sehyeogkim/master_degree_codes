@@ -1,0 +1,104 @@
+"""
+Fluid mesh-independence 분석 (case 0).
+
+입력: wall/{phase}/wall_{phase}_{grid}.csv   (columns: x,y,z,Tx,Ty,Tz,Pressure)
+성분 분해:  T = P*n + t_inplane,  t_inplane ⊥ n
+   -> |T|   = sqrt(Tx^2+Ty^2+Tz^2)     (solid 에 실제로 들어가는 하중)
+   -> |P|   = |Pressure|                (법선 성분, 압력 지배)
+   -> |WSS| = sqrt(|T|^2 - P^2)         (접선 성분, 메쉬에 가장 민감)
+
+비교: 기준 격자의 벽면 점들 위에서 다른 격자의 값을 IDW(k=4) 보간한 뒤
+      상대 L2 error  e(fine, coarse) = ||f_coarse - f_fine||_2 / ||f_fine||_2
+기준 격자는 --ref 로 지정(기본 최密 0.01). 역방향(--ref 0.02)도 같이 돌려서
+결론이 기준 선택에 흔들리지 않는지 확인할 것.
+
+Usage: analyze_mi.py [--ref 0.01] [--grids 0.01,0.015,0.02]
+"""
+import argparse
+import itertools
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+from scipy.spatial import cKDTree
+
+BASE = Path(__file__).resolve().parent
+WALL = BASE / "wall"
+PHASES = ["peak", "low"]
+
+
+def load(phase, grid):
+    f = WALL / phase / f"wall_{phase}_{grid}.csv"
+    if not f.exists():
+        return None
+    d = pd.read_csv(f)
+    xyz = d[["x", "y", "z"]].to_numpy()
+    T = d[["Tx", "Ty", "Tz"]].to_numpy()
+    P = d["Pressure"].to_numpy()
+    Tmag = np.linalg.norm(T, axis=1)
+    # 수치오차로 음수가 되는 경우 방지
+    wss = np.sqrt(np.clip(Tmag**2 - P**2, 0.0, None))
+    return {"xyz": xyz, "Tmag": Tmag, "P": np.abs(P), "WSS": wss, "n": len(d)}
+
+
+def interp(src, dst_xyz, key, k=4):
+    """src 의 값을 dst_xyz 위치로 역거리가중(IDW) 보간."""
+    tree = cKDTree(src["xyz"])
+    dist, idx = tree.query(dst_xyz, k=k)
+    if k == 1:
+        return src[key][idx]
+    w = 1.0 / np.maximum(dist, 1e-12)
+    w /= w.sum(axis=1, keepdims=True)
+    return (src[key][idx] * w).sum(axis=1)
+
+
+def rel_l2(a, b):
+    """||a - b|| / ||b||  (b 가 기준=더 조밀한 쪽)"""
+    return float(np.linalg.norm(a - b) / np.linalg.norm(b))
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--ref", default="0.01")
+    ap.add_argument("--grids", default="0.01,0.015,0.02")
+    args = ap.parse_args()
+    grids = args.grids.split(",")
+
+    for phase in PHASES:
+        data = {g: load(phase, g) for g in grids}
+        avail = [g for g in grids if data[g] is not None]
+        if len(avail) < 2:
+            print(f"\n### {phase}: csv 부족 (있는 것: {avail})")
+            continue
+
+        print(f"\n{'='*74}")
+        print(f"### {phase.upper()}   (기준 격자 = {args.ref})")
+        print(f"{'='*74}")
+        print(f"{'grid':>8s} {'wall pts':>10s} {'mean|T|':>12s} {'mean|P|':>12s} {'mean|WSS|':>11s} {'max|WSS|':>11s}")
+        for g in avail:
+            d = data[g]
+            print(f"{g:>8s} {d['n']:>10,} {d['Tmag'].mean():>12,.1f} {d['P'].mean():>12,.1f} "
+                  f"{d['WSS'].mean():>11,.2f} {d['WSS'].max():>11,.2f}")
+
+        ref = data[args.ref] if args.ref in data and data[args.ref] else data[avail[0]]
+        ref_xyz = ref["xyz"]
+        proj = {g: {k: interp(data[g], ref_xyz, k) for k in ("Tmag", "P", "WSS")} for g in avail}
+
+        print(f"\n  상대 L2 error  (조밀한 쪽을 기준으로 정규화)")
+        print(f"  {'pair':>16s} {'|T|':>12s} {'|P|':>12s} {'|WSS|':>12s}")
+        order = sorted(avail, key=float)          # 조밀 -> 성긴
+        for fine, coarse in zip(order[:-1], order[1:]):
+            row = [rel_l2(proj[coarse][k], proj[fine][k]) for k in ("Tmag", "P", "WSS")]
+            lbl = f"e({fine},{coarse})"
+            print(f"  {lbl:>16s} " + " ".join(f"{v*100:>11.4f}%" for v in row))
+
+        if len(order) >= 3:
+            eF = rel_l2(proj[order[1]]["Tmag"], proj[order[0]]["Tmag"])
+            eC = rel_l2(proj[order[2]]["Tmag"], proj[order[1]]["Tmag"])
+            print(f"\n  |T| 기준:  e({order[0]},{order[1]}) = {eF*100:.4f}%  vs  "
+                  f"e({order[1]},{order[2]}) = {eC*100:.4f}%   -> 비율 {eC/eF if eF else float('nan'):.2f}x")
+            print(f"  판정: e(조밀쌍) << e(성긴쌍) 이면 {order[1]} 로 수렴한 것으로 볼 수 있음")
+
+
+if __name__ == "__main__":
+    main()

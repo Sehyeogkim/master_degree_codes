@@ -1,0 +1,118 @@
+"""momentum_v1 (screener) — 종목 고르기.
+
+target 매매시작 월요일을 받아, 그 직전 주(월~금)로:
+① 시총 ≥ cap_min  → ② 주간변동율(금종가−월시가)/월시가 상승 Top_change → ③ 그중 거래대금 Top_value.
+direction=up 상승 롱 / down 하락 숏. 데이터: tradingview-screener(시총·이름) + yfinance(직전주 일봉).
+F0 = 직전 금 종가(tvDatafeed 기준, yf fallback).
+※ yfinance는 '.KS' 접미사로 KOSPI/KOSDAQ 무관하게 6자리 코드를 해석하므로 전 종목 '.KS' 통일.
+
+이 파일은 screeners/ 레지스트리의 첫 스크리너다. 새 선정 로직은 이 폴더에 모듈을 추가하고
+config.yaml의 screener: 로 지목한다 (기존 스크리너 불변 — 엔진 plug-in과 대칭).
+"""
+import os, sys, json, warnings, logging, signal
+warnings.filterwarnings("ignore"); logging.disable(logging.CRITICAL)
+signal.signal(signal.SIGALRM, lambda s, f: (_ for _ in ()).throw(TimeoutError()))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # pipeline/ (weekcal, data_source)
+from tradingview_screener import Query, col
+import yfinance as yf
+import pandas as pd
+from weekcal import prior_week
+from data_source import f0_close
+
+
+def _prior_days(dd, code, pm, pf):
+    """직전주 월~금 일봉 [{d,o,h,l,c}] 추출 (dd=yfinance 멀티다운로드, pm/pf=ISO 날짜문자열).
+    선정보고서의 '직전주 미니 그래프'용."""
+    try:
+        d = dd[code + ".KS"].dropna()
+    except Exception:
+        return []
+    days = []
+    for idx, row in d.iterrows():
+        ds = idx.strftime("%Y-%m-%d") if hasattr(idx, "strftime") else str(idx)[:10]
+        if pm <= ds <= pf:
+            days.append(dict(d=ds, o=float(row["Open"]), h=float(row["High"]),
+                             l=float(row["Low"]), c=float(row["Close"])))
+    return days
+
+
+def resolve_names(codes):
+    """코드 리스트 → {code: 종목명} (screener description). 실패 시 코드 그대로."""
+    codes = list(codes)
+    signal.alarm(40)
+    try:
+        _, nm = (Query().set_markets("korea").select("name", "description")
+                 .where(col("name").isin(codes)).get_scanner_data())
+        signal.alarm(0)
+        d = dict(zip(nm["name"], nm["description"]))
+    except Exception:
+        signal.alarm(0)
+        d = {}
+    return {c: d.get(c, c) for c in codes}
+
+
+def select_stocks(target_monday, cap_min=500_000_000_000, top_change=20, top_value=5,
+                  with_names=False, out_path=None, direction="up"):
+    """target_monday 직전 주 기준 종목 선정. 반환 [{code, chg, val, fri_close(=F0), mon_open [, name]}].
+    direction="up"=주간변동율 상승 Top / "down"=하락 Top (숏 실험용). 이후 거래대금 Top으로 압축."""
+    prior_mon, prior_fri, dl_start, dl_end = prior_week(target_monday)
+
+    signal.alarm(60)
+    _, uni = (Query().set_markets("korea").select("name", "market_cap_basic")
+              .where(col("market_cap_basic") > cap_min)
+              .order_by("market_cap_basic", ascending=False).limit(1500).get_scanner_data())
+    signal.alarm(0)
+    codes = [n for n in uni["name"].tolist() if str(n).isdigit() and len(str(n)) == 6]
+    try:
+        caps = {str(k): float(v) for k, v in zip(uni["name"], uni["market_cap_basic"])}
+    except Exception:
+        caps = {}
+    print(f"시총 {cap_min/1e8:,.0f}억↑ 유니버스: {len(codes)}개 (직전주 {prior_mon}~{prior_fri})")
+
+    signal.alarm(300)
+    dd = yf.download([c + ".KS" for c in codes], start=dl_start, end=dl_end,
+                     interval="1d", progress=False, group_by="ticker", threads=True)
+    signal.alarm(0)
+    rows = []
+    for c in codes:
+        try:
+            d = dd[c + ".KS"].dropna()
+            if len(d) < 2:
+                continue
+            mo = float(d["Open"].iloc[0]); fc = float(d["Close"].iloc[-1])
+            rows.append(dict(code=c, mon_open=mo, fri_close=fc,
+                             chg=(fc / mo - 1) * 100, val=float((d["Close"] * d["Volume"]).sum())))
+        except Exception:
+            pass
+    df = pd.DataFrame(rows)
+    if direction == "down":
+        pick = df[df.chg < 0].sort_values("chg", ascending=True).head(top_change)
+    else:
+        pick = df[df.chg > 0].sort_values("chg", ascending=False).head(top_change)
+    top = pick.sort_values("val", ascending=False).head(top_value)
+    print(f"일봉 확보 {len(df)}개 → {'하락' if direction=='down' else '상승'} Top{top_change} → 거래대금 Top{top_value}")
+
+    names = resolve_names([r.code for _, r in top.iterrows()]) if with_names else {}
+
+    # F0는 5분봉과 동일한 tvDatafeed 기준으로 재설정(가격 불일치 방지). 실패 시 yfinance 금종가 유지.
+    out = []
+    for _, r in top.iterrows():
+        f0, src = f0_close(r.code, prior_fri, fallback=r.fri_close)
+        f0 = f0 if f0 else r.fri_close
+        rec = dict(code=r.code, chg=r.chg, val=r.val, fri_close=f0, mon_open=r.mon_open,
+                   mktcap=caps.get(r.code, 0.0),
+                   days=_prior_days(dd, r.code, str(prior_mon)[:10], str(prior_fri)[:10]))
+        if with_names:
+            rec["name"] = names.get(r.code, r.code)
+        out.append(rec)
+        print(f"  {r.code} 변동율 {r.chg:+.1f}% 거래대금 {r.val/1e8:,.0f}억 F0(금종가) {f0:,.0f} [{src}]")
+    if out_path:
+        json.dump(out, open(out_path, "w"))
+        print("saved", out_path)
+    return out
+
+
+if __name__ == "__main__":
+    import sys as _s
+    mon = _s.argv[1] if len(_s.argv) > 1 else "2026-07-06"
+    select_stocks(mon, with_names=True, out_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), "_top5.json"))

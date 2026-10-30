@@ -1,0 +1,25 @@
+"""fable3 정식 전략 정의 — fable2와 동일하되 리버설 플립 창을 10:00까지 확장.
+
+fable3 = 281 규칙
+  + 리버설 플립: 월요일 10:00까지 · 최대 1회 (fable2의 09:30 → 10:00 연장)
+  + 익절 게이트 10%
+  익절 사다리 리셋은 미적용.
+
+flip_cutoff_hm 만 fable2("09:30")와 다르다.
+"""
+from engine_fable3 import run
+
+_COMMON = dict(
+    tp_gate=0.10,               # 익절 게이트 10%
+    entries=("trail",),
+    stop_mode="none",
+    fee=0.00015, slip=0.0005, tax=0.0015,
+    round_shares=True,
+    flip_monday=True, flip_days=1, flip_cutoff_hm="10:00", flip_max=1,  # ★ 10:00 확장
+)
+
+STRAT_FABLE3 = dict(_COMMON)
+
+
+def run_fable3(bars, F0, capital=10_000_000.0):
+    return run(bars, F0, capital=capital, **STRAT_FABLE3)

@@ -1,0 +1,19 @@
+---
+name: mesh-timeout-2d-meshadapt
+description: "Solid-mesh batch timeouts were caused by 2D MeshAdapt fallback, not 3D HXT — fix is Mesh.Algorithm=5 (2D Delaunay)"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: 9f7a5359-4da2-4098-a81a-7674efa09d6e
+  modified: 2026-07-24T01:03:49.726Z
+---
+
+In the 65_final_0723 Type-1 dist batch, the 35 cases that hit the 40-min cap were **stuck in 2D surface meshing, never reaching 3D**. Logs end with `Meshing surface N (BSpline surface, MeshAdapt)` + `elements remain invalid in surface 9` + `8-| Splitting those edges and trying again` — `Mesh.Algorithm=2` (Automatic) falls back to **MeshAdapt** on the BSpline faces and thrashes in edge recovery.
+
+**Fix: `Mesh.Algorithm = 5` (2D Delaunay).** Retried case 9: 40-min timeout → **63.8 s**; case 18 → 96.6 s; case 31 → 232.8 s, all neg-jacobian 0. Changing `Algorithm3D` (HXT 10 → Delaunay 1) does **nothing** for these — 3D was never reached.
+
+Use 3D Delaunay (`Algorithm3D=1`) only for the separate "HXT 3D mesh failed" bucket (9 cases). Boolean/OCC failures (STEP4, "Unknown OpenCASCADE entity", BOPAlgo fragments) are a geometry problem — no algorithm change helps.
+
+`gmshing_solid` in `HXT_meshing_I_dist.py` now takes `algo2d=2, algo3d=10` kwargs; `mesh_one_dist.py <case> <nproc> <size> [algo2d] [algo3d]`; retry driver `batch_retry_0723.py` (per-group algo plan, 3-h cap, → `retry_progress.jsonl`). Backups: `*.py.bak`.
+
+Batch context in [[batch-dist-meshing-0723]]; quality recipe in [[solid-mesh-negjacobian-fix]].

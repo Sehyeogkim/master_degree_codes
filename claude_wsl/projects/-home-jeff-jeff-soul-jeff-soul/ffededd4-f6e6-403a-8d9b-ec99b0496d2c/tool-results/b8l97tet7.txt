@@ -1,0 +1,223 @@
+42crunch-api-security-testing | 1.6.3 | Automate API security directly in Claude Code with 42Crunch - automatically audit OpenAPI specs, detect vulnerabilities aligned with OWASP API Securit
+adobe-for-creativity | 1.1.0 | Harness Adobe's creative AI-powered tools to edit images, automate design workflows, and bring creative visions to life — from background removal to v
+agent-sdk-dev | unknown | Development kit for working with the Claude Agent SDK
+agentforce-adlc | 0.7.0 | Agentforce Agent Development Life Cycle — author, discover, scaffold, deploy, test, and optimize .agent files
+ai-plugins | 1.1.0 | Set up endorctl and use Endor Labs to scan, prioritize, and fix security risks across your software supply chain
+aikido | 1.2.0 | Aikido Security scanning for Claude Code — SAST, secrets, and IaC vulnerability detection powered by the Aikido MCP server.
+airtable | 0.1.0 | Airtable is the database and operations layer for your agents — whether running product, marketing, sales, ops, HR, or a custom business app. It combi
+airwallex-agentos | 0.2.2 | Bring Airwallex's global financial infrastructure to Claude. Orchestrate actions across your account in plain language, e.g., set up invoices from a P
+alloydb | 0.2.0 | Create, connect, and interact with an AlloyDB for PostgreSQL database and data.
+alloydb-omni | 0.2.1 | Create, connect, and interact with an AlloyDB Omni database and data.
+amazon-location-service | 1.0.0 | Guide developers through adding maps, places search, geocoding, routing, and other geospatial features with Amazon Location Service, including authent
+amplitude | unknown | Use Amplitude as an expert analyst — instrument Amplitude, discover product opportunities, analyze charts, create dashboards, manage experiments, and 
+apollo | 0.1.1 | Prospect, enrich leads, load outreach sequences, and query sales analytics with Apollo.io — one-click MCP server integration for Claude Code and Cowor
+apollo-skills | 1.2.5 | Apollo GraphQL agent skills for Claude Code — Apollo Client, Server, Federation, Connectors, Router, Rover CLI, iOS, Kotlin, and the Apollo MCP server
+appwrite | 0.1.0 | Appwrite tools for Claude Code, including SDK skills, Appwrite MCP servers, and deployment commands.
+asana | unknown | Asana project management integration. Create and manage tasks, search projects, update assignments, track progress, and integrate your development wor
+astronomer-data-agents | 0.1.0 | Data engineering for Apache Airflow and Astronomer. Author DAGs with best practices, debug pipeline failures, trace data lineage, profile tables, migr
+atlan | 1.0.0 | Atlan data catalog plugin for Claude Code. Search, explore, govern, and manage your data assets through natural language. Powered by the Atlan MCP ser
+atlassian | unknown | Connect to Atlassian products including Jira and Confluence. Search and create issues, access documentation, manage sprints, and integrate your develo
+atomic-agents | unknown | Comprehensive development workflow for building AI agents with the Atomic Agents framework. Includes specialized agents for schema design, architectur
+auth0 | 1.1.0 | Enterprise-grade auth, easy to implement. Add login, SSO, MFA, and access control to any app with framework-aware guidance.
+aws-agents | 1.0.0 | Build, deploy, and operate AI agents on AWS. Skills for scaffolding agents with Amazon Bedrock AgentCore, connecting tools, memory, policies, evaluati
+aws-agents-for-devsecops | 1.0.0 | Investigate incidents, review code and execute UAT for release readiness, scan code for vulnerabilities, and run penetration tests with AWS DevOps Age
+aws-amplify | 1.0.0 | Build full-stack apps with AWS Amplify Gen 2 using guided workflows for authentication, data models, storage, GraphQL APIs, and Lambda functions.
+aws-core | 1.1.0 | Build, deploy, and operate applications on AWS. Skills to author infrastructure-as-code, use core services, and complete common tasks.
+aws-data-analytics | 1.0.0 | Data lake, analytics, and ETL workflows with S3 Tables, AWS Glue, and Athena.
+aws-dev-toolkit | 0.3.0 | AWS development toolkit — 34 skills, 11 agents, and 3 MCP servers for building, migrating, and performing architecture reviews on AWS.
+aws-serverless | 1.1.1 | Design, build, deploy, test, and debug serverless applications with AWS Serverless services.
+aws-startup-advisor | 1.5.1 | Personalized architecture, cost, security, and migration guidance for startups. From day-one account setup and security baselines to production-ready 
+aws-transform | 1.1.2 | Migrate, modernize, and upgrade codebases to AWS. Transforms .NET Framework to .NET 8/10, mainframe COBOL to Java, VMware VMs to EC2, SQL Server to Au
+azure | 1.1.71 | Transform Claude into an Azure expert. This plugin integrates the Azure MCP server and specialized Azure skills to move beyond generic advice. It enab
+azure-cosmos-db-assistant | 1.0.0 | Expert assistant for Azure Cosmos DB — data modeling, query optimization, performance tuning, and best practices.
+base44 | 1.0.0-beta.1 | Build and deploy Base44 full-stack apps with CLI project management and JavaScript/TypeScript SDK development skills
+bigdata-com | 1.1.0 | Official Bigdata.com plugin providing financial research, analytics, and intelligence tools powered by Bigdata MCP.
+bigquery-data-analytics | 0.2.1 | Connect, query, and generate data insights for BigQuery datasets and data.
+boltz | 0.1.0 | Predict structures, screen molecules and proteins, and design binders with Boltz from Claude Code.
+box | 1.0.0 | Work with your Box content directly from Claude Code — search files, organize folders, collaborate with your team, and use Box AI to answer questions,
+brightdata-plugin | 1.8.0 | Web scraping, Google search, structured data extraction, and MCP server integration powered by Bright Data. Includes 7 skills: scrape any webpage as m
+buildkite | 1.0.0 | Official Buildkite skills for Claude Code, Cursor, and other AI coding agents — pipelines, migration, preflight, agent runtime, CLI, and API
+carta-cap-table | 6.21.5 | Carta Cap Table plugin — skills and hooks for querying cap tables, grants, SAFEs, 409A valuations, waterfall scenarios, and more
+carta-crm | 0.8.1 | Manage the Carta CRM conversationally — search, add, update, and enrich investors, companies, contacts, deals, notes, and fundraisings via the Carta C
+carta-investors | 0.107.1 | Carta Investors plugin — skills for querying investor data, performance benchmarks, regulatory reporting, AGM deck generation, brand extraction, and m
+cds-mcp | 0.0.5 | AI-assisted development of SAP Cloud Application Programming Model (CAP) projects. Search CDS models and CAP documentation.
+chrome-devtools-mcp | 1.3.0 | Control and inspect a live Chrome browser from your coding agent. Record performance traces, analyze network requests, check console messages with sou
+circle-skills | 1.0.0 | Ship stablecoin apps faster. Best-practice skills for USDC payments, cross-chain transfers, wallets, and smart contracts — plus Circle's MCP server fo
+circleback | 1.0.0 | Circleback conversational context integration. Search and access meetings, emails, calendar events, and more.
+clangd-lsp | 1.0.0 | C/C++ language server (clangd) for code intelligence
+claude-code-setup | 1.0.0 | Analyze codebases and recommend tailored Claude Code automations such as hooks, skills, MCP servers, and subagents.
+clickhouse | 1.0.0 | Connect Claude to your ClickHouse Cloud databases. Browse organizations, services, databases, and table schemas. Run read-only SQL queries against you
+clickhouse-best-practices | 0.3.0 | 28 best practice rules for ClickHouse schema design, query optimization, and data ingestion — prioritized by impact
+cloud-sql-mysql | 0.2.0 | Connect and interact with a Cloud SQL for MySQL database and data.
+cloud-sql-postgresql | 0.4.0 | Create, connect, and interact with a Cloud SQL for PostgreSQL database and data.
+cloud-sql-sqlserver | 0.2.0 | Connect to Cloud SQL for SQL Server
+cloudflare | 1.0.0 | Skills for the Cloudflare developer platform: Workers, Durable Objects, Agents SDK, MCP servers, Wrangler CLI, and web performance.
+cloudinary | 1.1.1 | Use Cloudinary directly in Claude. Manage assets, apply transformations, optimize media, and more through natural conversation.
+cockroachdb | 0.1.9 | Connect Claude Code directly to your CockroachDB clusters for hands-on database work — explore schemas, write optimized SQL, debug queries, and manage
+code-modernization | unknown | Modernize legacy codebases (COBOL, legacy Java/C++, monolith web apps) with a structured preflight / assess / map / extract-rules / brief / reimagine 
+code-simplifier | 1.0.0 | Agent that simplifies and refines code for clarity, consistency, and maintainability while preserving functionality. Focuses on recently modified code
+coderabbit | 1.1.1 | Your code review partner. CodeRabbit provides external validation using a specialized AI architecture and 40+ integrated static analyzers—offering a d
+codspeed | 1.0.0 | CodSpeed is the all-in-one performance testing toolkit. Dive into benchmarking results, flamegraphs, and performance comparisons — give Claude granula
+commit-commands | unknown | Commands for git commit workflows including commit, push, and PR creation
+confidence | 0.4.1 | Access Confidence feature flags, experiments, and migration tools directly from Claude Code.
+context7 | unknown | Upstash Context7 MCP server for up-to-date documentation lookup. Pull version-specific documentation and code examples directly from source repositori
+convex | 1.3.0 | Official Convex plugin for Claude Code with bundled Convex skills, the convex-expert subagent for code-writing, a runtime-error monitor, and MCP acces
+crowdstrike-falcon-foundry | 1.3.0 | CrowdStrike Falcon Foundry development skills for building cybersecurity applications on the Falcon platform. Includes UI development, collections, fu
+csharp-lsp | 1.0.0 | C# language server for code intelligence
+cwc-makers | 1.0.0 | Onboard a Code-with-Claude Makers Cardputer with one /maker-setup command — clones the build-with-claude repo, flashes UIFlow firmware, and installs t
+dash0 | 0.1.10 | OpenTelemetry observability for Claude Code sessions. Captures tool calls, LLM invocations, token usage, and errors as OTel traces. Send telemetry to 
+data | 0.1.0 | Data engineering for Apache Airflow and Astronomer. Author DAGs with best practices, debug pipeline failures, trace data lineage, profile tables, migr
+data-agent-kit-starter-pack | 0.4.0 | This plugin provides a specialized suite of skills for data engineers and database practitioners working on Google Cloud. It acts as an expert assista
+data-engineering | 0.1.0 | Data engineering plugin - warehouse exploration, pipeline authoring, Airflow integration
+databases-on-aws | 1.3.2 | Expert database guidance for the AWS database portfolio. Design schemas, execute queries, handle migrations, and choose the right database for your wo
+datadog | 0.7.14 | Use Datadog directly in Claude Code through a preconfigured Datadog MCP server. Query logs, metrics, traces, dashboards, and more through natural conv
+datahub-skills | 1.4.1 | DataHub development and interaction toolkit with connector planning, PR review, catalog search, metadata enrichment, lineage tracing, data quality man
+dataproc | 0.1.0 | Manage Dataproc clusters and jobs.
+datarobot-agent-skills | 1.3.2 | DataRobot skills for AI/ML workflows — model training, deployment, predictions, feature engineering, monitoring, explainability, data preparation, App
+dataverse | 1.6.0 | Agent skills for building on, analyzing, and managing Microsoft Dataverse — with Dataverse MCP, PAC CLI, and Python SDK.
+deploy-on-aws | 1.3.0 | Deploy applications to AWS with architecture recommendations, cost estimates, and IaC deployment.
+desktop-commander | unknown | MCP server for terminal commands, process management, and file operations across text, code, PDF, DOCX, Excel, images, and structured data.
+dominodatalab | 1.0.0 | Full Domino Data Lab platform support — workspaces, jobs, model deployment, experiment tracking, GenAI tracing, Spark/Ray/Dask, and app deployment for
+duckdb-skills | 0.2.4 | DuckDB-powered skills for Claude Code: read any data file, attach and query DuckDB databases, search DuckDB/DuckLake docs, search past session logs, a
+duende-skills | 0.1.0 | Duende development skills and agents for Claude Code — covering OAuth/OIDC protocols, IdentityServer, token management, ASP.NET Core authentication/au
+exa | 3.3.9 | Exa AI web search, deep research, and content extraction. Provides MCP tools and research skills for comprehensive web search, people discovery, compa
+explanatory-output-style | 1.0.0 | Adds educational insights about implementation choices and codebase patterns (mimics the deprecated Explanatory output style)
+expo | 1.3.0 | Official Expo skills for building, deploying, upgrading, and debugging React Native apps with Expo. Covers UI development with Expo Router, SwiftUI an
+fakechat | 0.0.1 | Localhost web chat for testing the channel notification flow. No tokens, no access control, no third-party service.
+fastly-agent-toolkit | 0.1.0 | Fastly development tools and platform skills
+feature-dev | unknown | Comprehensive feature development workflow with specialized agents for codebase exploration, architecture design, and quality review
+fiftyone | 1.0.3 | Build high-quality datasets and computer vision models. Visualize datasets, analyze models, find duplicates, run inference, evaluate predictions, and 
+firebase | unknown | Google Firebase MCP integration. Manage Firestore databases, authentication, cloud functions, hosting, and storage. Build and manage your Firebase bac
+firecrawl | 1.0.9 | Web scraping and crawling powered by Firecrawl. Turn any website into clean, LLM-ready markdown or structured data. Scrape single pages, crawl entire 
+firestore-native | 0.3.1 | Connect and interact with Firestore databases, collections, and documents.
+forge-skills | 0.1.0 | Forge-focused skills and MCP configuration for Atlassian Forge: scaffold and deploy apps (forge create, templates, dev spaces), build Teamwork Graph c
+fullstory | 0.1.0 | Connect Claude to Fullstory to query behavioral analytics, session replays, and customer experience insights.
+gitlab | unknown | GitLab DevOps platform integration. Manage repositories, merge requests, CI/CD pipelines, issues, and wikis. Full access to GitLab's comprehensive Dev
+gopls-lsp | 1.0.0 | Go language server for code intelligence and refactoring
+greptile | unknown | AI-powered codebase search and understanding. Query your repositories using natural language to find relevant code, understand dependencies, and get c
+hookify | unknown | Easily create custom hooks to prevent unwanted behaviors by analyzing conversation patterns or from explicit instructions. Define rules via simple mar
+huggingface-skills | 1.0.8 | Build, train, evaluate, and use open source AI models, datasets, and spaces.
+hunter | 0.1.0 | Find and verify professional email addresses, search contacts by domain, and enrich company data -- directly in Claude.
+hyperframes | 0.6.121 | HyperFrames by HeyGen. Write HTML, render video. Compositions, GSAP and runtime adapter animations, captions, voiceovers, audio-reactive visuals, and 
+imessage | 0.1.0 | iMessage messaging bridge with built-in access control. Reads chat.db directly, sends via AppleScript. Manage pairing, allowlists, and policy via /ime
+intercom | 0.1.0 | Intercom integration for Claude Code. Search conversations, analyze customer support patterns, look up contacts and companies, and install the Interco
+jdtls-lsp | 1.0.0 | Java language server (Eclipse JDT.LS) for code intelligence
+jfrog | 0.2.7 | Use the JFrog Platform from Claude Code: Artifactory repos and artifacts, security findings and exposures, Catalog package safety and downloads, workf
+knowledge-catalog | 0.5.2 | Connect to Knowledge Catalog to discover, manage, monitor, and govern data and AI artifacts across your data platform
+kotlin-lsp | 1.0.0 | Kotlin language server for code intelligence
+langfuse-observability | 1.0.0 | The Langfuse x Claude Code Observability Plugin
+laravel-boost | unknown | Laravel development toolkit MCP server. Provides intelligent assistance for Laravel applications including Artisan commands, Eloquent queries, routing
+learn-with-coursera | unknown | Turn any learning intent into a personalized Coursera experience. Asks three quick questions (topic, familiarity, preferred format), searches Coursera
+learning-output-style | 1.0.0 | Interactive learning mode that requests meaningful code contributions at decision points (mimics the unshipped Learning output style)
+legalzoom | 1.0.0 | Attorney guidance and legal tools for business and personal needs. AI-powered document review identifies critical risks and important clauses, advises
+linear | unknown | Linear issue tracking integration. Create issues, manage projects, update statuses, search across workspaces, and streamline your software development
+liquid-lsp | 1.0.0 | LSP integration for Shopify Liquid templates via the Shopify CLI theme language server.
+liquid-skills | 1.0.0 | Liquid language fundamentals, CSS/JS/HTML coding standards, and WCAG accessibility patterns for Shopify themes
+logfire | 0.1.3 | Add Logfire observability to Python applications with auto-instrumentation for FastAPI, httpx, asyncpg, SQLAlchemy, and more
+logrocket | 0.1.0 | Connect Claude Code to LogRocket to query session replays, metrics, issues, and user behavior using natural language.
+looker | 0.3.5 | Connect to Looker and interact with your data using LookML.
+lovable | 0.1.0 | Build, iterate on, deploy, and manage Lovable apps from Claude Code. Bundles the official Lovable MCP server (remote, OAuth 2.1) and adds focused comm
+lua-lsp | 1.0.0 | Lua language server for code intelligence
+lumen | 0.0.41 | Precise local semantic code search via MCP. Indexes your codebase with Go AST parsing, embeds with Ollama or LM Studio, and exposes vector search to C
+lusha | 0.1.1 | Prospect, enrich, and build call-ready lead lists using Lusha's B2B intelligence platform — verified phone numbers, company signals, and lookalike tar
+mapbox | 1.0.0 | Mapbox skills and MCP servers for building location-aware applications with AI. Includes geospatial tools, style management, and patterns for web, iOS
+math-olympiad | unknown | Solve competition math (IMO, Putnam, USAMO) with adversarial verification that catches what self-verification misses. Fresh-context verifiers attack p
+mcp-apps | 0.1.0 | Skills for creating MCP Apps with the MCP Apps SDK
+mcp-server-dev | unknown | Skills for designing and building MCP servers that work seamlessly with Claude. Guides you through deployment models (remote HTTP, MCPB, local), tool 
+mcp-tunnels | unknown | Connect Claude to a private MCP server through an Anthropic MCP tunnel. The /create-docker-mcp-tunnel command drives the Docker Compose quickstart end
+mercadopago | 4.1.0 | Mercado Pago full-product integration toolkit. One agent routes to four orchestration skills (mp-integrate wizard, mp-webhooks, mp-test-setup, mp-revi
+microsoft-docs | 0.3.1 | Access official Microsoft documentation, API references, and code samples for Azure, .NET, Windows, and more.
+migration-to-aws | 1.1.0 | Plan a migration from Google Cloud Platform (and OpenAI/Gemini AI workloads) to AWS. Analyzes your Infrastructure-as-Code files, app code, and GCP bil
+mintlify | unknown | Build beautiful documentation sites with Mintlify. Convert non-markdown files into properly formatted MDX pages, add and modify content with correct c
+miro | 1.3.0 | Secure access to Miro boards. Enables AI to read board context, create diagrams, and generate code with enterprise-grade security.
+monday-crm | 0.3.0 | Run your monday CRM in plain language. Build a pipeline from scratch, start the day with a ranked deal briefing, spin up a forecast dashboard, audit b
+mongodb | 1.1.0 | Official Claude plugin for MongoDB (MCP Server + Skills). Connect to databases, explore data, manage collections, optimize queries, generate reliable 
+neon | 1.0.0 | Manage your Neon projects and databases with the neon-postgres agent skill and the Neon MCP Server.
+netlify-skills | 1.1.0 | Netlify platform skills for Claude Code — functions, edge functions, blobs, database, image CDN, forms, config, CLI, frameworks, caching, AI gateway, 
+netsuite-suitecloud | unknown | NetSuite agent skills from Oracle — authoring guidance for SuiteCloud Development Framework (SDF) objects and UIF single-page-app components, plus run
+nightvision | 1.0.1 | Skills for working with NightVision, a DAST and API Discovery platform that finds exploitable vulnerabilities in web applications and REST APIs
+nimble | 0.23.0 | Nimble web data toolkit — search, extract, map, crawl the web and work with structured data agents
+nvidia-skills | 1.0.0 | NVIDIA agent skills for accelerated-computing workflows — starting with cuOpt vehicle-routing optimization (VRP, TSP, PDP) via the cuOpt Python API.
+oracle-ai-data-platform-workbench-engineer-agent | 0.5.0 | Oracle AI Data Platform (AIDP) Workbench engineer agent for Claude Code — a 37-skill agent that operates the full Spark/Delta lakehouse in natural lan
+oracle-ai-data-platform-workbench-spark-connectors | 0.5.0 | Oracle AI Data Platform Workbench Spark connectors for Claude Code. 18 connector skills covering every data source workbench customers commonly need: 
+oracledb | 0.2.3 | Connect, query, and interact with Oracle Databases and their data.
+outputai | 0.3.0 | Output.ai workflow development toolkit for Claude Code. Adds 5 specialist agents (planner, builder, debugger, prompt writer, quality reviewer), 40+ sl
+pagerduty | 1.1.0 | Enhance code quality and security through PagerDuty risk scoring and incident correlation. Score pre-commit diffs against historical incident data and
+php-lsp | 1.0.0 | PHP language server (Intelephense) for code intelligence
+pigment | 1.0.8 | Analyze business data and build custom Pigment models, metrics, and boards through natural language.
+pinecone | 1.4.1 | Pinecone vector database integration. Streamline your Pinecone development with powerful tools for managing vector indexes, querying data, and rapid p
+planetscale | 1.0.0 | An authenticated hosted MCP server that accesses your PlanetScale organizations, databases, branches, schema, and Insights data. Query against your da
+playground | unknown | Creates interactive HTML playgrounds — self-contained single-file explorers with visual controls, live preview, and prompt output with copy button. In
+plugin-dev | unknown | Comprehensive toolkit for developing Claude Code plugins. Includes 7 expert skills covering hooks, MCP integration, commands, agents, and best practic
+posthog | 1.1.39 | Access PostHog analytics, feature flags, experiments, error tracking, and insights directly from Claude Code.
+postiz | 2.0.12 | Social media automation CLI for scheduling posts, managing integrations, uploading media, and tracking analytics across 28+ platforms including X, Lin
+postman | 1.2.0 | Full API lifecycle management for Claude Code. Sync collections, generate client code, discover APIs, run tests, create mocks, publish docs, and audit
+pr-review-toolkit | unknown | Comprehensive PR review agents specializing in comments, tests, error handling, type design, code quality, and code simplification
+prisma | unknown | Prisma MCP integration for Postgres database management, schema migrations, SQL queries, and connection string management. Provision Prisma Postgres d
+project-artifact | unknown | Generate and publish a living project status page — overview & success criteria, the workstream sequence, and next steps — as a shareable claude.ai ar
+pydantic-ai | 0.1.0 | Write accurate Pydantic AI code from the start. Up-to-date patterns, decision trees, and common gotchas for agents, tools, structured output, streamin
+pyright-lsp | 1.0.0 | Python language server (Pyright) for type checking and code intelligence
+qdrant-skills | 1.0.0 | Agent skills for Qdrant vector search covering scaling, performance optimization, search quality, monitoring, deployment, model migration, version upg
+qodo-skills | 0.6.1 | Qodo Skills provides a curated library of reusable AI agent capabilities that extend Claude's functionality for software development workflows. Each s
+qt-development-skills | 1.5.0 | Agentic engineering skills for Qt software development — Qt C++/QML code review, QML coding, and Qt C++/QML code documentation.
+quarkus-agent | 1.1.4 | MCP server for AI coding agents to create, manage, and interact with Quarkus applications. Provides tools for project scaffolding, dev mode lifecycle,
+railway | 1.3.1 | Deploy and manage apps, databases, and infrastructure on Railway. Covers project setup, deploys, environment configuration, networking, troubleshootin
+ralph-loop | 1.0.0 | Interactive self-referential AI loops for iterative development, implementing the Ralph Wiggum technique. Claude works on the same task repeatedly, se
+rc | unknown | Configure RevenueCat projects, apps, products, entitlements, and offerings directly from Claude Code. Manage your in-app purchase backend without leav
+redis-development | unknown | Redis development best practices — data structures, query engine, vector search, caching, and performance optimization
+remember | 0.8.2 | Continuous memory for Claude Code. Extracts, summarizes, and compresses conversations into tiered daily logs. Claude remembers what you did yesterday.
+resend | 1.0.0 | Agent skills for working with Resend to send and receive emails — email API integration, agent inbox, CLI, React Email components, and deliverability 
+revenuecat | unknown | Configure RevenueCat projects, apps, products, entitlements, and offerings directly from Claude Code. Manage your in-app purchase backend without leav
+rill | 1.0.0 | Skills for developing and querying projects in the Rill business intelligence platform
+rootly | 2.2.0 | Full-lifecycle incident management: deploy safety, incident response, on-call management, and retrospectives.
+ruby-lsp | 1.0.0 | Ruby language server for code intelligence and analysis
+runway-api | 2.1.0 | Video generation at scale. Generate videos, images, and audio with Runway's API — batch ad campaigns, product videos, multishot stories, and creative 
+rust-analyzer-lsp | 1.0.0 | Rust language server for code intelligence and analysis
+sagemaker-ai | 1.2.1 | Build, train, and deploy AI models with deep AWS AI/ML expertise brought directly into your coding assistants, covering the surface area of Amazon Sag
+sanity | 1.0.0 | Sanity content platform integration with MCP server, agent skills, and slash commands. Query and author content, build and optimize GROQ queries, desi
+sap-cds-mcp | 0.0.5 | AI-assisted development of SAP Cloud Application Programming Model (CAP) projects. Search CDS models and CAP documentation.
+sap-fiori-mcp-server | 1.4.1 | MCP server for SAP Fiori development tools for Claude Code. Build and modify SAP Fiori applications with AI assistance.
+sap-mdk-server | 0.4.0 | MCP server for SAP Mobile Development Kit (MDK). Build and modify MDK applications with AI assistance — schema lookups, action validation, rule editin
+save-to-spotify | 0.1.1 | Create polished audio episodes with TTS narration, rich timelines, cover images, and save them to Spotify via the save-to-spotify CLI.
+security-guidance | 2.0.6 | Security review for Claude-generated code. Pattern-based warnings on edits, LLM-powered diff review on Stop, and an agentic commit reviewer that catch
+semgrep | 2.0.1 | Semgrep catches security vulnerabilities in real-time and guides Claude to write secure code from the start.
+sentry | 1.0.0 | Sentry error monitoring integration. Access error reports, analyze stack traces, search issues by fingerprint, and debug production errors directly fr
+sentry-cli | 0.38.0 | Skills for using the Sentry CLI to interact with Sentry from the command line
+serena | unknown | Semantic code analysis MCP server providing intelligent code understanding, refactoring suggestions, and codebase navigation through language server p
+servicenow-sdk | 1.0.2 | Create, edit, and deploy ServiceNow applications with the Fluent SDK effortlessly through Claude AI.
+session-report | unknown | Generate an explorable HTML report of Claude Code session usage — tokens, cache efficiency, subagents, skills, and the most expensive prompts — from l
+shopify | 1.0.0 | Shopify developer tools for Claude Code — search Shopify docs, generate and validate GraphQL, Liquid, and UI extension code
+shopify-ai-toolkit | 1.4.1 | Shopify's AI Toolkit provides 18 development skills for building on the Shopify platform, covering documentation search, API schema access, GraphQL an
+slack | 1.0.0 | Slack workspace integration. Search messages, access channels, read threads, and stay connected with your team's communications while coding. Find rel
+snowflake-cortex-code | 3.2.2 | Automatically route Snowflake prompts from Claude Code to Cortex Code for execution. Provides slash commands for code review and task delegation, plus
+sonarqube | 2.2.0 | Automatically enforce SonarQube code quality and security in the agent coding loop — 7,000+ rules, secrets scanning, agentic analysis, and quality gat
+sonatype-guide | 1.0.0 | Sonatype Guide MCP server for software supply chain intelligence and dependency security. Analyze dependencies for vulnerabilities, get secure version
+sourcegraph | 0.1.0 | Code search and understanding across codebases. Search, read, and trace references across repositories; analyze refactor impact; investigate incidents
+spanner | 0.3.1 | Connect and interact with Spanner data using natural language.
+spotify-ads-api | 1.4.0 | Manage Spotify ad campaigns with natural language. Create campaigns, ad sets, ads, pull reports, and handle OAuth — all through conversation.
+stripe | 0.2.0 | Stripe development plugin for Claude
+sumup | unknown | SumUp payment integrations across terminal and online checkout flows. Build Android and iOS POS apps with SumUp card readers, online checkout with ser
+supabase | 0.1.11 | Supabase MCP integration for database operations, authentication, storage, and real-time subscriptions. Manage your Supabase projects, run SQL queries
+swift-lsp | 1.0.0 | Swift language server (SourceKit-LSP) for code intelligence
+teamcity-cli | 1.2.0 | Agent skill for interacting with TeamCity CI/CD using the teamcity CLI. Enables Claude to explore builds, view logs, start jobs, manage queues, agents
+terraform | unknown | The Terraform MCP Server provides seamless integration with Terraform ecosystem, enabling advanced automation and interaction capabilities for Infrast
+togetherai-skills | 1.0.0 | Agent Skills for Together AI platform — inference, training, embeddings, audio, video, images, function calling, and infrastructure. Covers serverless
+twilio-developer-kit | 0.3.1 | Twilio Skills provide procedural knowledge for AI coding agents — which APIs to use, in what order, and what to avoid. Covers SMS, Voice, WhatsApp, Ve
+typescript-lsp | 1.0.0 | TypeScript/JavaScript language server for enhanced code intelligence
+ui5 | unknown | SAPUI5 / OpenUI5 plugin for coding agents. Create and validate UI5 projects, access API documentation, run UI5 linter, get development guidelines and 
+ui5-typescript-conversion | unknown | SAPUI5 / OpenUI5 plugin for coding agents. Convert JavaScript based UI5 projects to TypeScript.
+valtown | 0.2.1 | Build and deploy on Val Town. Bundles the Val Town MCP server and platform skills (HTTP vals, cron/intervals, SQLite, email, OAuth, React UI, third-pa
+vanta | 1.0.0 | The Vanta plugin connects Claude Code to Vanta's security and compliance platform through the Vanta MCP server. It combines Vanta's test-specific reme
+vanta-mcp-plugin | 1.0.0 | The Vanta plugin connects Claude Code to Vanta's security and compliance platform through the Vanta MCP server. It combines Vanta's test-specific reme
+vercel | 0.44.0 | Vercel deployment platform integration. Manage deployments, check build status, access logs, configure domains, and control your frontend infrastructu
+vibe-prospecting | 0.1.62 | Vibe Prospecting connects Claude to live B2B company and contact data so users can search, match, enrich, filter, and export prospects at scale. It tu
+windsor-ai | 1.0.0 | Connect Claude Code to 325+ business data sources via Windsor.ai. Query marketing, sales, CRM, ecommerce, finance, and analytics data from Google Ads,
+wix | 1.1.0 | Build, manage, and deploy Wix sites and apps. CLI development skills for dashboard extensions, backend APIs, site widgets, and service plugins with th
+wordpress.com | 0.0.2 | Uses Claude Code to create and edit WordPress sites with WordPress Studio before deploying changes to your WordPress.com site.
+workos | 0.6.1 | WorkOS integration skills for AuthKit, SSO, Directory Sync, RBAC, Vault, Audit Logs, migrations, and API references.
+youdotcom-agent-skills | 1.0.0 | You.com agent skills for web search, research with citations, and content extraction. Guided integrations for Vercel AI SDK, Claude Agent SDK, OpenAI 
+zapier | 1.0.0 | Connect 8,000+ apps to your AI workflow. Discover, enable, and execute Zapier actions directly from your client.
+zilliz | unknown | Zilliz Cloud management plugin with 14 skills covering cluster lifecycle, collection schema, vector search, index tuning, bulk import, RBAC, backups, 
+zoom-plugin | 1.1.3 | Claude plugin for planning, building, and debugging Zoom integrations across REST APIs, SDKs, webhooks, bots, and MCP workflows.
+zoominfo | 1.0.1 | Search companies and contacts, enrich leads, find lookalikes, and get AI-ranked contact recommendations. Pre-built skills chain multiple ZoomInfo tool
+zscaler | 0.12.7 | Manage Zscaler cloud security platform including ZPA (private access), ZIA (internet access), ZDX (digital experience), ZCC (client connector), EASM (

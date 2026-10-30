@@ -1,0 +1,21 @@
+"""Adapt __main__ paths in pymapdl_simulation_ver5_fibrous.py for 65_final_0723."""
+
+F = "/home/jeff/project/65_final_0723/pymapdl_simulation_ver5_fibrous.py"
+s = open(F).read()
+
+E = [
+    ('parameter_csv_path = pre_data_dir / "input_0605.csv"',
+     'parameter_csv_path = pre_data_dir / "parameter.csv"'),
+    ('solid_dir = working_dir / "solid_data_cal"',
+     'solid_dir = working_dir / "solid_0723"'),
+    ('ansys_dir = case_dir / "ansys_results_type2_CP_0618"',
+     'ansys_dir = case_dir / "ansys_results_0723"'),
+    ('msh_path = case_dir / "type2_mesh" /"solid_type_2_quad.msh"',
+     'msh_path = case_dir / "solid_type_1.msh"'),
+]
+for old, new in E:
+    assert s.count(old) == 1, (s.count(old), old[:50])
+    s = s.replace(old, new)
+
+open(F, "w").write(s)
+print("__main__ paths adapted: parameter.csv, solid_0723, ansys_results_0723, solid_type_1.msh")

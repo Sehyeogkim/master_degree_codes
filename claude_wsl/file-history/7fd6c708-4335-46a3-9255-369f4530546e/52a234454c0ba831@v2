@@ -1,0 +1,22 @@
+"""Apply wall_0723 CSV integration edits to pymapdl_simulation_ver5_fibrous.py."""
+
+F = "/home/jeff/project/65_final_0723/pymapdl_simulation_ver5_fibrous.py"
+s = open(F).read()
+
+E = [
+    # 1) /MAP read: pressure field col 4 -> col 7 (wall_0723 = x,y,z,Tx,Ty,Tz,Pressure)
+    ("1, 2, 3, 4)   # NSKIP=1, x=col1, y=2, z=3, p=4",
+     "1, 2, 3, 7)   # NSKIP=1, x=col1, y=2, z=3, p=col7 (Pressure in wall_0723 csv)"),
+    # 2) wall dir 0430 -> 0723
+    ('"post_data" / "wall_0430"',
+     '"post_data" / "wall_0723"'),
+    # 3) filename: drop the _pressure suffix (wall_0723 uses wall_{bc}_case_{i}.csv)
+    ('f"wall_{bc_type}_case_{case_index}_pressure.csv"',
+     'f"wall_{bc_type}_case_{case_index}.csv"'),
+]
+for old, new in E:
+    assert s.count(old) == 1, (s.count(old), old[:50])
+    s = s.replace(old, new)
+
+open(F, "w").write(s)
+print("pymapdl_simulation_ver5_fibrous.py: 3 wall-CSV edits applied")

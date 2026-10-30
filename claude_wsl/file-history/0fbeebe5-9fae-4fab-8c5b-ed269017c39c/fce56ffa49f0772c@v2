@@ -1,0 +1,59 @@
+# -*- coding: utf-8 -*-
+"""선정 깔때기 검증: 시총필터 → 주-주 변동율 Top20 → 거래대금 Top5. 전 과정 투명 출력."""
+import sys, warnings, logging
+warnings.filterwarnings("ignore"); logging.disable(logging.CRITICAL)
+sys.path.insert(0, "/home/jeff/bullet281/pipeline")
+sys.path.insert(0, "/home/jeff/bullet281/pipeline/screeners")
+from tradingview_screener import Query, col
+import yfinance as yf
+from weekcal import prior_week
+import momentum_v1 as M
+
+MON = "2026-07-20"; CAP, TOPCH, TOPV = 500_000_000_000, 20, 5
+prior_mon, prior_fri, dl_start, dl_end = prior_week(MON)
+prev_mon, prev_fri, prev_dl_start, _ = prior_week(prior_mon)
+pm, pf, xf = str(prior_mon)[:10], str(prior_fri)[:10], str(prev_fri)[:10]
+
+_, uni = (Query().set_markets("korea").select("name", "market_cap_basic")
+          .where(col("market_cap_basic") > CAP)
+          .order_by("market_cap_basic", ascending=False).limit(1500).get_scanner_data())
+codes = [n for n in uni["name"].tolist() if str(n).isdigit() and len(str(n)) == 6]
+caps = {str(k): float(v) for k, v in zip(uni["name"], uni["market_cap_basic"])}
+
+dd = yf.download([c + ".KS" for c in codes], start=prev_dl_start, end=dl_end,
+                 interval="1d", progress=False, group_by="ticker", threads=True)
+rows = []
+for c in codes:
+    try:
+        d = dd[c + ".KS"].dropna()
+        if len(d) < 2: continue
+        dts = [str(x)[:10] for x in d.index]
+        pw = [i for i, dt in enumerate(dts) if pm <= dt <= pf]
+        pv = [i for i, dt in enumerate(dts) if dt <= xf]
+        if not pw or not pv: continue
+        fc = float(d["Close"].iloc[pw[-1]]); prevfc = float(d["Close"].iloc[pv[-1]])
+        if prevfc <= 0: continue
+        val = float((d["Close"].iloc[pw] * d["Volume"].iloc[pw]).sum())
+        rows.append(dict(code=c, chg=(fc/prevfc-1)*100, val=val, cap=caps.get(c, 0)))
+    except Exception:
+        pass
+
+rows.sort(key=lambda r: -r["chg"])
+top20 = rows[:TOPCH]
+final5 = set(r["code"] for r in sorted(top20, key=lambda r: -r["val"])[:TOPV])
+names = M.resolve_names([r["code"] for r in top20])
+val_rank = {r["code"]: i+1 for i, r in enumerate(sorted(top20, key=lambda r: -r["val"]))}
+
+print(f"시총 {CAP/1e8:,.0f}억↑ 유니버스 {len(rows)}개 · 주-주 변동율 상위 20 (★=최종 선정 5)\n")
+print(f"{'변동율순위':>4} {'종목':22} {'주-주chg':>8} {'거래대금':>9} {'거래대금순위':>6} {'시총':>7}")
+for i, r in enumerate(top20, 1):
+    star = "★" if r["code"] in final5 else " "
+    nm = (names.get(r["code"], r["code"]) or r["code"])[:20]
+    print(f"{star}{i:>3} {nm:22} {r['chg']:>+7.1f}% {r['val']/1e8:>7,.0f}억 {val_rank[r['code']]:>7}위 {r['cap']/1e12:>5,.1f}조")
+
+print("\\n최종 5 (거래대금 Top5 of 상위20):", sorted(final5))
+# 대원전선 진단
+for r in top20:
+    if r["code"] == "006340":
+        print(f"\\n▶ 대원전선(006340): 변동율순위 {top20.index(r)+1}/20, 거래대금순위 {val_rank['006340']}/20 "
+              f"(chg {r['chg']:+.1f}%, 거래대금 {r['val']/1e8:,.0f}억)")

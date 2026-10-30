@@ -1,0 +1,364 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>281 엔진 내부 동작 — engine.py 정독</title><style>
+:root{color-scheme:light}*{box-sizing:border-box}
+body{margin:0;background:#F0EEE6;color:#2D2D2D;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo",sans-serif;line-height:1.62}
+main{max-width:1000px;margin:0 auto;padding:40px 20px 90px}
+h1{font-size:28px;color:#1A1A1A;margin:0 0 4px;letter-spacing:-.3px}
+.sub{color:#6B5E54;margin:0 0 16px;font-size:14px}
+h2{font-size:20px;color:#1A1A1A;margin:34px 0 8px;padding-left:11px;border-left:4px solid #CC785C}
+h3{font-size:15.5px;color:#1A1A1A;margin:18px 0 6px}
+section{background:#fff;border:1px solid #D4C5B0;border-radius:12px;padding:14px 17px;margin:10px 0;box-shadow:0 2px 8px rgba(140,110,80,.06)}
+.hero{background:linear-gradient(135deg,#fff,#E6E0D4);border:2px solid #CC785C;border-radius:16px;padding:18px 22px;margin:14px 0}
+.hero .big{font-size:22px;font-weight:800;color:#1A1A1A}
+p{margin:8px 0}
+table{width:100%;border-collapse:collapse;font-size:13px;background:#fff;margin:8px 0}
+th,td{border-bottom:1px solid #D4C5B0;padding:7px 9px;text-align:left;vertical-align:top}
+th{background:#E6E0D4}
+.g{color:#2E7D32;font-weight:700}.r{color:#C25744;font-weight:700}
+code{background:#E6E0D4;color:#8B4513;border-radius:4px;padding:1px 5px;font-size:12.5px}
+pre{background:#2b2620;color:#e9e2d4;border-radius:10px;padding:14px 16px;overflow-x:auto;font-size:12.4px;line-height:1.55;margin:10px 0}
+pre .c{color:#9db08a}.pre .k{color:#e0a458}
+.chartwrap{overflow-x:auto;margin:10px 0;-webkit-overflow-scrolling:touch}
+.note{background:#F7F4EC;border-left:4px solid #CC785C;border-radius:6px;padding:9px 13px;margin:10px 0;font-size:13.2px}
+.note b{color:#CC785C}
+.warn{background:#fff;border:2px solid #C25744;border-radius:10px;padding:11px 15px;margin:10px 0;font-size:13px}.warn b{color:#C25744}
+ul{margin:8px 0;padding-left:20px}li{margin:4px 0}
+.foot{margin-top:26px;color:#6B5E54;font-size:12.5px;border-top:1px solid #D4C5B0;padding-top:14px}
+.toc{font-size:13px;columns:2;column-gap:26px}.toc a{color:#8B4513;text-decoration:none}.toc a:hover{text-decoration:underline}
+svg.flow{display:block;min-width:820px}
+</style></head><body><main>
+
+<h1>⚙️ 281 엔진 내부 동작 — <code>engine.py</code> 정독</h1>
+<p class="sub">대상: <code>engines/engine281/{engine.py · strategy281.py · chart.py}</code> · 정리 2026-07-09</p>
+
+<div class="hero">
+<div class="big">엔진 = "규율에 미친 트레이더 한 명"</div>
+<p style="margin:6px 0 0;font-size:13.6px">월요일 <b>첫 봉</b>으로 그 주 방향을 정하고(<code>classify</code>), 이후 <b>5분마다 봉 하나</b>를 받아
+① 들고 있는 포지션을 관리하고 → ② 금요일 마감이면 강제로 던지고 → ③ 손이 비면 새로 잡을지 본다.
+이 3단계를 마지막 봉까지 반복한 뒤 <b>한 주 순수익률</b>을 뱉는다.</p>
+<p style="margin:6px 0 0;font-size:13px;color:#6B5E54">이 문서는 <b>전략이 왜 좋은가</b>(→ workflow-overall)가 아니라 <b>코드가 봉을 어떻게 처리하는가</b>를 다룬다.</p>
+</div>
+
+<section><b>목차</b>
+<div class="toc">
+<a href="#io">0. 입력·출력 한눈에</a><br>
+<a href="#big">1. 큰 그림 — run() 파이프라인 (워크플로우 차트)</a><br>
+<a href="#ds">2. 데이터 구조 3종</a><br>
+<a href="#classify">3. classify() — 첫 봉의 삼거리</a><br>
+<a href="#entry">4. 진입 로직 (trail vs cross)</a><br>
+<a href="#process">5. ★ _process() — 심장부 (익절/손절 국면)</a><br>
+<a href="#exit">6. _exit() — 분할청산 회계</a><br>
+<a href="#order">7. 루프 순서·강제청산·안전장치</a><br>
+<a href="#cost">8. 비용 회계</a><br>
+<a href="#strat">9. strategy281 & 포트폴리오 배분</a><br>
+<a href="#params">10. 파라미터 요약 & 실험 스위치</a><br>
+<a href="#glossary">용어 정리</a>
+</div>
+</section>
+
+<h2 id="io">0. 입력·출력 한눈에</h2>
+<section>
+<table>
+<tr><th>구분</th><th>내용</th></tr>
+<tr><td>입력</td><td><code>bars</code>(그 종목 1주치 5분봉 리스트) + <code>F0</code>(전주 금 종가) + <code>capital</code>(원금)</td></tr>
+<tr><td>처리 단위</td><td><b>종목 1개 × 1주 = "종목-주" 1건.</b> 엔진은 이 1건만 안다(포트폴리오는 상위 레이어).</td></tr>
+<tr><td>출력</td><td><code>events</code>(진입/청산 로그) + <code>ctx</code>(요약 dict) · <code>ctx["weekly_return"]</code> = net 주간수익률</td></tr>
+<tr><td>판정 기준</td><td><b>모든 판정·체결은 5분봉 '종가(close)' 기준.</b> 고가·저가는 판정에 안 쓴다(차트 표시용).</td></tr>
+<tr><td>통합 트릭</td><td><code>direction</code> 부호(+1 롱 / −1 숏) 하나로 롱·숏을 <b>같은 코드</b>로 처리. 숏은 롱의 거울상.</td></tr>
+</table>
+<div class="note"><b>핵심 항등식.</b> 최종현금 = 취득원가 + 실현손익 − 비용 + 미투자현금 이므로
+→ <b>주간수익률 = (실현손익 − 거래비용) / 원금.</b> 손익과 비용만 깔끔히 남는다.</div>
+</section>
+
+<h2 id="big">1. 큰 그림 — <code>run()</code> 파이프라인</h2>
+<section>
+<div class="chartwrap">
+<svg class="flow" viewBox="0 0 900 690" role="img" aria-label="run() 봉 루프 워크플로우">
+<defs><marker id="ah" markerWidth="10" markerHeight="8" refX="8" refY="3" orient="auto">
+<path d="M0,0 L8,3 L0,6 Z" fill="#8a7a6a"/></marker></defs>
+<style>
+.bx{fill:#fff;stroke:#D4C5B0;stroke-width:1.4}
+.hd{fill:#E6E0D4;stroke:#CC785C;stroke-width:1.4}
+.br{fill:#F7F4EC;stroke:#D9C7A8;stroke-width:1.2}
+.out{fill:#E6F0E6;stroke:#2E7D32;stroke-width:1.6}
+.t{font:600 12.5px -apple-system,'Segoe UI',sans-serif;fill:#2D2D2D}
+.tb{font:800 12.5px -apple-system,'Segoe UI',sans-serif;fill:#1A1A1A}
+.ts{font:500 11px -apple-system,'Segoe UI',sans-serif;fill:#6B5E54}
+.acc{fill:#CC785C;font-weight:800}
+.ar{stroke:#8a7a6a;stroke-width:1.6;fill:none;marker-end:url(#ah)}
+</style>
+
+<!-- input -->
+<rect class="bx" x="300" y="14" width="300" height="40" rx="9"/>
+<text class="tb" x="450" y="39" text-anchor="middle">입력 · bars(5분봉) + F0 + capital</text>
+<path class="ar" d="M450,54 L450,72"/>
+
+<!-- classify -->
+<rect class="hd" x="120" y="72" width="660" height="52" rx="9"/>
+<text class="tb" x="134" y="93">classify(bars[0], F0)</text>
+<text class="t" x="134" y="112">→ base · case · longL · shortL · initial 결정  |  long_gate=max(longL) · short_gate=min(shortL)</text>
+<path class="ar" d="M450,124 L450,142"/>
+
+<!-- loop container -->
+<rect x="30" y="146" width="840" height="392" rx="14" fill="none" stroke="#CC785C" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text class="acc" x="46" y="168" style="font-size:12.5px">for 봉 b (i) — 마지막 봉까지 반복 ↻</text>
+<text class="ts" x="360" y="168">forced = (b가 마지막날 &amp; 시각 ≥ 15:15)</text>
+
+<!-- step 1 -->
+<rect class="bx" x="60" y="180" width="560" height="58" rx="9"/>
+<text class="tb" x="74" y="201">[1] 포지션 관리</text>
+<text class="t" x="74" y="220">pos 있으면 _process(익절/손절 tier 판정 → 분할청산)</text>
+<text class="ts" x="74" y="233">전량청산(closed)이면 현금 회수 · pos = None</text>
+<!-- branch closed -->
+<path class="ar" d="M620,209 L648,209"/>
+<rect class="br" x="650" y="190" width="212" height="38" rx="8"/>
+<text class="t" x="662" y="207">closed → cash_after 회수</text>
+<text class="ts" x="662" y="221">pos = None (같은 봉 재진입 가능)</text>
+<path class="ar" d="M340,238 L340,256"/>
+
+<!-- step 1b -->
+<rect class="bx" x="60" y="256" width="560" height="48" rx="9"/>
+<text class="tb" x="74" y="277">[1b] 강제 청산</text>
+<text class="t" x="74" y="295">pos 있고 forced면 → 잔량 전량 청산 (금요일 마감 · <tspan class="acc">손실은 여기서만 실현</tspan>)</text>
+<path class="ar" d="M340,304 L340,322"/>
+
+<!-- step 2 -->
+<rect class="bx" x="60" y="322" width="560" height="58" rx="9"/>
+<text class="tb" x="74" y="343">[2] 신규 진입</text>
+<text class="t" x="74" y="362">pos 없고 not forced: (i==0 &amp; "first" → 즉시진입)</text>
+<text class="t" x="74" y="375">또는 _check_triggers(trail / cross) → 신호 있으면 _open</text>
+<path class="ar" d="M340,380 L340,398"/>
+
+<!-- step 3 -->
+<rect class="bx" x="60" y="398" width="560" height="42" rx="9"/>
+<text class="t" x="74" y="424">[갱신] run_high / run_low (종가 누적 최고·최저) · prev_close</text>
+
+<!-- loopback -->
+<path class="ar" d="M60,419 L44,419 L44,209 L58,209"/>
+<text class="acc" x="30" y="318" transform="rotate(-90 30,318)" style="font-size:10.5px">↻ 다음 봉</text>
+
+<path class="ar" d="M450,538 L450,556"/>
+<!-- safety -->
+<rect class="bx" x="90" y="556" width="720" height="42" rx="9"/>
+<text class="t" x="104" y="582">루프 후 pos 남으면(데이터가 15:15 전 종료) → <b>마지막 봉 강제청산</b> (안전장치)</text>
+<path class="ar" d="M450,598 L450,616"/>
+<!-- output -->
+<rect class="out" x="230" y="616" width="440" height="46" rx="9"/>
+<text class="tb" x="450" y="638" text-anchor="middle">출력 · weekly_return = (cash − capital)/capital</text>
+<text class="ts" x="450" y="654" text-anchor="middle">ctx(base·case·F0·비용·notional…) → return events, ctx</text>
+</svg>
+</div>
+
+<h3>루프 안 3단계의 <u>순서</u>가 규칙이다</h3>
+<ul>
+<li><b>① 관리 먼저</b> — 이번 봉 종가로 익절/손절 tier부터 판정. (금요일 15:15 봉도 익절이 먼저 걸리면 부분청산 후 잔량만 강제청산)</li>
+<li><b>② 강제청산 그다음</b> — 금요일 마감이면 무조건 잔량을 던진다. <span class="r">손실은 오직 여기서만 실현</span>(281은 무손절).</li>
+<li><b>③ 진입 마지막</b> — 손이 비고 마감 아니면 새로 잡는다. 같은 봉에서 청산 직후 재진입도 가능(§7).</li>
+</ul>
+<div class="note"><b>비유.</b> 트레이더가 매 5분 "① 들고 있는 걸 규칙대로 정리 → ② 마감시간이면 다 던짐 → ③ 남는 총알로 새 자리 볼까" 순서로 손을 놀리는 것.</div>
+</section>
+
+<h2 id="ds">2. 데이터 구조 3종</h2>
+<section>
+<h3>Bar — 5분봉 한 개</h3>
+<p><code>dt</code>(시각문자열) · <code>o/h/l/c/v</code> · 파생 <code>.day</code>(=dt[:10] 마지막날 판정) · <code>.hm</code>(=dt[11:16] 15:15 판정) · <code>.bull</code>(=c≥o 양봉 여부, 진입 방향의 출발점).</p>
+<h3>Event — 진입/청산 로그 한 줄</h3>
+<p><code>kind</code>(ENTRY/EXIT) · <code>direction</code>(±1) · <code>marker</code>(E/S/T) · <code>frac</code>(이번 청산 비율) · <code>reason</code>(사유) · <code>pnl</code> · <code>note</code>(투입액 또는 누적청산 "1/3·2/3·전량"). → <code>chart.py</code>가 이 로그로 E/S/T 마커를 찍는다.</p>
+<h3>Position — 엔진의 상태 저장소</h3>
+<table>
+<tr><th>필드</th><th>의미</th></tr>
+<tr><td><code>direction</code></td><td>+1 롱 / −1 숏</td></tr>
+<tr><td><code>entry_price / entry_open</code></td><td>진입봉 <b>종가</b> / 진입봉 시가(손절피보 기준)</td></tr>
+<tr><td><code>invested / shares / leftover</code></td><td>취득원가 / 주수 / 정수주 반올림으로 못 산 현금(다음 진입 이월 = cash drag)</td></tr>
+<tr><td><code>exited</code></td><td>지금까지 청산한 누적 비율(0→1)</td></tr>
+<tr><td><b><code>extreme_fav</code></b></td><td><b>진입 후 '유리한 방향'으로의 최대 이동폭.</b> 익절/손절 국면을 가르는 핵심 상태(§5)</td></tr>
+<tr><td><code>realized_pnl / cost</code></td><td>누적 실현손익 / 누적 체결비용</td></tr>
+<tr><td><code>closed / cash_after</code></td><td>전량청산 여부 / 청산 후 회수현금</td></tr>
+<tr><td><code>fee/slip/tax · buy/sell_notional</code></td><td>편도 비용률 / 매수·매도 누적 체결액</td></tr>
+</table>
+</section>
+
+<h2 id="classify">3. <code>classify()</code> — 첫 봉이 서는 삼거리</h2>
+<section>
+<p>첫 봉의 양/음과, 시가·종가가 F0의 어느 쪽인지로 <b>base 방향·Case·트리거 레벨·즉시진입</b>을 한 번에 정한다. 양봉이면 롱 base, 음봉이면 거울상(숏 base).</p>
+<p><b>양봉(롱 base, base=+1) 기준:</b></p>
+<table>
+<tr><th>Case</th><th>조건</th><th>롱 트리거 longL</th><th>숏 트리거 shortL</th><th>첫봉 즉시진입 initial</th></tr>
+<tr><td>1</td><td><code>o &gt; F0</code> (시가부터 F0 위)</td><td>[c, o]</td><td>[F0]</td><td class="g">+1 즉시 롱</td></tr>
+<tr><td>2</td><td><code>c ≥ F0 ≥ o</code> (걸치고 위 마감)</td><td>[c]</td><td>[o]</td><td class="g">+1 즉시 롱</td></tr>
+<tr><td>3</td><td><code>c &lt; F0</code> (F0 아래 마감)</td><td>[F0]</td><td>[o]</td><td>0 대기</td></tr>
+</table>
+<p><code>initial = +1 if c ≥ F0 else 0</code>. 즉 <b>Case1·2는 첫봉 종가 즉시 롱</b>, Case3는 관망. 음봉은 부호만 뒤집힌 대칭.</p>
+<div class="note"><b>281에서의 쓸모.</b> 281은 <code>entries=("trail",)</code>라 <code>"first"</code>가 꺼져 <b>즉시진입은 안 쓴다.</b>
+그럼 classify가 왜 필요한가? → <code>long_gate=max(longL)</code>·<code>short_gate=min(shortL)</code>를 만들어 <b>trail 재진입의 문턱</b>을 세운다(§4). 첫 봉의 구조가 "이 위로 올라서야 진짜 롱"이라는 방벽이 된다.</div>
+<div class="note"><b>비유.</b> 첫 봉은 그날의 <b>기준 지형</b>을 그린다. F0라는 해수면 위/아래 어디서 출발했는지로 "여기보다 높이 오르면 진짜 상승"이라 인정할 문턱(gate)을 세운다.</div>
+</section>
+
+<h2 id="entry">4. 진입 로직 — <code>_open</code> · <code>_check_triggers</code></h2>
+<section>
+<h3>_open() — 자리 잡기</h3>
+<p><code>shares = int(cash/c)</code>(정수주 내림) → <code>invested = shares·c</code>, <code>leftover = cash − invested</code>(이월현금). 진입 체결비용 즉시 반영: <b>롱=매수</b>(수수료+슬리피지) / <b>숏=매도</b>(수수료+슬리피지+<b>거래세</b>).</p>
+<h3>_check_triggers() — flat일 때 재진입 감지</h3>
+<table>
+<tr><th>유형</th><th>조건(롱)</th><th>의미</th></tr>
+<tr><td><code>"cross"</code> 단순 돌파</td><td>양봉 &amp; <code>prev_close ≤ L &lt; c</code></td><td>트리거 레벨을 방향대로 관통</td></tr>
+<tr><td><b><code>"trail"</code> 신고점 돌파</b></td><td>양봉 &amp; <code>c &gt; run_high</code> &amp; <code>c &gt; long_gate</code></td><td><b>그 주 최고 종가를 새로 뚫음(모멘텀)</b></td></tr>
+</table>
+<p><b>281은 <code>trail</code>만 켠다</b> → "그 주 <b>신고점(최고 종가)을 새로 뚫는 양봉 종가에 롱</b>, 신저점 뚫는 음봉 종가에 숏"이 유일 진입 규칙.</p>
+<ul>
+<li><code>run_high/run_low</code>는 각 봉 처리 <b>끝</b>에 갱신 → 봉 0에선 <code>None</code>이라 trail이 못 걸림(첫 trail은 최소 봉 1부터).</li>
+<li>진단상 첫봉즉시(−20bp)·단순돌파(−8bp)는 <span class="r">역엣지</span>, <b>신고점 모멘텀(+6bp)만 양엣지</b>여서 trail만 남겼다.</li>
+</ul>
+</section>
+
+<h2 id="process">5. ★ <code>_process()</code> — 엔진의 심장부</h2>
+<section>
+<p>보유 중인 봉마다 호출되어 <b>이번 봉 종가로 청산 tier를 판정</b>한다. 전체가 하나의 결정트리:</p>
+<pre><span class="c"># 보유 포지션 pos, 새 봉 b(index i)</span>
+① i ≤ entry_idx ?          <span class="c">→ 진입한 그 봉 당일은 판정 안 함. return</span>
+② fav = dir·(c − entry_price)          <span class="c"># 유리 이동(양수 = 이익 방향)</span>
+③ fav &gt; extreme_fav ?       <span class="c">→ 새 극값! extreme_fav 갱신·밴드 재작도·청산 없음. return</span>
+   │ (아니면 = 고점 대비 되돌림/정체)
+④ tp_thr = tp_gate·entry_price            <span class="c">(tp_mode="pct", 281 = +8%)</span>
+           또는 tp_body_frac·|entry−open|  <span class="c">(tp_mode="body", 적응형)</span>
+⑤ extreme_fav ≥ tp_thr ?  <span class="c"># 한 번이라도 게이트를 넘겼나</span>
+   ├─ YES → 【익절 국면】 lr = fav / extreme_fav
+   │          tier = #(0.75, 0.5, 0.25 중 lr 미만인 것)   <span class="c"># 되돌림 깊을수록 tier↑</span>
+   └─ NO  → 【손절 국면】 stop_mode 분기:
+              "none"  → return                            <span class="c"># 281: 그냥 홀드</span>
+              "hard"  → 진입가 −stop_pct 도달 시 전량 S
+              "chand" → 고점 대비 −stop_pct 되돌림 시 전량(샹들리에)
+              "pct"   → 진입가 대비 불리폭을 stop_pct 3등분 tier
+              "body"  → 진입봉 몸통(|종가−시가|) 피보 0.25/0.5/0.75 tier
+⑥ tier == 0 ? return
+⑦ frac = tier/3 − exited                  <span class="c"># 이미 판 만큼 빼고 추가 청산</span>
+   label = "T"(fav&gt;0) / "S"(fav≤0)         <span class="c"># 체결가가 진입가보다 위면 익절, 아니면 손절</span>
+   → _exit(frac)</pre>
+
+<h3>extreme_fav — 왜 이게 국면을 가르나</h3>
+<ul>
+<li><code>extreme_fav</code>는 진입 후 유리 방향 <b>최대폭</b>이고 <b>커지기만</b> 한다(새 고점에서만 갱신).</li>
+<li>새 고점 갱신 봉에서는 <b>청산 안 함</b> — 이익을 끝까지 태운다(트레일링).</li>
+<li>되돌아오는 봉에서만 익절/손절 판정.</li>
+</ul>
+<div class="note"><b>비유.</b> <code>extreme_fav</code>는 <b>연날리기에서 지금까지 연이 오른 최고 높이</b>. 더 오르면 실을 계속 풀고(청산 안 함), 내려오기 시작하면 그제야 "얼마나 되감을지"를 피보 눈금으로 정한다.</div>
+
+<h3>익절 피보 (<code>TP_FIB = 0.75, 0.5, 0.25</code>) — 되돌림 트레일링 익절</h3>
+<p>게이트(+8%)를 한 번 넘긴 뒤 작동. <code>lr = fav/extreme_fav</code> = 고점 대비 현재 위치(1=고점, 0=진입가, &lt;0=손실).</p>
+<table>
+<tr><th>lr (고점 대비 잔존)</th><th>되돌림</th><th>tier</th><th>누적 청산</th></tr>
+<tr><td>≥ 0.75</td><td>25% 미만</td><td>0</td><td>홀드</td></tr>
+<tr><td>0.5 ~ 0.75</td><td>25~50%</td><td>1</td><td>1/3</td></tr>
+<tr><td>0.25 ~ 0.5</td><td>50~75%</td><td>2</td><td>2/3</td></tr>
+<tr><td>&lt; 0.25</td><td>75% 초과</td><td>3</td><td class="g">전량</td></tr>
+</table>
+<p><b>"+8% 이상 먹은 뒤, 고점에서 25%씩 되밀릴 때마다 1/3씩 분할 익절".</b> 한 번 무장되면 <code>extreme_fav</code>가 안 줄어 나중에 진입가 밑으로 다 밀려도 결국 tier3(전량)로 정리된다. 이때 진입가 아래면 label은 T가 아니라 <span class="r">S</span>로 찍힌다.</p>
+
+<h3>손절 모드들 (281은 전부 미사용)</h3>
+<table>
+<tr><th>stop_mode</th><th>동작</th><th>281</th></tr>
+<tr><td><code>none</code></td><td>인트라데이 손절 없음. 게이트 미달이면 무한 홀드 → 금요일 청산</td><td class="g">✅ 채택</td></tr>
+<tr><td><code>body</code></td><td>진입봉 몸통 대비 반대 이동 피보(원본 알고리즘 v2)</td><td>✗</td></tr>
+<tr><td><code>pct</code></td><td>진입가 대비 불리폭 고정% 3등분</td><td>✗ 실험</td></tr>
+<tr><td><code>chand</code></td><td>샹들리에: 고점 대비 stop_pct 되돌림 전량</td><td>✗ 실험</td></tr>
+<tr><td><code>hard</code></td><td>진입가 −stop_pct 도달 시 전량 손절</td><td>✗ 실험</td></tr>
+</table>
+<div class="warn"><b>281이 none인 이유.</b> 손절 실험을 전부 돌렸으나(하드·샹들리에·되돌림피보·재난·시간손절) 하나같이 <b>승자를 조기 청산</b>해 평균을 깎았다. 손익비는 개선(1.31→2.09)되나 승률↓로 상쇄. → "불리해도 홀드, 손실은 금요일 강제청산 한 번으로만 실현"이 281의 고집.</div>
+</section>
+
+<h2 id="exit">6. <code>_exit()</code> — 분할청산 회계</h2>
+<section>
+<pre>pnl = dir · (c − entry_price) · (frac · shares)     <span class="c"># 이번에 판 몫의 손익</span>
+realized_pnl += pnl
+notional = frac·shares·c                            <span class="c"># 이번 체결액</span>
+  롱 청산 = 매도 → cost += notional·(fee+slip+tax)  <span class="c"># 거래세 포함</span>
+  숏 청산 = 매수 → cost += notional·(fee+slip)       <span class="c"># 세금 없음</span>
+exited += frac
+if exited ≥ 1:                                       <span class="c"># 전량 청산 완료</span>
+   closed = True
+   cash_after = invested + realized_pnl − cost + leftover</pre>
+<p><code>note</code>에 누적청산을 <code>1/3·2/3·전량</code>으로 표기. label(T/S)은 그 봉 종가가 진입가보다 유리하면 T, 아니면 S.</p>
+<div class="note"><b>회계 항등식.</b> 처음 넣은 현금 = invested + leftover. 청산 후 = invested + pnl − cost + leftover. 따라서 <b>주간수익률 = (pnl − cost)/capital</b>. 원금 대비 순손익만 남는다.</div>
+</section>
+
+<h2 id="order">7. 루프 순서·강제청산·안전장치 (놓치기 쉬운 것)</h2>
+<section><ul>
+<li><b>같은 봉 청산→재진입 가능:</b> [1] _process가 이 봉에서 전량청산하면 <code>pos=None</code>, [1b] forced 아니면 [2] 진입이 <b>이 봉에서 곧바로</b> 다시 트리거될 수 있다(trail 충족 시).</li>
+<li><b>금요일 15:15 강제청산:</b> <code>forced = 마지막날 &amp; hm ≥ liquidate_hm</code>. 이 봉도 [1] 익절이 먼저 걸려 부분청산될 수 있고, 잔량을 [1b]가 전량 청산. <span class="r">281에서 손실은 사실상 여기서만 확정</span>.</li>
+<li><b>진입 차단:</b> forced인 봉에서는 신규 진입 안 함(마감 임박에 새 포지션 금지).</li>
+<li><b>안전장치:</b> 데이터가 15:15 전 종료면 루프 후 <b>마지막 봉 종가로 강제청산</b>해 포지션을 반드시 닫는다(손익을 한 주 안에 확정).</li>
+</ul></section>
+
+<h2 id="cost">8. 비용 회계</h2>
+<section><ul>
+<li>전부 <b>편도 비율</b>(소수). 기본 0이면 gross(비용 미반영).</li>
+<li><b>거래세(tax)는 매도측만</b> → 롱은 청산 시, 숏은 진입 시.</li>
+<li>281 값: 수수료 <code>1.5bp</code> · 슬리피지 <code>5bp</code> · 거래세 <code>15bp</code>. 왕복 대략 <b>−0.30%p/주</b>.</li>
+<li><code>round_shares=True</code>: 정수주 매수 + 못 산 현금 이월(leftover) → <b>cash drag</b>까지 반영.</li>
+<li><code>ctx</code>에 <code>cost / buy_notional / sell_notional</code> 누적 → 상위에서 비용률 검산 가능.</li>
+</ul></section>
+
+<h2 id="strat">9. <code>strategy281.py</code> — "281" 못박기 + 배분</h2>
+<section>
+<p><code>engine.py</code>는 여러 모드를 가진 <b>범용 엔진</b>. 그 위에서 "281이 정확히 무엇인가"를 고정한 게 strategy281.</p>
+<h3>엔진 설정 STRAT281 (종목-주 1건)</h3>
+<pre>STRAT281 = dict(
+    tp_gate=0.08,          <span class="c"># 익절 게이트: 고점이익 진입가 대비 +8%</span>
+    entries=("trail",),    <span class="c"># 신고점 돌파(모멘텀)만 — first·cross 미사용</span>
+    stop_mode="none",      <span class="c"># 무손절</span>
+    fee=0.00015, slip=0.0005, tax=0.0015,   <span class="c"># 편도 비용</span>
+    round_shares=True)     <span class="c"># 정수주</span>
+run_281(bars, F0) = run(bars, F0, **STRAT281)   <span class="c"># ctx["weekly_return"] = net</span></pre>
+<h3>포트폴리오 배분 portfolio_281(recs)</h3>
+<p>입력 <code>recs=[{week, ret(=종목-주 net), traded, gap}]</code>. 주 단위로 묶어 포트폴리오 수익률 생성:</p>
+<pre>주 w 마다:
+  kept = traded이고 gap ≥ gap_min(3%)인 종목        <span class="c"># 진입 갭 필터</span>
+  kept 비고 fallback → 그 주 최고갭 1종목만 편입
+  k = len(kept);  deploy = k / max(k, div_floor)     <span class="c"># 분산 바닥(cash drag)</span>
+  가중치 = gap^power (=gap⁴) 정규화                   <span class="c"># 강한 모멘텀 집중</span>
+  포트수익 = deploy · Σ(가중치·ret) / Σ가중치</pre>
+<table>
+<tr><th>파라미터</th><th>281 값</th><th>의미</th></tr>
+<tr><td>gap_min</td><td>0.03</td><td>진입 갭 <code>방향×(진입가/F0−1)</code> 3% 이상만</td></tr>
+<tr><td>power</td><td>4</td><td>갭⁴ 가중 (강한 모멘텀 초집중)</td></tr>
+<tr><td>div_floor</td><td>1</td><td>분산 바닥=1 → <b>완전 집중</b>(통과 종목에 원금 전부). ↑ 올리면 종목 적을 때 현금 남김</td></tr>
+<tr><td>fallback</td><td>True</td><td>그 주 갭≥3% 없으면 최고갭 1종목 편입</td></tr>
+</table>
+<div class="note"><b>비유.</b> <code>gap</code> = "월요일 아침 얼마나 세게 튀어나갔나"(모멘텀 세기). <code>power=4</code>는 <b>가장 세게 튄 놈에 몰아준다</b>(gap 2배면 가중 16배). <code>div_floor=1</code>은 통과 종목이 몇 개든 <b>원금을 다 태우는</b> 초집중(고수익·고위험).</div>
+</section>
+
+<h2 id="params">10. 파라미터 요약 & 실험 스위치</h2>
+<section>
+<p><b>281 확정 호출:</b></p>
+<pre>run(bars, F0, entries=("trail",), stop_mode="none", tp_gate=0.08,
+    fee=.00015, slip=.0005, tax=.0015, round_shares=True)</pre>
+<p><b>엔진에 남은 실험용 스위치(281은 전부 OFF)</b> — 새 실험은 이 조합으로 <code>engines/</code>에 독립 엔진 폴더로 파생(claude.md 원칙).</p>
+<table>
+<tr><th>스위치</th><th>값</th><th>용도 / 281</th></tr>
+<tr><td><code>entries</code></td><td>first/cross/trail</td><td>진입 유형 · 281=trail만</td></tr>
+<tr><td><code>stop_mode</code></td><td>none/body/pct/chand/hard</td><td>손절 방식 · 281=none</td></tr>
+<tr><td><code>tp_mode</code></td><td>pct/body</td><td>익절 게이트 기준 · 281=pct(+8%)</td></tr>
+<tr><td><code>tp_body_frac</code></td><td>0.5</td><td>body 모드 몸통 대비 게이트 비율</td></tr>
+<tr><td><code>stop_pct</code></td><td>0.02</td><td>pct/chand/hard 손절 폭</td></tr>
+</table>
+</section>
+
+<h2 id="glossary">용어 정리</h2>
+<section style="font-size:13px">
+<ul>
+<li><b>F0</b>: 전주 마지막 거래일(금) 종가. 그 주의 기준선(해수면).</li>
+<li><b>base / case</b>: 첫 봉이 정한 그 주 기본 방향(±1)·유형(1/2/3). 트리거 게이트를 세움.</li>
+<li><b>trail(신고점 돌파)</b>: 그 주 최고 종가를 새로 뚫는 봉에 진입하는 모멘텀 규칙. 281의 유일 진입.</li>
+<li><b>gate(게이트)</b>: 넘어야 뭔가 켜지는 문턱. 진입 게이트(long_gate) / 익절 게이트(tp_gate +8%).</li>
+<li><b>extreme_fav</b>: 진입 후 유리 방향 최대폭. 익절/손절 국면을 가르는 상태값. 트레일링 익절의 기준 고점.</li>
+<li><b>피보 tier</b>: 청산량 3등분(1/3·2/3·전량) 눈금. 익절=되돌림(0.75/0.5/0.25), 손절=몸통 대비(0.25/0.5/0.75).</li>
+<li><b>notional / cost</b>: 체결액(주수×가격) / 그에 붙는 편도 비용.</li>
+<li><b>leftover / cash drag</b>: 정수주 매수로 못 산 현금 / 그로 인한 수익률 희석.</li>
+<li><b>div_floor(분산 바닥)</b>: 최소 몇 종목처럼 나눠 담을지의 바닥값. 1=완전 집중.</li>
+<li><b>gap(진입 갭)</b>: <code>방향×(진입가/F0−1)</code>. 진입 시점 모멘텀 세기. 281은 gap⁴ 가중.</li>
+</ul>
+</section>
+
+<div class="foot">engine-internals · engines/engine281 정독 · 전략·검증 여정은 <code>workflow-overall.html</code> 참고</div>
+</main></body></html>

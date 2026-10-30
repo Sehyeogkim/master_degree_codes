@@ -1,0 +1,26 @@
+#!/bin/bash
+# Runs on the LOCAL machine (ws2 cannot reach harvey directly).
+# Every 60s, pull new no-hyperemia wall CSVs from harvey and push them to ws2.
+# Accumulates (NO --delete). Wall data is plaque-agnostic, so both LAP & CP use it.
+set -u
+H_WALL="harvey:/home/jeff/project/54_analysis/post_data/wall_no_hyperemia"
+LOCAL_STAGE="/tmp/claude-1000/-home-jeff-project-65-final-0723/df4a62ea-af2f-4dc3-98ba-634bb6c6b240/scratchpad/wall_stage"
+WS2_WALL="ws2:/home/jeff/project/54_analysis/post_data/wall_no_hyperemia"
+STOP="$LOCAL_STAGE/STOP_SYNC"
+LOG="$LOCAL_STAGE/sync.log"
+mkdir -p "$LOCAL_STAGE/peak" "$LOCAL_STAGE/low"
+ssh ws2 "mkdir -p /home/jeff/project/54_analysis/post_data/wall_no_hyperemia/peak /home/jeff/project/54_analysis/post_data/wall_no_hyperemia/low"
+
+while [ ! -f "$STOP" ]; do
+  for bc in peak low; do
+    # harvey -> local stage  (--timeout so a dropped harvey connection can't hang forever)
+    timeout 300 rsync -a --ignore-existing --timeout=120 -e "ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=3" "$H_WALL/$bc/" "$LOCAL_STAGE/$bc/" 2>>"$LOG"
+    # local stage -> ws2
+    timeout 300 rsync -a --ignore-existing --timeout=120 -e "ssh -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=3" "$LOCAL_STAGE/$bc/" "$WS2_WALL/$bc/" 2>>"$LOG"
+  done
+  np=$(ls "$LOCAL_STAGE/peak"/wall_peak_case_*.csv 2>/dev/null | wc -l)
+  nl=$(ls "$LOCAL_STAGE/low"/wall_low_case_*.csv 2>/dev/null | wc -l)
+  echo "$(date +%H:%M:%S) synced peak=$np low=$nl" >> "$LOG"
+  sleep 60
+done
+echo "$(date) SYNC STOPPED" >> "$LOG"

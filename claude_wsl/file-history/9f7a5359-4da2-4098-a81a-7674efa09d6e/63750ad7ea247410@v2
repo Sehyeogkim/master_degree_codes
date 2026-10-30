@@ -1,0 +1,23 @@
+import json
+import glob
+import os
+import time
+
+S = "solid_0723"
+rows = [json.loads(l) for l in open(f"{S}/batch_progress.jsonl") if l.strip()]
+recorded = {r["case"] for r in rows}
+running = set()
+for d in glob.glob(f"{S}/case_*/dist_run"):
+    c = int(d.split("case_")[1].split("/")[0])
+    if c >= 1 and c not in recorded and not os.path.exists(f"{d}/solid_type_1_dist.msh"):
+        running.add(c)
+sol0 = sorted(recorded | running)
+ts = time.strftime("%Y-%m-%d %H:%M:%S")
+note = (
+    f"SOL cutover {ts}\n"
+    f"SecondOrderLinear switched 0 -> 1 (straight mid-nodes) going forward.\n"
+    f"SOL=0 cases (started before switch): {sol0}\n"
+    f"All OTHER cases (started after) = SOL=1.\n"
+)
+open(f"{S}/SOL_CUTOVER.txt", "w").write(note)
+print(note)

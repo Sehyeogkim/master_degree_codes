@@ -1,0 +1,29 @@
+#!/bin/bash
+# Batch Type-2 quad meshing for geo_0723 cases 0..383 on cvbml02.
+#   quad (SOL=1, second_order_linear=True), mesh_size=0.06, nproc=20, .msh only (no .vtu)
+#   3 cases concurrent (3 x 20 = 60 cores), resumable (runner skips existing .msh).
+set -u
+cd /home/jeff/project/65_final_0723
+export PATH=/home/jeff/miniconda3/envs/ansys_new/bin:$PATH
+PY=/home/jeff/miniconda3/envs/ansys_new/bin/python
+mkdir -p mesh_logs
+PROG=mesh_batch_progress.log
+: > "$PROG"
+
+run_one() {
+  local c=$1
+  "$PY" -u run_type2_0723.py "$c" 20 1 0 0.06 > "mesh_logs/case_${c}.log" 2>&1
+  local rc=$?
+  # classify outcome from log
+  if [ $rc -eq 0 ]; then
+    if grep -q "\[skip\]" "mesh_logs/case_${c}.log"; then st=SKIP;
+    else st=OK; fi
+  elif grep -q "\[invalid\]" "mesh_logs/case_${c}.log"; then st=INVALID;
+  else st=FAIL; fi
+  echo "$(date +%H:%M:%S) case ${c} rc=${rc} ${st}" >> "$PROG"
+}
+export -f run_one
+export PY
+
+seq 0 383 | xargs -P 3 -I{} bash -c 'run_one {}'
+echo "$(date +%H:%M:%S) BATCH COMPLETE" >> "$PROG"

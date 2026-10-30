@@ -1,0 +1,49 @@
+# Compare our freshly-computed peak (updated params) vs the reference expB_new type1 peak.
+import sys
+import numpy as np
+import pyvista as pv
+
+OURS = "/home/jeff/project/54_analysis/validate_peak/FC_case_500_peak.vtk"
+REF  = "/home/jeff/project/54_analysis/solid_data/case_500/ansys_results_type1_expB_new/FC_case_500_peak.vtu"
+
+o = pv.read(OURS)
+r = pv.read(REF)
+print(f"OURS: {o.n_points} pts, {o.n_cells} cells")
+print(f"  point arrays: {list(o.point_data.keys())}")
+print(f"  cell  arrays: {list(o.cell_data.keys())}")
+print(f"REF : {r.n_points} pts, {r.n_cells} cells")
+print(f"  point arrays: {list(r.point_data.keys())}")
+print(f"  cell  arrays: {list(r.cell_data.keys())}")
+
+def get(mesh, name):
+    if name in mesh.point_data: return np.asarray(mesh.point_data[name]), 'pt'
+    if name in mesh.cell_data:  return np.asarray(mesh.cell_data[name]),  'cell'
+    return None, None
+
+def mag(a):
+    a = np.asarray(a, float)
+    return np.linalg.norm(a, axis=1) if a.ndim > 1 else a
+
+common = (set(o.point_data.keys()) | set(o.cell_data.keys())) & (set(r.point_data.keys()) | set(r.cell_data.keys()))
+print(f"\ncommon arrays: {sorted(common)}")
+same_topo = (o.n_points == r.n_points)
+print(f"same #points: {same_topo}  ({o.n_points} vs {r.n_points})")
+
+for name in sorted(common):
+    ao, _ = get(o, name); ar, _ = get(r, name)
+    mo, mr = mag(ao), mag(ar)
+    print(f"\n=== {name} ===")
+    print(f"  ours: min={np.nanmin(mo):.5g} max={np.nanmax(mo):.5g} mean={np.nanmean(mo):.5g} median={np.nanmedian(mo):.5g}")
+    print(f"  ref : min={np.nanmin(mr):.5g} max={np.nanmax(mr):.5g} mean={np.nanmean(mr):.5g} median={np.nanmedian(mr):.5g}")
+    # relative diff of maxima (material-response sanity)
+    if np.nanmax(mr) != 0:
+        print(f"  rel diff of max = {100*abs(np.nanmax(mo)-np.nanmax(mr))/abs(np.nanmax(mr)):.2f}%")
+    if same_topo and mo.shape == mr.shape:
+        d = np.abs(mo - mr)
+        denom = np.nanmax(np.abs(mr)) or 1.0
+        print(f"  pointwise: max|diff|={np.nanmax(d):.5g} ({100*np.nanmax(d)/denom:.3f}% of ref max), mean|diff|={np.nanmean(d):.5g}")
+        # correlation
+        m = np.isfinite(mo) & np.isfinite(mr)
+        if m.sum() > 2:
+            c = np.corrcoef(mo[m], mr[m])[0, 1]
+            print(f"  correlation = {c:.6f}")

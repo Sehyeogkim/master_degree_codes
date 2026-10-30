@@ -1,0 +1,75 @@
+"""
+Steady 3D fluid PRE for 54_analysis -- NON-hyperemia.  Single case (CLI arg).
+Phases via env PHASES (default "peak low"); e.g. PHASES="low" for low-only.
+  peak <- systolic (Q,R) ; low <- diastolic (Q,R)
+Input 1D json:  post_data/_1d_no_hyperemia/_1d_json_{i}.json  (key "{i}")
+Output: fluid_data[_500]/case_{i}/steady_3d_no_hyperemia/{phase}/  (+ svpre)
+"""
+import os
+import sys
+import json
+import shutil
+from pathlib import Path
+
+sys.path.insert(0, "/home/jeff/repo/master_python/src")
+import utils.utils_lumen.paths as utils_paths
+import utils.utils_lumen.runner as runner
+
+ROOT = Path("/home/jeff/project/54_analysis")
+PRE_DATA = ROOT / "pre_data"
+POST_DATA = ROOT / "post_data"
+SVPRE = "/opt/cvbml/repos/svSolverPrivate/build/svSolver-build/bin/svpre"
+SOLVER_INP_TEMPLATE = PRE_DATA / "scripts" / "solver.inp"
+
+NUM_TIMESTEPS = 500
+DT = 0.0001
+RESTART_FREQ = 500
+PHASE_MAP = {"peak": "systolic", "low": "diastolic"}
+PHASES = os.environ.get("PHASES", "peak low").split()
+
+
+def fluid_dir(i):
+    return ROOT / ("fluid_data" if i < 500 else "fluid_data_500")
+
+
+def process_case(i):
+    exec_dir = fluid_dir(i) / f"case_{i}"
+    meshing_dir = exec_dir / "meshing"
+    st_dir = exec_dir / "steady_3d_no_hyperemia"
+    rst_json = POST_DATA / "_1d_no_hyperemia" / f"_1d_json_{i}.json"
+
+    if not rst_json.exists():
+        print(f"[skip] case_{i}: 1d json missing -> {rst_json}")
+        return False
+    if not (meshing_dir / "mesh-complete").exists():
+        print(f"[skip] case_{i}: mesh-complete missing -> {meshing_dir}")
+        return False
+
+    data = json.load(open(rst_json))[str(i)]
+    try:
+        for name in PHASES:
+            phase = PHASE_MAP[name]
+            folder = st_dir / name
+            folder.mkdir(parents=True, exist_ok=True)
+            Q = data[phase]["Q"]
+            R = data[phase]["R"]
+            utils_paths.create_flow_file(str(folder / "inflow.flow"), Q)
+            utils_paths.create_svpre_file(folder / "model.svpre", meshing_dir)
+            shutil.copyfile(SOLVER_INP_TEMPLATE, folder / "solver.inp")
+            utils_paths.revise_inp_file(str(folder / "solver.inp"), {
+                "Resistance Values:": R,
+                "Number of Timesteps:": NUM_TIMESTEPS,
+                "Time Step Size:": DT,
+                "Number of Timesteps between Restarts:": RESTART_FREQ,
+            })
+            runner.run_svpre(str(folder), SVPRE)
+            print(f"[ok] case_{i}/{name}: Q={Q:.5f} R={R:.1f} -> svpre done", flush=True)
+        return True
+    except Exception as e:
+        print(f"[ERROR] case_{i}: {e}", flush=True)
+        return False
+
+
+if __name__ == "__main__":
+    i = int(sys.argv[1])
+    sys.exit(0 if process_case(i) else 1)

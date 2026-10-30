@@ -1,0 +1,2 @@
+- [Thesis project overview](project_thesis.md) — FEM+GPR sensitivity study of coronary plaque rupture; 4 experiments (A/B/C/D) + B_2, B_3 variants; Q0–Q8 analysis pipeline
+- [User role](user_role.md) — Master's student in biomechanics; FEM + Sobol/GPR sensitivity analysis; casual communication style

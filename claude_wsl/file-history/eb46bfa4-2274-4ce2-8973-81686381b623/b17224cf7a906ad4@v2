@@ -1,0 +1,46 @@
+"""
+Generate ONLY tree.dat + xyzts.dat (no meshing) for given case ids, from
+parameter_0728.csv, into 54_analysis/fluid_data/case_<i>/.
+
+Mirrors the tree step of lumen_Simmetrix_meshing.py:
+    cad = VesselCADModel.CAD_instance_from_idx(case_id, parameter_csv)
+    cad.tree_xyzts_generator(tree_path, xyzt_path, num_points=50)
+
+Usage: python -u make_tree_only.py <case_id> [<case_id> ...]
+"""
+import sys
+import traceback
+from pathlib import Path
+
+from lumen_codes.cad_meshing import VesselCADModel
+
+HERE = Path("/home/jeff/project/54_analysis")
+PAR = HERE / "pre_data" / "parameter_0728.csv"
+
+
+def main():
+    cases = [int(x) for x in sys.argv[1:]]
+    if not cases:
+        sys.exit("no case ids given")
+    ok, fail = [], []
+    for cid in cases:
+        exec_dir = HERE / "fluid_data" / f"case_{cid}"
+        exec_dir.mkdir(parents=True, exist_ok=True)
+        tree_path = exec_dir / "tree.dat"
+        xyzt_path = exec_dir / "xyzts.dat"
+        try:
+            cad = VesselCADModel.CAD_instance_from_idx(cid, PAR)
+            cad.tree_xyzts_generator(tree_path=tree_path, xyzt_path=xyzt_path, num_points=50)
+            good = tree_path.exists() and xyzt_path.exists()
+            print(f"[{'Done' if good else 'Empty'}] case_{cid}: "
+                  f"tree={tree_path.exists()} xyzts={xyzt_path.exists()}", flush=True)
+            (ok if good else fail).append(cid)
+        except Exception as e:
+            print(f"[Fail] case_{cid}: {e}", flush=True)
+            traceback.print_exc()
+            fail.append(cid)
+    print(f"\nDONE ok={ok} fail={fail}", flush=True)
+
+
+if __name__ == "__main__":
+    main()

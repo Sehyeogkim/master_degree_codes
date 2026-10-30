@@ -1,0 +1,135 @@
+"""back_test 코어 라이브러리 — 원래 엔진/파이프라인은 읽기전용으로만 import.
+
+목적: CREON 5분봉(baked-in 선정) + yfinance 일봉(F0·직전주변동성)으로
+      **causal** 자본배분 실험을 돌린다. look-ahead(진입 gap 사후배분)를
+      "직전주 주간변동율"이라는 사전신호로 대체 → 실시간 실행 가능.
+
+핵심 함수:
+  daily(code)                 : yfinance 일봉 캐시(.KS→.KQ), full range
+  prior_signal(monday, code)  : (chg%, F0)  — chg=(직전금종가/직전월시가−1)×100, F0=직전금종가
+  stock_week(monday, code, F0): net 주간수익률 r + 진입 gap (엔진 causal 가동)
+  weeks()                     : 실데이터 있는 255주 목록
+  week_stocks(monday)         : 그 주 폴더의 선정종목 코드
+"""
+import os, sys, glob, csv, datetime
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))     # bullet281/
+sys.path.insert(0, os.path.join(ROOT, "engines", "engine281"))
+sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+from engine import load_bars, run                                      # 불변 엔진(읽기전용)
+from strategy281 import STRAT281
+from weekcal import prior_week
+
+DATA  = os.path.join(ROOT, "data", "data_creon_API", "intraday_5m_by_week")
+CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache", "daily")
+os.makedirs(CACHE, exist_ok=True)
+
+
+# ── 주/종목 목록 ────────────────────────────────────────────────
+def weeks():
+    """실데이터(>100B csv) 있는 주(월요일 문자열) 정렬 목록."""
+    out = []
+    for w in sorted(os.listdir(DATA)):
+        d = os.path.join(DATA, w)
+        if not os.path.isdir(d):
+            continue
+        if any(f.endswith("_5m.csv") and os.path.getsize(os.path.join(d, f)) > 100
+               for f in os.listdir(d)):
+            out.append(w)
+    return out
+
+
+def week_stocks(monday):
+    """그 주 폴더의 (code, 5m csv경로) — 실데이터만."""
+    d = os.path.join(DATA, monday)
+    out = []
+    for f in sorted(os.listdir(d)):
+        if f.endswith("_5m.csv") and os.path.getsize(os.path.join(d, f)) > 100:
+            out.append((f.split("_")[0], os.path.join(d, f)))
+    return out
+
+
+# ── yfinance 일봉 캐시 (F0·직전주변동성 소스) ────────────────────
+def _cache_path(code):
+    return os.path.join(CACHE, f"{code}.csv")
+
+
+def daily(code):
+    """일봉 [(date, open, close)] 반환. 캐시 우선, 없으면 yfinance .KS→.KQ 시도.
+    실패 시 빈 리스트 + 빈 캐시 마커('MISS') 기록(재조회 방지)."""
+    p = _cache_path(code)
+    if os.path.exists(p):
+        rows = []
+        with open(p, encoding="utf-8") as f:
+            r = csv.reader(f)
+            for a in r:
+                if not a or a[0] == "MISS":
+                    return []
+                if a[0] == "date":
+                    continue
+                rows.append((a[0], float(a[1]), float(a[2])))
+        return rows
+    import yfinance as yf
+    df = None
+    for sfx in (".KS", ".KQ"):
+        try:
+            d = yf.download(code + sfx, start="2019-12-01", end="2026-07-20",
+                            interval="1d", progress=False, auto_adjust=False)
+        except Exception:
+            d = None
+        if d is not None and not d.empty:
+            df = d
+            break
+    if df is None or df.empty:
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("MISS\n")
+        return []
+    rows = []
+    op = df["Open"]; cl = df["Close"]
+    for i in range(len(df)):
+        dt = df.index[i].strftime("%Y-%m-%d")
+        try:
+            o = float(op.iloc[i].item()); c = float(cl.iloc[i].item())
+        except Exception:
+            o = float(op.iloc[i]); c = float(cl.iloc[i])
+        rows.append((dt, o, c))
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("date,open,close\n")
+        for dt, o, c in rows:
+            f.write(f"{dt},{o},{c}\n")
+    return rows
+
+
+def prior_signal(monday, code):
+    """(chg%, F0) — 직전주(월~금) 일봉으로 chg=(금종가/월시가−1)×100, F0=금종가.
+    데이터 없으면 (None, None)."""
+    prior_mon, prior_fri, _, _ = prior_week(monday)
+    pm, pf = str(prior_mon)[:10], str(prior_fri)[:10]
+    dd = [r for r in daily(code) if pm <= r[0] <= pf]
+    if not dd:
+        return None, None
+    mon_open = dd[0][1]
+    fri_close = dd[-1][2]
+    if mon_open <= 0 or fri_close <= 0:
+        return None, None
+    chg = (fri_close / mon_open - 1) * 100
+    return chg, fri_close
+
+
+# ── 엔진 causal 가동 (종목-주 1건) ──────────────────────────────
+def stock_week(csv_path, F0, strat=STRAT281, run_fn=None):
+    """5분봉 CSV + F0 → (net 주간수익률 r, 진입 gap decimal | None, 월요일 첫봉 시가).
+    엔진은 봉 순서대로만 판단(causal). 진입 gap = 방향×(진입가/F0−1).
+    첫봉 시가는 F0 정합성 교차검증용(yfinance 분할조정 불일치 탐지).
+    run_fn: 엔진 run 함수 주입(기본 None → engine281 run). fable 등 대체엔진용."""
+    bars = load_bars(csv_path)
+    if not bars:
+        return None, None, None
+    events, ctx = (run_fn or run)(bars, F0, **strat)
+    r = ctx["weekly_return"]
+    gap = None
+    for e in events:
+        if e.kind == "ENTRY":
+            gap = e.direction * (e.price / F0 - 1)
+            break
+    return r, gap, bars[0].o

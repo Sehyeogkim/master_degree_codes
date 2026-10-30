@@ -1,0 +1,72 @@
+#!/usr/bin/env python
+"""
+Ladder re-mesh case 168 from the ORIGINAL geometry geo_0723 (14:59) via
+mesh_one_dist.py (which reads geo_0723 and writes solid_0723/case_168/dist_run).
+The tuned 16:14 geometry that meshed successfully was overwritten by the 17:56
+regeneration, so this uses the original as the available "previous" geometry.
+
+Ladder (each rung 25-min cap, first success wins):
+  A. 0.05, algo2d=5 (Delaunay),         algo3d=10 (HXT)
+  B. 0.06, algo2d=6 (Frontal-Delaunay), algo3d=10 (HXT)
+  C. 0.06, algo2d=5 (Delaunay),         algo3d=1  (Delaunay)
+"""
+import json
+import time
+import subprocess
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+PY = "/home/jeff/miniconda3/envs/ansys_new/bin/python"
+CASE = 168
+NPROC = 12
+CAP = 1500
+RUNGS = [(0.05, 5, 10), (0.06, 6, 10), (0.06, 5, 1)]
+
+SOLID = HERE / "solid_0723"
+LOGDIR = SOLID / "logs"; LOGDIR.mkdir(parents=True, exist_ok=True)
+PROG = SOLID / "case168_geo0723_progress.jsonl"
+MARKER = SOLID / "case168_geo0723.marker"
+final = SOLID / f"case_{CASE}" / "dist_run" / "solid_type_1_dist.msh"
+
+
+def attempt(size, a2, a3, tag):
+    logf = LOGDIR / f"case{CASE}_g0723_{tag}.log"
+    try:
+        with open(logf, "w") as lf:
+            p = subprocess.run(
+                [PY, "mesh_one_dist.py", str(CASE), str(NPROC), str(size), str(a2), str(a3)],
+                cwd=str(HERE), stdout=lf, stderr=subprocess.STDOUT, timeout=CAP,
+            )
+        for line in reversed(logf.read_text(errors="replace").splitlines()):
+            if line.startswith("STATUS "):
+                return json.loads(line[len("STATUS "):])
+        return {"status": "failed", "error": f"no STATUS line (exit {p.returncode})"}
+    except subprocess.TimeoutExpired:
+        return {"status": "timeout"}
+    except Exception as e:
+        return {"status": "failed", "error": f"{type(e).__name__}: {e}"}
+
+
+def main():
+    if MARKER.exists():
+        MARKER.unlink()
+    print(f"[168-g0723] ladder on original geometry, rungs={RUNGS}", flush=True)
+    result = {"case": CASE, "status": "failed"}
+    for i, (size, a2, a3) in enumerate(RUNGS):
+        st = attempt(size, a2, a3, f"r{i+1}")
+        st.update({"mesh_size": size, "algo2d": a2, "algo3d": a3, "rung": i + 1, "ts": time.time()})
+        with open(PROG, "a") as f:
+            f.write(json.dumps(st) + "\n")
+        print(f"[rung {i+1}] size={size} algo=({a2},{a3}) -> {st.get('status')} "
+              f"elem={st.get('num_elements')} min_q={st.get('min_quality')} "
+              f"neg={st.get('neg_jacobian')} {st.get('seconds')}s "
+              f"{str(st.get('error',''))[:70]}", flush=True)
+        result = st
+        if st.get("status") == "done":
+            break
+    MARKER.write_text("DONE\n")
+    print(f"[168-g0723] COMPLETE final={result.get('status')}")
+
+
+if __name__ == "__main__":
+    main()

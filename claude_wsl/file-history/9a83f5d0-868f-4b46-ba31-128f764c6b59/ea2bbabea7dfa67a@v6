@@ -1,0 +1,155 @@
+# bullet281
+
+한국주식 **5분봉 주간 모멘텀 퀀트 전략**을 실험·설계·검증하는 저장소.
+핵심 엔진 **281**(CREON 5년 백테스트 기준 net 평균 **+2.81%/주**)을 베이스로,
+파생 실험을 돌리고 실시간 주간 파이프라인으로 모의 운영한다.
+
+## 무엇을 하는가
+
+**공용 부품**(`pipeline/`) + **두 레지스트리**(`engines/` 매매 · `screeners/` 선정) 위에 **시뮬레이터 3종**을 얹었다:
+
+1. **① 실시간 자동매매 시뮬 (cron)** — ✅ 가동 중. 매주 토요일 종목 선정 → 월~금 5분봉에 엔진 가동 → 라이브 리포트 갱신 + 5분봉 원본 축적 → 이메일 발송. **전부 순수 코드**(Claude 호출 0 → 비용 0).
+2. **② 백테스터** — ⏳ 미구현. 로컬 과거 데이터로 엔진의 승률·평균수익률·성과 지표 측정.
+3. **③ 단일종목 시뮬** — ✅ `single_simulator_agent`. 종목·주·엔진 지정 → 워크스루 리포트.
+
+> 원칙: 판단이 필요 없는 결정론적 작업(선정·엔진·렌더·이메일)은 **순수 코드**, Claude는 진짜 판단이 필요할 때만.
+
+## 디렉토리 구조
+
+```
+bullet281/
+├── engines/                  ★ 매매 로직 레지스트리 (엔진별 독립 폴더)
+│   └── engine281/               281 핵심 로직 — 이 폴더 README가 규칙 전문
+│       ├── engine.py            순수 로직 엔진 (종목-주 1건 → 이벤트·수익률)
+│       ├── strategy281.py       281 정식 정의 (엔진 설정 + 포트폴리오 배분)
+│       └── chart.py             보고서용 캔들 SVG 렌더러
+│
+├── pipeline/                 ★ 공용 부품 + 프로세스 드라이버
+│   ├── weekcal.py               순수 날짜 계산 (월요일 → 주경계·직전주·F0일)
+│   ├── screeners/            ★ 선정 로직 레지스트리 (config가 이름으로 지목)
+│   │   ├── __init__.py          get_screener(name) + resolve_names
+│   │   └── momentum_v1.py       시총≥컷 → 직전주 변동율Top → 거래대금Top (up롱/down숏)
+│   ├── f_run_engine.py         run_engine(code,start,end,F0) 5분봉+엔진 → 섹션 번들
+│   ├── f_build_report.py       build_report(워크스루)+selection_report(선정) 순수코드 렌더
+│   ├── live_config.py          config.yaml 로더 + week_paths(주별 폴더 경로)
+│   ├── data_source.py          bars_5m/f0_close (tvDatafeed 메인 + yfinance fallback)
+│   ├── p_report.py             [P1] (종목,기간) → 주별 워크스루 1 html
+│   ├── p_backtest.py           [P2] 과거주 선정+검증 → 1 html
+│   ├── p_live.py               [P3] 실시간 --mode select|update (cron)
+│   ├── p_email.py              Gmail 발송 --kind selection|daily|final (smtplib)
+│   └── {select_stocks,run_live_report}.py   옛 CLI 보존 shim
+│
+├── deploy/
+│   └── crontab               cron 등록 파일 (crontab deploy/crontab)
+│
+├── data/                     백테스트 원본 (CREON API, .gitignore — 로컬 전용)
+│
+├── experiment_report/        엔진 실험 기록 (날짜별 .md, 한글 자유양식)
+│
+├── report/                   산출 리포트
+│   ├── live/                 ★ 실시간 프로젝트 (실험 단위, 병렬 가능)
+│   │   └── {project}/           config.yaml(설정+가설) + 주별 날짜 폴더
+│   │       └── 2026-07-06/       _top5.json · selection.html · live.html
+│   │           ├── results.json    엔진 결과 스냅샷 (매 틱 갱신)
+│   │           └── bars/{code}_5m.csv   5분봉 원본 (백테스터 load_bars 포맷)
+│   ├── single/              단일종목 시뮬 산출 (③)
+│   └── architecture/        전체 방법론·아키텍처 문서
+│
+├── .claude/
+│   ├── agents/              single_simulator_agent(③) · kr-stock-screener 등
+│   ├── skills/              차트/검증 HTML 렌더링 스킬
+│   └── workflows/           live-weekly-pipeline.md
+│
+└── claude.md                프로젝트 목표·시뮬레이터 3종 스펙 (한글)
+```
+
+★ = 코드/실험이 사는 핵심 폴더.
+
+### 라이브 프로젝트 구조
+
+각 실험은 `report/live/{project}/` 폴더 하나. `config.yaml`(순수 yaml)이 그 실험의 전부:
+
+```yaml
+engine: engine281        # engines/ 폴더명
+screener: momentum_v1    # screeners/ 모듈명
+cap_min: 500000000000    # 시총 5,000억 이상
+top_change: 20           # 직전주 변동율 상위
+top_value: 5             # 그중 거래대금 상위
+direction: up            # up=상승 롱 / down=하락 숏
+emails: [kimse991228@gmail.com]
+desc: |                  # 사람이 읽는 실험 취지 (선정보고서에 반영)
+  ...
+```
+
+한 엔진×여러 선정기준, 또는 여러 엔진을 폴더별로 **병렬 운영**. 매주 토요일 `{다음주 월요일}/` 날짜 폴더를 새로 만들어 그 주 산출물을 격리 저장 → 주별 히스토리가 쌓인다.
+
+## 281 규칙 (한눈에)
+
+- **선정**: 진입 갭 `방향×(진입가/F0−1) ≥ 3%` 종목만. 갭⁴ 가중, 통과종목 집중, 무레버.
+- **진입**: 그 주 신고점/신저점을 새로 돌파하는 5분봉 **종가**로 롱/숏.
+- **익절**: 고점이익 **+8%** 도달 후, 피보 되돌림 0.75/0.5/0.25 통과 시 1/3·2/3·전량 분할 청산.
+- **손절**: 없음 (불리해도 홀드).
+- **청산**: **금요일 15:15 전량** — 손실은 이 강제청산으로만 실현(한 주로 제한).
+- **F0** = 전주 마지막 거래일(금) 종가.
+
+자세한 규칙·수치는 [`engines/engine281/README.md`](engines/engine281/README.md) 참고.
+
+## 빠른 시작
+
+**엔진 직접 호출:**
+```python
+import sys; sys.path.insert(0, "engines/engine281")
+from strategy281 import run_281, portfolio_281
+from engine import load_bars
+
+bars = load_bars("data/.../{code}_5m.csv")
+events, ctx = run_281(bars, F0=prior_friday_close)
+print(ctx["weekly_return"])          # 종목-주 net 수익률
+```
+
+**프로세스 (pipeline/):**
+```bash
+cd pipeline
+# 단발 워크스루
+python3 p_report.py 005930 2026-06-01 2026-07-06    # 임의 종목·기간 → 주별 워크스루
+
+# 실시간 라이브 (프로젝트 = report/live/{name}/config.yaml, 전체 순회)
+python3 p_live.py  --mode select                     # 토: 다음주 선정 → _top5.json + selection.html
+python3 p_live.py  --mode update                     # 평일 5분: 라이브 갱신 + bars CSV 축적
+python3 p_email.py --kind daily                      # 이메일 (selection|daily|final), --to로 수신자 override
+```
+전체 절차: [`.claude/workflows/live-weekly-pipeline.md`](.claude/workflows/live-weekly-pipeline.md)
+
+## 실시간 운영 (cron)
+
+전체 파이프라인이 순수 코드라 **cron 등록만 하면 자동 운영**된다 (Claude/API 비용 0).
+
+```bash
+crontab deploy/crontab            # 등록 (ON)
+crontab -l                        # 확인 (작업 목록 나오면 ON)
+crontab -r                        # 전부 해제 (OFF)
+systemctl is-active cron          # 데몬 상태 (active면 정상)
+tail -f report/live/_cron.log     # 실행 로그
+```
+
+**스케줄** (`deploy/crontab`): 토 09:00 선정 → 09:10 선정메일 · 평일 09~15시 5분 갱신 · 월~목 15:35 일일메일 · 금 15:35 최종메일.
+
+- cron이 "ON"이려면 ① 데몬 active(항상) + ② `crontab -l`에 작업 등록됨, 둘 다 참이어야 한다.
+- 이메일은 `p_email.py`(smtplib+Gmail). 발신 자격증명 `pipeline/.gmail_creds`(앱 비밀번호, **gitignore**). Gmail MCP는 cron/headless에서 못 쓰므로 코드로.
+- 이 머신(WSL2)은 systemd=true + cron.service 상시가동이라 등록만으로 백그라운드 실행.
+
+## 데이터 소스
+
+| 목적 | 도구 | 상태 |
+|---|---|---|
+| 시총/스크리닝·회사명 | tradingview-screener | ✅ |
+| 5분봉·F0 (메인) | **tvDatafeed** (KRX, KST) | ✅ |
+| 5분봉·일봉 (fallback) | yfinance (`{6자리}.KS`, UTC→KST) | ✅ |
+| 과거 백테스트 | CREON Plus API (Windows 수집, 로컬) | ✅ |
+
+## 주의
+
+- 백테스트 수치(+2.81%)는 **낙관 상한** — forward OOS(TradingView 13주)에선 더 약하다.
+- 라이브 가격은 tvDatafeed/yfinance 기준으로 공식 API와 미세차 가능 → 운영 전 교차검증 권장.
+- **엔진 15:15 조기청산 이슈**: `engine.py`는 데이터 마지막 날 15:15에 강제청산 → 주중(월~목) 라이브 평가엔 그날 조기청산이 섞임. 완전한 주(금=마지막날)엔 정상.
+- `data/`·`.gmail_creds`·`.tv_creds`는 git 추적 제외.

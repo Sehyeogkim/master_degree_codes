@@ -1,0 +1,100 @@
+"""
+Batch: mesh EVERY geo_0723 case at grid_size = 0.01, SEQUENTIALLY (Simmetrix license
+allows one at a time). Resumable: a case whose mesh-complete.mesh.vtu already exists is skipped.
+
+Output: fluid_0723/case_<i>/{meshing/mesh-complete/..., tree.dat, xyzts.dat}
+Progress CSV: lumen_meshing_g010_progress.csv  (case_id,status,nodes,tets,seconds)
+Failed list:  lumen_meshing_g010_failed.txt
+"""
+import re
+import sys
+import time
+import traceback
+from pathlib import Path
+
+HERE = Path("/home/jeff/project/65_final_0723")
+sys.path.insert(0, str(HERE))
+
+# Reuse the exact case pipeline from the main runner (unchanged meshing logic).
+from lumen_meshing_0723 import LumenMeshingCase, PARAMETER_CSV, CONFIG_PATH, GEO_DIR, FLUID_ROOT
+
+GRID = 0.01
+
+PROGRESS = HERE / "lumen_meshing_g010_progress.csv"
+FAILED = HERE / "lumen_meshing_g010_failed.txt"
+
+
+def vtu_counts(vtu_path):
+    """Cheap read of NumberOfPoints/NumberOfCells from the .vtu XML header."""
+    try:
+        head = vtu_path.read_bytes()[:4096].decode("latin-1")
+        pts = re.search(r'NumberOfPoints="(\d+)"', head)
+        cells = re.search(r'NumberOfCells="(\d+)"', head)
+        return (pts.group(1) if pts else "", cells.group(1) if cells else "")
+    except Exception:
+        return ("", "")
+
+
+def drop_sms(out_dir):
+    """Remove Simmetrix's native volume_mesh.sms (~180 MB/case).
+
+    Not used downstream -- svSolver reads the mesh-complete tree -- and it is by far
+    the largest artifact. Only ever called once mesh-complete.mesh.vtu exists.
+    """
+    sms = out_dir / "meshing" / "volume_mesh.sms"
+    if sms.exists():
+        mb = sms.stat().st_size / 1e6
+        sms.unlink()
+        print(f"        dropped volume_mesh.sms ({mb:.0f} MB)", flush=True)
+
+
+def main():
+    case_ids = sorted(
+        int(p.name.split("_")[1]) for p in GEO_DIR.glob("case_*") if p.is_dir()
+    )
+    if not PROGRESS.exists():
+        PROGRESS.write_text("case_id,status,nodes,tets,seconds\n")
+
+    failed = []
+    total = len(case_ids)
+    for n, cid in enumerate(case_ids, 1):
+        out_dir = FLUID_ROOT / f"case_{cid}"
+        done_marker = out_dir / "meshing" / "mesh-complete" / "mesh-complete.mesh.vtu"
+        if done_marker.exists():
+            print(f"[skip {n}/{total}] case_{cid} already meshed", flush=True)
+            drop_sms(out_dir)
+            continue
+
+        stp = GEO_DIR / f"case_{cid}" / "lumen.stp"
+        if not stp.exists():
+            print(f"[skip {n}/{total}] case_{cid}: no lumen.stp", flush=True)
+            failed.append(cid)
+            with PROGRESS.open("a") as f:
+                f.write(f"{cid},no_stp,,,0\n")
+            continue
+
+        print(f"[run  {n}/{total}] case_{cid} @ grid={GRID} ...", flush=True)
+        t0 = time.time()
+        try:
+            case = LumenMeshingCase(cid, out_dir, PARAMETER_CSV, CONFIG_PATH)
+            case.run(stp_path=stp, grid_size=GRID)
+            dt = time.time() - t0
+            nodes, tets = vtu_counts(done_marker)
+            print(f"[done {n}/{total}] case_{cid}: nodes={nodes} tets={tets} in {dt:.0f}s", flush=True)
+            drop_sms(out_dir)
+            with PROGRESS.open("a") as f:
+                f.write(f"{cid},done,{nodes},{tets},{dt:.0f}\n")
+        except Exception as e:
+            dt = time.time() - t0
+            print(f"[FAIL {n}/{total}] case_{cid}: {e}", flush=True)
+            traceback.print_exc()
+            failed.append(cid)
+            with PROGRESS.open("a") as f:
+                f.write(f"{cid},fail,,,{dt:.0f}\n")
+        FAILED.write_text(str(failed))
+
+    print(f"\nALL DONE. total={total} failed={failed}", flush=True)
+
+
+if __name__ == "__main__":
+    main()

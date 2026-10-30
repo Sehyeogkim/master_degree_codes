@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Copy all completed local cases (>=5) not yet on harvey, in NUMERIC order (lowest first,
+# so q_ramp's next-needed cases land first). flock-guarded: overlapping runs are no-ops.
+set -u
+SD=/tmp/claude-1000/-home-jeff-project-65-final-0723/4c5c939f-6472-457a-bbdc-757c03d64685/scratchpad
+exec 9>"$SD/copy_backlog.lock"
+flock -n 9 || { echo "copy_backlog: already running, skip"; exit 0; }
+
+LOCAL=/home/jeff/project/65_final_0723
+REMOTE_BASE=/home/jeff/project/65_final_0723/fluid_0723
+COPY="$SD/copy_case_to_harvey.sh"
+MINCASE=5
+
+mapfile -t ONH < <(ssh -o BatchMode=yes harvey \
+  "for d in $REMOTE_BASE/case_*; do [ -d \"\$d/meshing/mesh-complete\" ] && basename \"\$d\" | sed 's/case_//'; done" 2>/dev/null)
+declare -A HAS; for n in "${ONH[@]}"; do HAS[$n]=1; done
+
+# numeric-sorted local case numbers
+mapfile -t NUMS < <(for d in "$LOCAL"/fluid_0723/case_*; do basename "$d" | sed 's/case_//'; done | sort -n)
+
+copied=()
+for n in "${NUMS[@]}"; do
+  [ "$n" -ge "$MINCASE" ] 2>/dev/null || continue
+  d="$LOCAL/fluid_0723/case_$n"
+  [ -f "$d/tree.dat" ] && [ -f "$d/xyzts.dat" ] && [ -d "$d/meshing/mesh-complete" ] || continue
+  [ -n "${HAS[$n]:-}" ] && continue
+  if bash "$COPY" "$n" >/dev/null 2>&1; then copied+=("$n"); fi
+done
+echo "copy_backlog: copied=[${copied[*]:-none}]"

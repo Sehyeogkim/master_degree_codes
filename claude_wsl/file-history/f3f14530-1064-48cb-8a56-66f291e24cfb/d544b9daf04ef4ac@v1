@@ -1,0 +1,22 @@
+---
+name: lumen-mesh-wsl-setup
+description: How to run 65_final_0723 lumen Simmetrix meshing locally in WSL (not cvbml01)
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: ed2b0390-2511-4d59-a9e9-f9ecbb858024
+  modified: 2026-07-23T01:38:57.563Z
+---
+
+Running `lumen_simmetrix.py` (lumen Simmetrix meshing) in WSL instead of cvbml01. Verified 2026-07-23: one mesh at grid_size 0.02 built end-to-end (~49s, ~810k tets).
+
+WSL paths (replace the cvbml01 `/opt/cvbml/...` paths):
+- mesh_generator binary: `/home/jeff/repo/SyntheticTreeGenerator/build/apps/MeshGenerator/mesh_generator`
+- license: `/home/jeff/repo/SyntheticTreeGenerator/apps/MeshGenerator/floating.lic`
+- These go in `65_final_0723/simmetrix_path.json`.
+
+Build fix: `mesh_generator` was not pre-built. `make` in the build dir failed with `undefined reference to xdr_*` — XDR moved from glibc to libtirpc on modern Ubuntu, and only `libtirpc.so.3` (no dev pkg) is present. Fix applied: appended `/lib/x86_64-linux-gnu/libtirpc.so.3` to `target_link_libraries` in `apps/MeshGenerator/CMakeLists.txt`, then `cmake .` + `make`. (sudo needs a password, so `libtirpc-dev` install is not an option.)
+
+Script bugs for the flat WSL layout: `CONFIG_PATH = HERE.parent / "simmetrix_path.json"` was wrong (json sits next to the script) — changed to `HERE / ...`. Input is `HERE/lumen_mesh_test/lumen.vtp`.
+
+Input note: 65 only has STEP CAD (`geo_0723/case_*/lumen.stp`), no lumen.vtp. For the quick smoke test I used `61_mesh_independtest/1_Ideal_coronary/source_lumen.vtp` as the input surface — it is NOT the real 65 geometry. Real runs need a STEP→triangulated-VTP conversion first. See [[focus-solid-not-lumen]] (that memory predates this lumen pivot).

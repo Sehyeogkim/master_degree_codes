@@ -1,0 +1,19 @@
+engine: engine281          # 매매 엔진 (engines/ 폴더명)
+screener: momentum_v1      # 선정 로직 (screeners/ 모듈명)
+cap_min: 500000000000      # 시총 5,000억 이상
+top_change: 20             # 직전주 주간변동율 상위 20
+top_value: 5               # 그중 거래대금 상위 5
+direction: up              # up=상승 모멘텀 롱 / down=하락 숏
+emails:
+  - kimse991228@gmail.com
+  - limsung7969@naver.com
+
+# desc = 사람이 읽는 실험 취지. 토요일 선정 agent가 읽어 선정보고서 서술에 반영.
+desc: |
+  live_project1 — 시총 5,000억+ 상승 모멘텀 롱 (engine281)
+
+  기본 실험. 281 엔진의 표준 라이브 검증.
+  - 가설: 직전주 강한 상승 모멘텀(대형주)이 이번 주 신고점 돌파로 이어질 때
+    롱 진입해 +8% 익절 게이트를 노린다.
+  - 선정: 시총 5,000억↑ 유니버스에서 직전주 주간변동율 상승 Top20 → 거래대금 Top5.
+  - F0: 직전 금요일 종가. 청산: 금 15:15 강제.

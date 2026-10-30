@@ -1,0 +1,123 @@
+#!/usr/bin/env python
+"""
+Type-2 (calcification) solid meshing, single case, off geo_0723. Batch-friendly.
+
+Usage: run_type2_0723.py <case> <nproc> [SOL=1] [SAVE_VTU=0] [MESH_SIZE=0.06]
+  SOL=1  -> straight-edge quadratic (second_order_linear=True)  [production default]
+  SOL=0  -> curved quadratic (second_order_linear=False + high_order_optimize=2)
+Output: solid_0723/case_<i>/type2_mesh/solid_type_2_quad{,_curved}.msh (+ .vtu if SAVE_VTU=1)
+
+- Param source: pre_data/parameter.csv (same schema as input_0605.csv).
+- Geometry: geo_0723/case_<i>/{lumen,solid,lipid,fc,fc_offset}.stp
+- HXT_type2_utils.py left UNCHANGED (paths redirected on the instance).
+- Resumable: skips if the target .msh already exists (non-empty).
+- Solid meshing: HXT (algo 10); on failure retries Delaunay (algo 1).
+- Cleans intermediate cal files, keeping only the final solid .msh.
+"""
+import sys
+import time
+from pathlib import Path
+
+import HXT_type2_utils as T
+from utils.utils_geo_mesh.main_CAD import CAD_instance_from_idx as _cad
+
+HERE = Path(__file__).resolve().parent
+CASE = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+NPROC = int(sys.argv[2]) if len(sys.argv) > 2 else 20
+SOL = int(sys.argv[3]) if len(sys.argv) > 3 else 1
+SAVE_VTU = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+MESH_SIZE = float(sys.argv[5]) if len(sys.argv) > 5 else 0.06
+
+# ---- resume: skip if final mesh already exists ----
+out = HERE / "solid_0723" / f"case_{CASE}" / "type2_mesh"
+msh_name = "solid_type_2_quad.msh" if SOL else "solid_type_2_quad_curved.msh"
+final_msh = out / msh_name
+if final_msh.exists() and final_msh.stat().st_size > 0:
+    print(f"[skip] case {CASE}: {msh_name} already exists")
+    sys.exit(0)
+
+# ---- param source = parameter.csv ----
+PARAM_CSV = HERE / "pre_data" / "parameter.csv"
+T.CAD_instance_from_idx = lambda idx, _i: _cad(int(idx), str(PARAM_CSV))
+
+m = T.HXT_mesh_II(case_index=CASE, nproc=NPROC)
+
+# ---- redirect geometry -> geo_0723, outputs -> solid_0723 ----
+geo = HERE / "geo_0723" / f"case_{CASE}"
+m.lipid_path = geo / "lipid.stp"
+m.solid_path = geo / "solid.stp"
+m.fc_path = geo / "fc.stp"
+m.lumen_path = geo / "lumen.stp"
+m.fc_offset_path = geo / "fc_offset.stp"
+out.mkdir(parents=True, exist_ok=True)
+m.rst_dir = out
+m.cal_dep_json_path = out / "cal_dependent_variables.json"
+m.raw_cal_msh_path = out / "cal_subdomain.msh"
+m.cal_vtu_path = out / "cal_subdomain.vtu"
+m.offset_cal_stl_path = out / "offset_cal_subdomain.stl"
+m.prog_cal_vtu_path = out / "cal_propa.vtu"
+m.smooth_cal_stl_path = out / "smo_cal.stl"
+m.scaled_smo_cal_stl_path = out / "smo_cal_scaled.stl"
+m.smooth_cal_step_path = out / "smo_cal.step"
+m.lipid_stl_path = out / "true_lipid.stl"
+m.cal_intersect_lipid_stl_path = out / "ca_lipid_intersect.stl"
+m.final_solid_msh_path = final_msh
+
+for f in ("lumen.stp", "solid.stp", "lipid.stp", "fc.stp", "fc_offset.stp"):
+    assert (geo / f).exists(), f"missing input: {geo / f}"
+print(f"[cfg] case={CASE} nproc={NPROC} SOL={SOL} save_vtu={SAVE_VTU} mesh_size={MESH_SIZE}")
+
+t0 = time.time()
+
+# Steps 1-3: calcification subdomain -> propagate -> smooth -> validate -> step
+T.HXT_mesh_II.get_lipid_stl(m.lipid_path, m.fc_path, m.lipid_stl_path)
+T.HXT_mesh_II.create_cal_mesh(m.lipid_path, m.fc_offset_path, m.raw_cal_msh_path, m.nproc)
+m.Voronoi_tesselation_KDTREE(m.raw_cal_msh_path)
+m.smooth_vtu_to_stl(m.prog_cal_vtu_path, m.smooth_cal_stl_path, smooth_mode="laplacian")
+if not T.HXT_mesh_II.does_ca_inside_lipid(m.lipid_stl_path, m.smooth_cal_stl_path):
+    print(f"[invalid] case {CASE}: calcification NOT inside lipid core")
+    sys.exit(2)
+T.HXT_mesh_II.scale_stl(m.smooth_cal_stl_path, m.scaled_smo_cal_stl_path, scale_factor=10.0)
+T.HXT_mesh_II.stl_to_step(m.scaled_smo_cal_stl_path, m.smooth_cal_step_path, m.scripts_dir)
+
+# Step 4: solid meshing (HXT first, Delaunay fallback), size=MESH_SIZE, SOL controls curvature
+hoo = 0 if SOL else 2
+stats = None
+used_algo = None
+last_err = None
+for algo in (10, 1):  # 10=HXT, 1=Delaunay
+    try:
+        stats = m.solid_gmshing(
+            mesh_size=MESH_SIZE, nproc=m.nproc, order=2,
+            second_order_linear=bool(SOL), high_order_optimize=hoo,
+            box_vout=0.2, optimize=True, write=True, algorithm_3d=algo,
+        )
+        used_algo = "HXT" if algo == 10 else "Delaunay"
+        break
+    except Exception as e:
+        import gmsh
+        if gmsh.is_initialized():
+            gmsh.finalize()
+        last_err = e
+        print(f"[retry] case {CASE}: algo={algo} failed: {e}")
+if stats is None:
+    raise RuntimeError(f"case {CASE}: HXT and Delaunay both failed: {last_err}")
+
+print(f"[MESH] case {CASE}: algo={used_algo} size={stats['mesh_size']} "
+      f"n_tet={stats['n_tet']:,} nodes={stats['n_nodes']:,} "
+      f"min_q={stats['min_quality']:.4f} mean_q={stats['mean_quality']:.4f} "
+      f"neg={stats['n_negative']}")
+
+if SAVE_VTU:
+    T.HXT_mesh_II.msh_to_vtu(m.final_solid_msh_path)
+
+# ---- cleanup: keep only the final solid .msh (+ .vtu if made) ----
+for p in (m.raw_cal_msh_path, m.cal_vtu_path, m.offset_cal_stl_path, m.prog_cal_vtu_path,
+          m.smooth_cal_stl_path, m.scaled_smo_cal_stl_path, m.smooth_cal_step_path,
+          m.lipid_stl_path, m.cal_intersect_lipid_stl_path, m.cal_dep_json_path):
+    try:
+        Path(p).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+print(f"[done] case {CASE} {time.time() - t0:.1f}s -> {m.final_solid_msh_path}")

@@ -1,0 +1,23 @@
+import sys
+sys.path.insert(0, "/home/jeff/bullet281/pipeline")
+sys.path.insert(0, "/home/jeff/bullet281/engines/engine281")
+import data_source as ds
+import p_live
+from strategy281 import STRAT281
+from engine import run as run281
+
+CSV = "/home/jeff/bullet281/report/live/live_project1/2026-07-13/bars/036930_5m.csv"
+F0 = 191900.0
+
+# 실제 저장된 CSV → Bar → 엔진 (재사용 경로가 내는 결과)
+prior = ds.load_bars_csv(CSV)
+ev, ctx = run281(prior, F0, capital=p_live.CAPITAL, **STRAT281)
+ents = [e for e in ev if e.kind == "ENTRY"]
+print(f"실제 CSV {len(prior)}봉 → weekly_return={ctx['weekly_return']*100:+.2f}%  진입={len(ents)}")
+
+# 나쁜 틱 재현: fresh=yfinance 1봉, prior=실제 CSV → 가드가 되돌리나?
+one = prior[-1:]                       # 1봉짜리 부실 fetch 흉내
+bars, reused = p_live._pick_bars(one, prior)
+ev2, ctx2 = run281(bars, F0, capital=p_live.CAPITAL, **STRAT281)
+print(f"나쁜 틱(1봉) + 직전 CSV → reused={reused}  결과 weekly_return={ctx2['weekly_return']*100:+.2f}%")
+print("→ 가드 없으면 +0.00%(이메일 증상), 가드 있으면 -11%대여야 정상")

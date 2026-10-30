@@ -1,0 +1,36 @@
+# back_test — causal 자본배분 부트스트랩 실험
+
+옛 281 배분(**진입 gap⁴**)은 진입 시점이 종목마다 달라 5종목 gap을 동시에 알아야
+정규화된다 → **look-ahead(실시간 실행 불가)**. 이를 **매매주 시작 전 확정되는
+'직전주 주간변동율'** 신호로 대체하면 완전 causal. 그 신호를 어떤 스케일로 배분에
+쓰는 게 최적인지 부트스트랩으로 비교한다. **원래 엔진(`engines/engine281/`)은 불변** —
+여기서 읽기전용 import만.
+
+## 파이프라인
+```
+blib.py         엔진 causal 가동 + yfinance 일봉 캐시(F0·직전주변동율 소스)
+build_cache.py  355종목 일봉 프리페치(resumable) → cache/daily/{code}.csv
+build_weekly.py 255주 × 선정종목 → {신호, F0, net수익률 r, 진입gap} → weekly_records.json
+allocation.py   7개 배분규칙(equal/linear/square/quartic/sigmoid/softmax/lookahead_gap4)
+bootstrap.py    SEED=42·B=5000, 원자=주, 평균의 표집분포 → 95% CI·IQR
+report.py       SVG 박스플롯 + 통계표 → self-contained HTML
+run_all.py      오케스트레이터 → report/backtest_allocation_bootstrap.html
+```
+실행: `python3 run_all.py` (weekly_records 없으면 build_weekly 자동 선행. 캐시는 build_cache 먼저).
+
+## 데이터·신호
+- 5분봉 = `data/data_creon_API/`(CREON, 선정 baked-in, 255주/355종목).
+- **F0(직전 금종가)·직전주변동율은 데이터에 없어** yfinance 일봉으로 조달(CREON 5분봉 시가와 일치 확인).
+- 신호 = `(직전금종가/직전월시가 − 1)×100` (= momentum_v1 선정 기준과 동일).
+- F0 정합성: yfinance 직전금종가 vs CREON 월 첫봉시가 괴리 >35% → 분할조정 불일치로 제외.
+
+## 핵심 결과 (255주)
+- **causal 규칙 = +0.59 ~ +0.73%/주** (최고 square). 강집중(quartic/softmax)은 오히려 손해.
+- **lookahead_gap⁴ = +2.33%/주** — 옛 "+2.81"의 정체. 실행 불가·비교 상한선.
+- 결론: 실시간 실행가능한 진짜 엣지는 **~+0.7%/주**, 균등분산과 큰 차이 없음.
+  직전주 모멘텀은 이번주 수익의 약한 예측자 → 집중이 분산만 키움.
+
+## 한계
+과적합 미해결(같은 255주 재조합) → walk-forward 병행 필요. 레짐 조건부. net비용 반영하나 시장충격 미반영.
+
+`cache/`는 재생성 가능(gitignore). `weekly_records.json`은 재현용으로 커밋.

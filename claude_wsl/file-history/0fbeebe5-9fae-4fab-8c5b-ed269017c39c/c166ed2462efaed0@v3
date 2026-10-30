@@ -1,0 +1,151 @@
+"""공용 데이터 소스 — 메인 tvDatafeed, 보조(fallback) yfinance.
+
+- 5분봉(트레이딩 데이터)·F0(지난주 금 종가)를 tvDatafeed로 우선 받고, 실패/부실하면 yfinance로.
+- tvDatafeed 로그인: pipeline/.tv_creds (1행 ID, 2행 PW) 있으면 사용, 없으면 익명.
+- tvDatafeed 타임스탬프는 KRX 로컬(KST). yfinance는 UTC → KST 변환.
+- 근거: Notion 'trading view data complition' — tvDatafeed 커버리지 완전(yfinance가 놓치는 종목 있음),
+  단 flaky라 재시도 + yfinance fallback.
+"""
+import os, sys, warnings, logging, signal
+warnings.filterwarnings("ignore"); logging.disable(logging.CRITICAL)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "engines", "engine281"))
+from engine import Bar
+
+signal.signal(signal.SIGALRM, lambda s, f: (_ for _ in ()).throw(TimeoutError()))
+HERE = os.path.dirname(os.path.abspath(__file__))
+CRED = os.path.join(HERE, ".tv_creds")
+MIN_BARS_PER_DAY = 10          # 이보다 적으면(하루 밀도) 부실 → fallback
+MIN_WEEK_BARS = 10             # 주간 데이터로 인정할 최소 총 봉수 (1봉짜리 yfinance 오염 차단)
+_tv = None
+
+
+def load_bars_csv(path):
+    """p_live가 매 틱 저장한 5분봉 CSV(datetime,open,high,low,close,volume) → [Bar]. 없으면 []."""
+    if not os.path.exists(path):
+        return []
+    out = []
+    with open(path, encoding="utf-8") as f:
+        next(f, None)                      # 헤더
+        for line in f:
+            p = line.rstrip("\n").split(",")
+            if len(p) < 6:
+                continue
+            try:
+                out.append(Bar(p[0], float(p[1]), float(p[2]), float(p[3]), float(p[4]), float(p[5])))
+            except ValueError:
+                continue
+    return out
+
+
+def _tv_client():
+    global _tv
+    if _tv is None:
+        from tvDatafeed import TvDatafeed
+        if os.path.exists(CRED):
+            L = [x.strip() for x in open(CRED).read().splitlines() if x.strip()]
+            try:
+                _tv = TvDatafeed(username=L[0], password=L[1]) if len(L) >= 2 else TvDatafeed()
+            except Exception:
+                _tv = TvDatafeed()
+        else:
+            _tv = TvDatafeed()
+    return _tv
+
+
+def _mk_bars(rows, start, end):
+    """rows: list of (dt_str 'YYYY-MM-DD HH:MM', o,h,l,c,v). start/end 날짜 필터 + 09:00~15:30."""
+    out = []
+    for dt, o, h, l, c, v in rows:
+        d, hm = dt[:10], dt[11:16]
+        if d < start or d >= end or hm < "09:00" or hm > "15:30" or c <= 0:
+            continue
+        out.append(Bar(dt, o, h, l, c, v))
+    return out
+
+
+def _bars_tv(code, start, end, tries=3):
+    from tvDatafeed import Interval
+    for _ in range(tries):
+        signal.alarm(70)
+        try:
+            df = _tv_client().get_hist(symbol=code, exchange="KRX",
+                                       interval=Interval.in_5_minute, n_bars=700)
+            signal.alarm(0)
+            if df is not None and len(df):
+                rows = [(str(ix)[:16], float(r["open"]), float(r["high"]), float(r["low"]),
+                         float(r["close"]), float(r.get("volume", 0))) for ix, r in df.iterrows()]
+                return _mk_bars(rows, start, end)
+        except Exception:
+            signal.alarm(0)
+    return []
+
+
+def _bars_yf(code, start, end):
+    import yfinance as yf
+    signal.alarm(60)
+    try:
+        d = yf.download(code + ".KS", start=start, end=end, interval="5m", progress=False)
+        signal.alarm(0)
+    except Exception:
+        signal.alarm(0); return []
+    if len(d) == 0:
+        return []
+    if hasattr(d.columns, "get_level_values"):
+        d.columns = d.columns.get_level_values(0)
+    d = d.dropna(); idx = d.index.tz_convert("Asia/Seoul")
+    rows = [(idx[i].strftime("%Y-%m-%d %H:%M"), float(d["Open"].iloc[i]), float(d["High"].iloc[i]),
+             float(d["Low"].iloc[i]), float(d["Close"].iloc[i]), float(d["Volume"].iloc[i]))
+            for i in range(len(d))]
+    return _mk_bars(rows, start, end)
+
+
+def bars_5m(code, start, end):
+    """이번 주 5분봉. tvDatafeed 메인 → 부실하면 yfinance. 반환: (bars, source)."""
+    bars = _bars_tv(code, start, end)
+    ndays = len({b.day for b in bars})
+    if bars and (not ndays or len(bars) / max(ndays, 1) >= MIN_BARS_PER_DAY):
+        return bars, "tvDatafeed"
+    yb = _bars_yf(code, start, end)
+    if len(yb) > len(bars):
+        return yb, "yfinance(fallback)"
+    return bars, ("tvDatafeed" if bars else "없음")
+
+
+def f0_close(code, sel_fri, fallback=None):
+    """지난주 금(sel_fri='YYYY-MM-DD') 종가(F0). tvDatafeed 일봉 메인 → 실패 시 fallback 값."""
+    from tvDatafeed import Interval
+    signal.alarm(60)
+    try:
+        df = _tv_client().get_hist(symbol=code, exchange="KRX", interval=Interval.in_daily, n_bars=20)
+        signal.alarm(0)
+        if df is not None and len(df):
+            m = sel_fri.replace("-", "")
+            cand = [(str(ix)[:10], float(r["close"])) for ix, r in df.iterrows() if str(ix)[:10].replace("-", "") <= m]
+            if cand:
+                return cand[-1][1], "tvDatafeed"
+    except Exception:
+        signal.alarm(0)
+    return fallback, "yfinance(fallback)"
+
+
+def prior_week_open_close(code, prior_mon, prior_fri, fb_open=None, fb_close=None):
+    """직전주 (월 시가, 금 종가) — 5분봉·F0와 동일한 tvDatafeed 일봉으로 통일 조달.
+
+    prior_mon/prior_fri='YYYY-MM-DD'. 직전주 [월,금] 구간의 첫 거래일 시가·마지막 거래일 종가.
+    (월/금이 휴장이면 그 주 첫/마지막 실제 거래일로 대체.) 실패 시 (fb_open, fb_close) 유지.
+    반환 (mon_open, fri_close, source). → chg=(fri_close/mon_open-1) 를 단일 소스로 계산 가능."""
+    from tvDatafeed import Interval
+    signal.alarm(60)
+    try:
+        df = _tv_client().get_hist(symbol=code, exchange="KRX", interval=Interval.in_daily, n_bars=20)
+        signal.alarm(0)
+        if df is not None and len(df):
+            pm, pf = prior_mon.replace("-", ""), prior_fri.replace("-", "")
+            wk = [(str(ix)[:10].replace("-", ""), float(r["open"]), float(r["close"]))
+                  for ix, r in df.iterrows()]
+            wk = [x for x in wk if pm <= x[0] <= pf]          # 직전주 [월,금] 거래일만
+            if wk:
+                return wk[0][1], wk[-1][2], "tvDatafeed"       # 첫날 시가, 마지막날 종가
+    except Exception:
+        signal.alarm(0)
+    return fb_open, fb_close, "yfinance(fallback)"

@@ -1,0 +1,108 @@
+"""fable4 리버설밴드(cross_freeze) 스윕 — 월요일 컷오프(30분 단위) × flip_max.
+베이스=281(tp_gate 0.08). 부트스트랩(SEED=42·B=5000, square)만.
+사용: python3 sweep_band.py  → sweep_band_results.json"""
+import os, sys, json, time, importlib.util
+import multiprocessing as mp
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+import allocation, bootstrap
+
+spec = importlib.util.spec_from_file_location("_f4", os.path.join(ROOT, "engines", "engine_fable4", "engine_fable4.py"))
+f4 = importlib.util.module_from_spec(spec); sys.modules["_f4"] = f4; spec.loader.exec_module(f4)
+
+DATA = os.path.join(ROOT, "data", "data_creon_API", "intraday_5m_by_week")
+OUT = os.path.join(HERE, "sweep_band_results.json")
+
+BASE = dict(tp_gate=0.08, entries=("trail",), stop_mode="none",
+            fee=0.00015, slip=0.0005, tax=0.0015, round_shares=True)
+
+CUTS = ["09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30",
+        "13:00", "13:30", "14:00", "14:30", "15:00", "15:30"]      # 13
+MAXS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 999]                        # 11 (999=무한)
+
+GRID = [("281", None, 0)]                                          # 기준선(플립 없음)
+GRID += [(f"{c}·x{'inf' if m>10 else m}", c, m) for c in CUTS for m in MAXS]
+
+DS = None
+
+
+def load_dataset():
+    wr = json.load(open(os.path.join(HERE, "weekly_records.json"), encoding="utf-8"))["weeks"]
+    ds = []
+    for w in sorted(wr):
+        d = os.path.join(DATA, w)
+        files = {fn.split("_")[0]: os.path.join(d, fn) for fn in os.listdir(d)
+                 if fn.endswith("_5m.csv") and os.path.getsize(os.path.join(d, fn)) > 100}
+        for s in wr[w]:
+            p = files.get(s["code"])
+            if not p:
+                continue
+            bars = f4.load_bars(p)
+            if bars:
+                ds.append((w, s["code"], s["signal"], s["F0"], bars))
+    return ds
+
+
+def run_config(cfg):
+    label, cut, mx = cfg
+    flip_on = mx > 0
+    recs = {}
+    n = flip_hit = flips_total = 0
+    for w, code, sig, F0, bars in DS:
+        if flip_on:
+            ev, ctx = f4.run(bars, F0, flip_monday=True, flip_days=1, flip_cutoff_hm=cut,
+                             flip_max=mx, flip_mode="cross_freeze", **BASE)
+        else:
+            ev, ctx = f4.run(bars, F0, **BASE)          # 281 (플립 off)
+        gap = None
+        for e in ev:
+            if e.kind == "ENTRY":
+                gap = e.direction * (e.price / F0 - 1)
+                break
+        recs.setdefault(w, []).append(dict(signal=sig, r=ctx["weekly_return"], gap=gap))
+        n += 1
+        if flip_on and ctx["flips_used"] > 0:
+            flip_hit += 1
+            flips_total += ctx["flips_used"]
+    rules_mean, weekly = {}, {}
+    for key in ("equal", "square", "quartic"):
+        fn = dict((k, f) for k, _l, f in allocation.RULES)[key]
+        wk = allocation.weekly_returns(recs, fn)
+        rules_mean[key] = sum(wk) / len(wk) * 100
+        weekly[key] = wk
+    st = bootstrap.analyze(weekly["square"])
+    sw = [s["r"] for w in recs for s in recs[w]]
+    return dict(label=label, cut=cut, max=(None if mx == 0 else mx),
+                sw_mean=sum(sw) / len(sw) * 100,
+                flip_rate=(flip_hit / n * 100 if flip_on else 0.0),
+                flips_per_sw=(flips_total / n if flip_on else 0.0),
+                rules_mean=rules_mean,
+                square_mean=st["obs_mean"], ci_lo=st["ci_lo"], ci_hi=st["ci_hi"],
+                p_pos=st["prob_pos"], weekly_square=weekly["square"])
+
+
+def main():
+    global DS
+    t0 = time.time()
+    DS = load_dataset()
+    print(f"{len(DS)} 종목-주 로드 {time.time()-t0:.0f}s · 스윕 {len(GRID)}설정", flush=True)
+    t1 = time.time()
+    with mp.Pool(8) as pool:
+        results = pool.map(run_config, GRID)
+    print(f"스윕 완료 {time.time()-t1:.0f}s", flush=True)
+    json.dump(results, open(OUT, "w", encoding="utf-8"), ensure_ascii=False)
+
+    base = next(r for r in results if r["label"] == "281")
+    b0 = base["square_mean"]
+    ranked = sorted((r for r in results if r["label"] != "281"), key=lambda r: -r["square_mean"])
+    print(f"\n기준 281 square {b0:+.3f}%")
+    print(f"{'설정':16} {'square':>8} {'CI':>18} {'P(>0)':>6} {'플립율':>7} {'평균플립':>7}")
+    for r in ranked[:14]:
+        print(f"  {r['label']:14} {r['square_mean']:+7.3f}% [{r['ci_lo']:+.2f},{r['ci_hi']:+.2f}] "
+              f"{r['p_pos']*100:5.0f}% {r['flip_rate']:6.1f}% {r['flips_per_sw']:6.2f}")
+    print("saved →", OUT)
+
+
+if __name__ == "__main__":
+    main()

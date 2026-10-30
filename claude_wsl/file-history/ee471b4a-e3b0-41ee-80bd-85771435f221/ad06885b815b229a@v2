@@ -1,0 +1,95 @@
+#!/usr/bin/env python
+"""
+Type-2 (calcification) solid meshing for a single case, off geo_0723 geometry.
+
+Mirrors HXT_meshing_II_main.whole_meshing_process (production policy) but redirects:
+  param csv -> 65_final_0723/pre_data/parameter.csv   (identical schema to input_0605.csv)
+  geometry  -> 65_final_0723/geo_0723/case_<i>/{lumen,solid,lipid,fc,fc_offset}.stp
+  output    -> 65_final_0723/solid_0723/case_<i>/type2_mesh/solid_type_2_quad.msh (+ .vtu)
+
+HXT_type2_utils.py is left UNCHANGED (same spirit as run_solid_0723.py for Type-1);
+only the instance attributes are redirected after construction.
+
+Usage: python run_type2_0723.py <case> <nproc>
+"""
+import sys
+import time
+from pathlib import Path
+
+import HXT_type2_utils as T
+from utils.utils_geo_mesh.main_CAD import CAD_instance_from_idx as _cad
+
+HERE = Path(__file__).resolve().parent
+CASE = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+NPROC = int(sys.argv[2]) if len(sys.argv) > 2 else 20
+
+# ---- parameter source: parameter.csv (geo_0723 params; same schema as input_0605.csv) ----
+PARAM_CSV = HERE / "pre_data" / "parameter.csv"
+T.CAD_instance_from_idx = lambda idx, _ignored: _cad(int(idx), str(PARAM_CSV))
+
+# __init__ reads pre_data/parameter.csv (via the patch) and builds the vessel model.
+m = T.HXT_mesh_II(case_index=CASE, nproc=NPROC)
+
+# ---- redirect geometry to geo_0723/case_<i> ----
+geo = HERE / "geo_0723" / f"case_{CASE}"
+m.lipid_path = geo / "lipid.stp"
+m.solid_path = geo / "solid.stp"
+m.fc_path = geo / "fc.stp"
+m.lumen_path = geo / "lumen.stp"
+m.fc_offset_path = geo / "fc_offset.stp"
+
+# ---- redirect every output under solid_0723/case_<i>/type2_mesh ----
+out = HERE / "solid_0723" / f"case_{CASE}" / "type2_mesh"
+out.mkdir(parents=True, exist_ok=True)
+m.rst_dir = out
+m.cal_dep_json_path = out / "cal_dependent_variables.json"
+m.raw_cal_msh_path = out / "cal_subdomain.msh"
+m.cal_vtu_path = out / "cal_subdomain.vtu"
+m.offset_cal_stl_path = out / "offset_cal_subdomain.stl"
+m.prog_cal_vtu_path = out / "cal_propa.vtu"
+m.smooth_cal_stl_path = out / "smo_cal.stl"
+m.scaled_smo_cal_stl_path = out / "smo_cal_scaled.stl"
+m.smooth_cal_step_path = out / "smo_cal.step"
+m.lipid_stl_path = out / "true_lipid.stl"
+m.cal_intersect_lipid_stl_path = out / "ca_lipid_intersect.stl"
+m.final_solid_msh_path = out / "solid_type_2_quad.msh"
+
+print(f"[cfg] case={CASE} nproc={NPROC}")
+print(f"[par] {PARAM_CSV}  (lesion_length={m.vessel_model.lesion_length}, fraction={m.vessel_model.fraction})")
+print(f"[in ] {geo}")
+print(f"[out] {out}")
+for f in ("lumen.stp", "solid.stp", "lipid.stp", "fc.stp", "fc_offset.stp"):
+    assert (geo / f).exists(), f"missing input: {geo / f}"
+
+t0 = time.time()
+
+# Step1. raw lipid.stl = lipid - fc
+T.HXT_mesh_II.get_lipid_stl(m.lipid_path, m.fc_path, m.lipid_stl_path)
+
+# Step2. calcification subdomain = lipid - fc_offset, then Voronoi/KDTree propagation
+T.HXT_mesh_II.create_cal_mesh(m.lipid_path, m.fc_offset_path, m.raw_cal_msh_path, m.nproc)
+m.Voronoi_tesselation_KDTREE(m.raw_cal_msh_path)
+
+# Step3. sharp vtu -> smoothed stl -> validate inside lipid -> scale -> step
+m.smooth_vtu_to_stl(m.prog_cal_vtu_path, m.smooth_cal_stl_path, smooth_mode="laplacian")
+if not T.HXT_mesh_II.does_ca_inside_lipid(m.lipid_stl_path, m.smooth_cal_stl_path):
+    print(f"[invalid] case {CASE}: calcification NOT inside lipid core -> stop")
+    sys.exit(2)
+print(f"[valid] case {CASE}: calcification inside lipid core")
+T.HXT_mesh_II.scale_stl(m.smooth_cal_stl_path, m.scaled_smo_cal_stl_path, scale_factor=10.0)
+T.HXT_mesh_II.stl_to_step(m.scaled_smo_cal_stl_path, m.smooth_cal_step_path, m.scripts_dir)
+
+# Step4. solid meshing with the calcification STEP (production policy)
+stats = m.solid_gmshing_production(
+    nproc=m.nproc, min_quality=0.0, max_tet=6_000_000,
+    coarsen_size=0.055, second_order_linear=True, box_vout=0.2,
+)
+print(f"[MESH] case {CASE}: size={stats['mesh_size']} "
+      f"algo={'HXT' if stats.get('algorithm_3d') == 10 else 'Delaunay'} "
+      f"n_tet={stats['n_tet']:,} nodes={stats['n_nodes']:,} "
+      f"min_q={stats['min_quality']:.4f} mean_q={stats['mean_quality']:.4f} "
+      f"neg={stats['n_negative']}")
+
+# Step5. msh -> vtu (points *= 0.1, drop cell_sets)
+T.HXT_mesh_II.msh_to_vtu(m.final_solid_msh_path)
+print(f"[done] {time.time() - t0:.1f}s -> {m.final_solid_msh_path}  (+ .vtu)")

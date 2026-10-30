@@ -1,0 +1,366 @@
+# Solid mesh independence study — LAP (Type-1) fibrous cap
+
+**Status: complete for case 0 (Box recipe). 2026-07-29.**
+
+Everything below was run on **ws1 (cvbml01)**. Late that evening ws1's root disk failed
+(read-only remount → I/O errors → sshd down), so the raw outputs are stranded on that
+machine. This directory is the **self-contained record**: methodology, every script, and
+every number, so the study can be reproduced on ws2 without ws1.
+
+---
+
+## 0. Where the raw data lives (and why it is not here)
+
+| what | where | reachable? |
+|---|---|---|
+| meshes, FC vtu, logs, analysis CSV | `ws1:/mnt/hdd/jeff/mesh_indep_solid/` | ❌ ws1 down; the data is on `/dev/sda1`, the **healthy** disk, so it should survive |
+| scripts | `ws1:/mnt/hdd/jeff/mesh_indep_solid/scripts/` | ❌ — **reproduced verbatim in `scripts/` here** |
+| rescue copy of 54_analysis | `ws1:/mnt/hdd/jeff/rescue_54_analysis/` | ❌ partial (see §7) |
+
+`/mnt/hdd` is a different physical disk (`/dev/sda1`, 15 TB, 27% used) from the one that
+failed (`/dev/mapper/vgubuntu-root`), so the study outputs are expected to be intact once
+ws1 comes back.
+
+---
+
+## 1. What the study answers
+
+For the LAP solid model, is the fibrous-cap stress result independent of the solid mesh,
+and what is the coarsest mesh that can be defended in the paper?
+
+Reported quantities:
+
+| metric | definition |
+|---|---|
+| **cap max σ₁** | max nodal maximum-principal stress over the lumen-facing cap surface |
+| **p99 / p99.9** | upper percentiles of the same nodal population |
+| **PSS** | `max_n mean(σ₁ over cap nodes within r of n)`, r = 0.01 cm — the published definition |
+| **ΔPSS** | same operator applied to the field `σ_peak − σ_low` (**full range, no /2**) |
+
+---
+
+## 2. ⚠️ Two traps found on the way (read before rerunning anything)
+
+### Trap A — `utils_bc.Apply_Traction` differs between ws1 and ws2 (100× error)
+
+`~/repo/master_python/src/utils/utils_ansys/utils_bc.py` is **not the same file** on the
+two workstations.
+
+| host | what it writes | status |
+|---|---|---|
+| **ws2** | `sfe,e,1,PRES,0,Tx` + `sfe,e,2,…,Ty` + `sfe,e,3,…,Tz` (traction **vector**) | **CORRECT** |
+| **ws1** | `sfe,e,1,PRES,0,‖T‖` (magnitude on face 1 only) | **STALE / WRONG** |
+
+`pymapdl_simulation_ver2.py` sets `keyopt(7,2,1)`, so SURF154 faces 1/2/3 map to element
+**local x/y/z**. ws1's version therefore puts the entire traction magnitude into the
+in-plane direction instead of resolving it into normal + shear. Loading a thin, stiff cap
+in-plane instead of normally inflates cap stress enormously.
+
+Measured on case 0, identical mesh and wall CSV:
+
+| | cap max σ₁ |
+|---|---|
+| ws2 / correct vector form | 1.1541e6 dyne/cm² = **115.4 kPa** ✅ |
+| ws1 / stale magnitude form | 1.2532e8 dyne/cm² = **12 532 kPa** ❌ (108×) |
+
+ws1's file still carries the vector form **commented out** underneath — easy to misread as
+"the vector form was rejected". It was not; ws1 is simply behind.
+
+`scripts/solve_one.py` overrides `Apply_Traction` in-process rather than editing the
+shared repo, because other jobs on the host import the same package.
+
+**Verification that the override is correct:** re-running the production mesh
+(`LAP_mesh/solid_LAP_0.msh`) with `solve_one.py` reproduced the production
+`FC_case_0_peak.vtu` exactly — 1.1541e6 dyne/cm², cap_n 28 145, both identical.
+
+Affected code paths:
+
+| BC path | scripts | at risk? |
+|---|---|---|
+| `utils_bc.Apply_Traction` (SFE vector) | `pymapdl_simulation_ver1.py`, **`ver2.py`** | **YES** |
+| `/MAP` → `WRITEMAP` → `INPUT(mapped.sfe)` | `pymapdl_sim_LAP_0728.py`, `pymapdl_sim_CP_0728.py`, `pymapdl_simulation_ver5_fibrous*.py` | no |
+
+Production LAP **peak** ran ver2 **on ws2** → correct. Production LAP **low** ran ver4
+`/MAP` on ws1 → never touches `Apply_Traction` → correct. **The production dataset is
+clean**; only ad-hoc ver2 runs launched on ws1 were affected.
+
+**Sanity check for any cap-stress result:** fibrous-cap principal stress lives at
+**1e2 – 1e3 kPa** (1e6 – 1e7 dyne/cm²). Applied wall traction is ~2.1e5 dyne/cm²
+(≈21 kPa ≈ 157 mmHg), so the stress concentration factor should be single digits.
+Anything in the MPa range is a bug. **Output arrays are CGS (dyne/cm²); ×0.1 → Pa.**
+
+### Trap B — gmsh 2D Algorithm 5 blows up at specific mesh sizes
+
+`HXT_meshing_I*.py` hardcodes `Mesh.Algorithm = 5` (2D Delaunay). At size 0.05 on case 0
+it emits
+
+```
+Warning : 4 elements remain invalid in surface 8
+```
+
+and then over-refines the surface trying to recover, so **a coarser nominal size produced
+far more elements**:
+
+| nominal size | algo2d = 5 | algo2d = 6 |
+|---|---|---|
+| 0.04 | 5 242 035 nodes | 4 567 767 |
+| **0.05** | **9 263 701**, min quality 0.096 | **2 560 116**, min quality 0.284 |
+| 0.055 | 2 293 357 | — |
+| 0.0625 | 1 674 647 | 1 461 883 |
+
+Reproducible across two runs. It is **not** an HXT problem — switching 3D to Delaunay
+(`Algorithm3D = 1`) does not help, because the damaged surface mesh is inherited from 2D
+(the warning still fires and the count stays at 7.6e6). **`Algorithm = 6`
+(Frontal-Delaunay) fixes it**: recovery facets 1951 → 90, monotonicity restored, quality up.
+
+Same failure mode as the earlier solid-meshing sweep where the 5→6 ladder took the success
+rate from 84% → 95.8%.
+
+**Never treat nominal `mesh_size` as a proxy for resolution — always read back the actual
+node/element count.**
+
+---
+
+## 3. Which mesh does production actually use?
+
+Unknown at the start. Determined by re-meshing case 0 at several sizes and matching the
+node count of the stored `LAP_mesh/solid_LAP_0.msh` (2 291 813 nodes / 1 523 760 tets):
+
+| box size (algo2d = 5) | nodes | vs production |
+|---|---|---|
+| 0.04 | 5 242 035 | +129% |
+| 0.05 | 9 263 701 | (pathological, Trap B) |
+| **0.055** | **2 293 357** | **+0.067%** ✅ |
+| 0.0625 | 1 674 647 | −27% |
+
+**Production = Box field, `mesh_size = 0.055` mm, algo2d = 5.** The 0.083% residual in the
+tet count (1 525 026 vs 1 523 760) is the extra `optimize('HighOrder')` pass that
+`lap_0729/HXT_meshing_I_box.py` adds. This also matches the hardcoded
+`mesh_size = 0.055  # 50million` left in `HXT_meshing_I.py.__main__`.
+
+### Production cohort statistics (measured over every `solid_LAP_*.msh` on ws1 + ws2)
+
+910 meshes yielded a tet count. They split by mtime into two recipes:
+
+| cohort | n | recipe | 2nd-order tets, median [IQR] | nodes, median |
+|---|---|---|---|---|
+| 2026-03 | **762** | **Box @ 0.055** | **2.22e6 [1.73e6 – 2.85e6]** | 3.29e6 [2.58e6 – 4.16e6] |
+| 2026-07 | 148 | distance field @ 0.05–0.055 | 1.18e6 [0.90e6 – 1.50e6] | 1.75e6 |
+| pooled | 910 | — | 2.06e6 [1.55e6 – 2.72e6] | 3.05e6 [2.30e6 – 3.98e6] |
+
+Box cohort range: 0.79e6 – 8.47e6 tets.
+
+> ⚠️ **The draft's "approximately 3×10⁶ elements" is the NODE median, not the element
+> median.** Second-order tets carry ~1.48 nodes per element here. The element median is
+> **2.22e6** for the Box cohort.
+
+> ⚠️ **The cohort is not homogeneous.** 148 of the meshes used the distance-field recipe
+> and are ~1.9× coarser in element count. This study validated the **Box** recipe only.
+> Decision taken 2026-07-29: write the paper with Box only.
+
+---
+
+## 4. The ladder actually used
+
+Case 0, Box recipe, **algo2d = 6 for every level** so that `h` is the only variable.
+
+| level | nominal size | 2nd-order tets | nodes | min minSICN | poor | neg-J |
+|---|---|---|---|---|---|---|
+| finest | 0.032 | 5 949 098 | — | 0.306 | 0 | 0 |
+| fine | 0.04 | 3 156 195 | 4 567 767 | 0.305 | 0 | 0 |
+| **medium** | **0.05** | **1 721 620** | 2 560 116 | 0.284 | 1 | 0 |
+| coarse | 0.0625 | 947 190 | 1 461 883 | 0.244 | 2 | 0 |
+| *production* | *0.055 (algo2d 5)* | *1 525 026* | *2 293 357* | *0.197* | *10* | *0* |
+
+Realized refinement ratio `r = (N_coarse/N_fine)^(1/3)`: **1.224 / 1.220** — essentially
+geometric. Slightly under Roache's suggested `r ≥ 1.3`, but constant across both steps,
+which is what matters for a clean successive-difference argument.
+
+No `remain invalid` warnings at any level.
+
+---
+
+## 5. Solve setup
+
+Identical numerics to the production PEAK solver (`ws2:pymapdl_solve_peak.py` → `ver2`):
+
+- **ver2 SFE traction**, `Apply_Traction` overridden to the ws2 vector form (Trap A)
+- `EQSLV, PCG, 1e-5`; `ANTYPE, STATIC`; `NLGEOM, OFF` — production settings, left untouched
+  on purpose so the study measures what production actually produces
+- `msh_to_cdb` monkeypatched to blank `cell_sets` (LAP-mesh meshio IndexError fix)
+- peak BC ← `post_data/wall_expB_new/peak/wall_peak_case_0.csv` (Tx,Ty,Tz)
+- low BC ← `post_data/wall_no_hyperemia/low/wall_low_case_0.csv` (Tx,Ty,Tz columns)
+
+8 solves (4 meshes × 2 BC), 2 concurrent at `nproc 20`. Wall clock **30 min total**
+(19:25 → 19:55); the 5.9e6-element level took 16 min for both BCs.
+
+> Note: production pairs **peak = ver2 SFE traction** with **low = ver4 `/MAP` scalar
+> pressure**. This study used SFE for both, so its ΔPSS is internally consistent across the
+> four meshes but is not numerically identical to the production ΔPSS.
+
+---
+
+## 6. Results
+
+### 6.1 Radius-free cap stress — **converged, and the ladder behaves textbook**
+
+peak, cap max principal stress (kPa; ×1e4 for dyne/cm²):
+
+| grid | tets | raw max | p99.9 | p99 | change vs next-finer (raw max) |
+|---|---|---|---|---|---|
+| coarse | 0.95e6 | 114.41 | 112.99 | 109.87 | **1.130 %** |
+| **medium** | **1.72e6** | **115.70** | **114.06** | **110.69** | **0.154 %** |
+| fine | 3.16e6 | 115.52 | 113.96 | 110.69 | 0.042 % |
+| finest | 5.95e6 | 115.47 | 113.95 | 110.65 | — |
+| *production* | *1.52e6* | *115.41* | *114.06* | *110.59* | *0.053 % vs finest* |
+
+Δ(peak − low):
+
+| grid | tets | raw max | p99.9 | change vs next-finer (raw max) |
+|---|---|---|---|---|
+| coarse | 0.95e6 | 50.62 | 49.58 | **1.987 %** |
+| medium | 1.72e6 | 51.62 | 50.38 | **0.148 %** |
+| fine | 3.16e6 | 51.55 | 50.27 | 0.047 % |
+| finest | 5.95e6 | 51.52 | 50.25 | — |
+
+p99.9 successive changes: **0.953 % → 0.091 % → 0.010 %** (each refinement cuts the change
+by ~10×).
+
+**Conclusion.** `e(coarse→medium) ≫ e(medium→fine) ≈ 0`, so **0.05 is the coarsest grid on
+the converged plateau**. And the *actual production mesh* (1.52e6 tets) agrees with the
+5.95e6-element reference to **0.053 %**.
+
+### 6.2 PSS (fixed-radius neighbourhood mean) — **NOT converged**
+
+At r = 0.01 cm:
+
+| grid | tets | PSS (kPa) | ΔPSS (kPa) | `n_sphere` |
+|---|---|---|---|---|
+| coarse | 0.95e6 | 34.49 | 14.86 | 42 |
+| medium | 1.72e6 | 35.17 | 15.57 | 61 |
+| fine | 3.16e6 | 31.80 | 13.71 | 95 |
+| finest | 5.95e6 | 30.27 | 13.31 | 148 |
+
+`e(coarse→medium) = 1.97 %`, `e(medium→fine) = 9.57 %`, `e(fine→finest) = 4.80 %` —
+inverted and large. Observed order **p = −6.6**, i.e. outside the asymptotic range, so a
+Richardson/GCI extrapolation is not defensible.
+
+**Diagnosis.** `n_sphere` runs 42 → 148 across the ladder. PSS is an **unweighted nodal
+mean over a fixed physical radius**, so its sample size — and therefore its value — tracks
+mesh density. This persisted unchanged after the Trap A fix, which confirms it is a
+property of the **metric definition**, not of the FE solution. Area-weighted averaging
+would fix it, but that changes the published definition.
+
+Larger radii dilute the effect (at r = 0.02 the spread falls to ~2.4 % / 0.6 %,
+`n_sphere` 87 → 581) without removing the inversion.
+
+### 6.3 Value stability vs location stability — they trade off
+
+| metric | value spread over the ladder | argmax location scatter |
+|---|---|---|
+| raw max (peak) | 1.13 % | **0.29–4.55 mm** — bistable |
+| p99.9 (peak) | 0.95 % | (percentile, not a single node) |
+| PSS r=0.01 | 9.3 % | **0.024 mm** between the two finer meshes |
+| raw max (delta) | 1.99 % | **0.03 mm** — stable on every mesh |
+
+The peak field has two nearly equal maxima ~4.5 mm apart axially; tiny numerical
+differences flip which one wins, so the *value* agrees to 0.04 % while the *location*
+jumps. The Δ(peak−low) field has a single clear maximum and its location is stable
+everywhere.
+
+**Recommendation for the manuscript:** report the **value from p99.9** (spread 0.95 %, no
+free radius parameter, singularity-robust by construction so the standard "nodal maxima do
+not converge in FEM" objection is pre-empted) and, if a critical **location** is reported,
+take it from the ΔPSS / smoothed field rather than from the raw argmax.
+
+---
+
+## 7. Open items
+
+1. **Case 339, not case 0, is the cohort-median case.** Case 0's production mesh
+   (1.52e6 tets) is at the **13.6th percentile** of the Box cohort (median 2.22e6);
+   case 339 is at 2.220e6. The fluid section says "a case at the cohort median", so
+   repeating the ladder on **case 339** would make the two sections methodologically
+   parallel. Inputs verified present (4 STPs + both wall CSVs). Script staged as
+   `scripts/run_case339.sh`; it never ran — ws1's disk failed first.
+2. **Distance-field recipe (148 meshes) is not covered.** Decision: paper uses Box only.
+3. Raw outputs are stranded on `ws1:/mnt/hdd/jeff/mesh_indep_solid/` (healthy disk,
+   expected to survive).
+
+---
+
+## 8. Reproducing on ws2
+
+ws2 already has the **correct** `utils_bc.py`, so the Trap A override in `solve_one.py` is
+harmless but unnecessary there. Adjust the hardcoded paths at the top of each script
+(`/mnt/hdd/jeff/mesh_indep_solid` → wherever you stage it), then:
+
+```bash
+cd ~/project/54_analysis
+PY=$HOME/miniconda3/envs/ansys_new/bin/python
+
+# 1. meshes: 4 levels, box recipe, algo2d=6
+for S in 0.032 0.04 0.05 0.0625; do
+  $PY -u scripts/mesh_one_box.py 0 24 $S <OUT>/mesh_algo 6 10
+done
+
+# 2. solves: 4 meshes x {peak, low}, 2 concurrent
+bash scripts/run_solve.sh
+
+# 3. PSS / delta-PSS (production definition, 4 radii)
+$PY -u scripts/pss_mesh_indep.py <OUT>/analysis/pss_mesh_indep.csv \
+    h0.032:<peak>:<low>  h0.04:...  h0.05:...  h0.0625:...
+
+# 4. radius-free metrics + argmax drift
+$PY scripts/rawmax.py 0.032 0.04 0.05 0.0625
+
+# 5. GCI + critical-node drift
+$PY scripts/gci.py
+```
+
+`scripts/mshstat.sh` extracts (nodes, 2nd-order tets, mtime month) from one `.msh` and is
+what produced §3's cohort statistics:
+
+```bash
+cd ~/project/54_analysis/LAP_mesh && ls *.msh | xargs -P 8 -I{} /tmp/mshstat.sh {}
+```
+
+---
+
+## 9. Files here
+
+| file | role |
+|---|---|
+| `scripts/mesh_one_box.py` | single-case Box mesher; optional `algo2d`/`algo3d` override (Trap B) |
+| `scripts/solve_one.py` | ver2 SFE solve on an arbitrary mesh/BC; contains the Trap A override |
+| `scripts/run_solve.sh` | driver: 4 meshes × {peak, low}, 2 concurrent |
+| `scripts/run_mesh.sh` | driver: sequential meshing sweep |
+| `scripts/pss_mesh_indep.py` | PSS / ΔPSS at 4 radii — the `post_processing_0727.py` definition |
+| `scripts/rawmax.py` | raw max / p99 / p99.9 + argmax drift |
+| `scripts/gci.py` | Roache GCI + critical-node drift |
+| `scripts/mshstat.sh` | per-mesh node + tet counter |
+| `scripts/utils_bc_ws1.py`, `scripts/utils_bc_ws2.py` | the two divergent versions, kept as evidence for Trap A |
+| `data/mesh_cohort_ws1.txt`, `data/mesh_cohort_ws2.txt` | raw `case nodes tets mtime` for §3 |
+
+### PSS definition — authoritative source
+
+`65_final_0723/post_processing_0727.py`, inside `ws1:~/project/65_final_0723.tar.gz`.
+Extract with `tar -xzvf … --wildcards '*.py'` (gzip is one stream, so the read is ~50 GB
+even though only a few MB are written).
+
+```
+sigma_n     max principal stress at a cap-surface node
+N_r(n)      cap-surface nodes within distance r of n
+sigmabar_n  NaN-aware MEAN of sigma over N_r(n)
+
+PSS     = max_n sigmabar_n   on sigma(peak)
+del_PSS = max_n sigmabar_n   on sigma(peak) - sigma(low)     <- FULL range, no /2
+```
+
+- **No top-5 % pre-filter**; the reported value *is* the maximised statistic. An earlier
+  version filtered to the top 5 % and reported the winning sphere's Q95 — that is
+  `superseded_Q95def/`, do not reuse it.
+- Cap mask: `WALL_IN_FC` on ver5 `.vtk` output, or `Group == 5` on ver2 `.vtu` output —
+  the same node set.
+- Axial trim `Z_EPSILON = 0.02` off both ends of the cap patch.
+- Production radius **r = 0.01 cm**; mid-side nodes carry NaN and are excluded.

@@ -1,0 +1,91 @@
+"""Send a lumen-meshing status email over Gmail SMTP.
+
+Reuses the app-password credentials already set up for bullet281
+(pipeline/.gmail_creds) -- MCP Gmail can't send, and cron/headless has no
+Claude session anyway, so smtplib is the only route that works unattended.
+
+Usage:
+    python bin/notify_email.py "<subject>" "<body>"
+    python bin/notify_email.py --status      # build the body from the progress CSVs
+"""
+import smtplib
+import ssl
+import subprocess
+import sys
+from email.message import EmailMessage
+from pathlib import Path
+
+CREDS = Path("/home/jeff/bullet281/pipeline/.gmail_creds")
+HERE = Path("/home/jeff/project/65_final_0723")
+TO = "kimse991228@gmail.com"
+
+
+def load_creds():
+    sender = password = None
+    for line in CREDS.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            k, v = line.split("=", 1)
+            k, v = k.strip().lower(), v.strip()
+            if k in ("sender", "email", "user") or "@" in v:
+                sender = v
+            elif k in ("password", "pass", "app_password"):
+                password = v
+        elif "@" in line:
+            sender = line
+        else:
+            password = line
+    if not sender or not password:
+        sys.exit(f"[notify_email] {CREDS} 파싱 실패")
+    return sender, password
+
+
+def status_body():
+    """Summarise both grid batches straight off disk."""
+    done = len(list(HERE.glob("fluid_0723/case_*/meshing/mesh-complete/mesh-complete.mesh.vtu")))
+    alive = subprocess.run(
+        ["pgrep", "-f", "mesh_all_g015[.]py"], capture_output=True
+    ).returncode == 0
+    lines = [
+        f"완료: {done} / 384",
+        f"배치 프로세스: {'실행 중' if alive else '중단됨'}",
+        "",
+    ]
+    for tag, grid in (("g010", "0.01"), ("g015", "0.015")):
+        csv = HERE / f"lumen_meshing_{tag}_progress.csv"
+        if not csv.exists():
+            continue
+        rows = [r.split(",") for r in csv.read_text().splitlines()[1:] if r.strip()]
+        ok = [r for r in rows if r[1] == "done"]
+        bad = [r for r in rows if r[1] != "done"]
+        if not ok:
+            continue
+        tets = sum(int(r[3]) for r in ok) / len(ok)
+        secs = sum(int(r[4]) for r in ok) / len(ok)
+        lines.append(
+            f"[grid {grid}] {len(ok)}개 완료, 실패 {len(bad)}개 — "
+            f"평균 {tets:,.0f} tets, {secs:.0f}초/case"
+        )
+    return "\n".join(lines)
+
+
+def send(subject, body):
+    sender, password = load_creds()
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = TO
+    msg.set_content(body)
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context()) as s:
+        s.login(sender, password)
+        s.send_message(msg)
+    print(f"[notify_email] sent to {TO}: {subject}")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--status":
+        send("[lumen meshing] 진행 상황", status_body())
+    else:
+        send(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "")

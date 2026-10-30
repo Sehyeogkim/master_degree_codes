@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Copy ONE completed fluid case's meshing/ + tree.dat + xyzts.dat to harvey.
+# COPY only (never move). Never touches other content in the harvey case dir.
+set -euo pipefail
+
+N="$1"
+LOCAL_BASE=/home/jeff/project/65_final_0723/fluid_0723
+REMOTE_BASE=/home/jeff/project/65_final_0723/fluid_0723
+SRC="$LOCAL_BASE/case_$N"
+DST="$REMOTE_BASE/case_$N"
+
+# Safety: verify local completion artifacts before copying
+for f in "$SRC/tree.dat" "$SRC/xyzts.dat"; do
+  [ -f "$f" ] || { echo "SKIP case_$N: missing $(basename "$f")"; exit 2; }
+done
+[ -d "$SRC/meshing/mesh-complete" ] || { echo "SKIP case_$N: missing meshing/mesh-complete"; exit 2; }
+
+# Ensure remote case dir exists (create if absent; leaves existing content intact)
+ssh -o BatchMode=yes harvey "mkdir -p '$DST/meshing'"
+
+# Copy meshing/ contents (no --delete: existing extra files on harvey untouched)
+rsync -a "$SRC/meshing/" "harvey:$DST/meshing/"
+# Copy the two case-root files
+rsync -a "$SRC/tree.dat" "$SRC/xyzts.dat" "harvey:$DST/"
+
+echo "COPIED case_$N -> harvey:$DST (meshing/, tree.dat, xyzts.dat)"

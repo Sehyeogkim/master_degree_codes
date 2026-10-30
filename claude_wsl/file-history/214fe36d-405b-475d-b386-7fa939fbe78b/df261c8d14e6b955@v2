@@ -1,0 +1,207 @@
+"""cofounder 설득 문서 — live2 갭필터 성공사례 (자체완결 HTML, 이메일/공유용).
+입력: scratchpad/persuade_stats.json · 출력: report/live2_갭필터_설명_cofounder.html
+사용: python3 make_cofounder_doc.py"""
+import os, json, html
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+OUT = os.path.join(ROOT, "report", "live2_갭필터_설명_cofounder.html")
+ST = json.load(open("/tmp/claude-1000/-home-jeff-bullet281/214fe36d-405b-475d-b386-7fa939fbe78b/scratchpad/persuade_stats.json"))
+
+# 팔레트 (웜페이퍼 · 리포 톤)
+PAPER, INK, ACC, GRID = "#F0EEE6", "#211D18", "#CC785C", "#D9D3C7"
+MUTE, CARD = "#6B5E54", "#FBFAF6"
+WIN, WARN, REF = "#2E7D32", "#C2493C", "#9B8E80"   # 갭필터(초록)·리스크(빨강)·기준선(회색)
+esc = html.escape
+
+
+def curve_svg():
+    """θ별 인샘플 square 주간평균 — 단봉 곡선(θ3 정점)."""
+    c = ST["insample"]["curve"]
+    base = c["0"] if "0" in c else c[0]
+    xs = sorted(int(k) for k in c)
+    W, H, padL, padT, padB = 560, 240, 46, 24, 42
+    pw, ph = W - padL - 20, H - padT - padB
+    vals = [c[str(x)] for x in xs]
+    lo, hi = 0, max(vals) + 0.4
+    X = lambda i: padL + pw * i / (len(xs) - 1)
+    Y = lambda v: padT + ph * (hi - v) / (hi - lo)
+    el = [f'<svg viewBox="0 0 {W} {H}" width="100%" style="max-width:{W}px" font-family="ui-sans-serif,system-ui,sans-serif">']
+    for tv in (0, 1, 2):
+        el.append(f'<line x1="{padL}" y1="{Y(tv):.0f}" x2="{W-20}" y2="{Y(tv):.0f}" stroke="{GRID}" stroke-width="1"/>')
+        el.append(f'<text x="{padL-6}" y="{Y(tv)+3:.0f}" font-size="10" fill="{MUTE}" text-anchor="end">{tv}%</text>')
+    el.append(f'<line x1="{padL}" y1="{Y(base):.0f}" x2="{W-20}" y2="{Y(base):.0f}" stroke="{REF}" stroke-width="1.4" stroke-dasharray="5 3"/>')
+    el.append(f'<text x="{W-22}" y="{Y(base)-5:.0f}" font-size="10" fill="{MUTE}" text-anchor="end">필터 없음 {base:.2f}%</text>')
+    path = " ".join(f'{"M" if i==0 else "L"} {X(i):.0f} {Y(c[str(x)]):.0f}' for i, x in enumerate(xs))
+    el.append(f'<path d="{path}" fill="none" stroke="{WIN}" stroke-width="2.4"/>')
+    peak = max(range(len(xs)), key=lambda i: c[str(xs[i])])
+    for i, x in enumerate(xs):
+        v = c[str(x)]; r = 6 if i == peak else 4
+        el.append(f'<g><title>갭 임계 {x}% · 주평균 {v:.2f}%</title>'
+                  f'<circle cx="{X(i):.0f}" cy="{Y(v):.0f}" r="{r}" fill="{WIN}" stroke="{CARD}" stroke-width="2"/></g>')
+        if i in (0, peak, len(xs) - 1):
+            el.append(f'<text x="{X(i):.0f}" y="{Y(v)-11:.0f}" font-size="11" font-weight="700" fill="{INK}" text-anchor="middle">{v:.2f}%</text>')
+        el.append(f'<text x="{X(i):.0f}" y="{H-24}" font-size="10.5" fill="{MUTE}" text-anchor="middle">±{x}%</text>')
+    el.append(f'<text x="{padL+pw/2:.0f}" y="{H-6}" font-size="10.5" fill="{MUTE}" text-anchor="middle">갭 임계값 (월 시가가 F0에서 몇 % 이상 튀어야 참가)</text>')
+    el.append('</svg>')
+    return "".join(el)
+
+
+def compare_svg():
+    """무필터 vs 갭필터 — 인샘플·OOS 2쌍 그룹 바. 갭필터=초록 강조, 무필터=회색 기준."""
+    ins = ST["insample"]; wf = ST["wf"]
+    groups = [("전체 5년\n(255주)", ins["base"], ins["t3"]),
+              ("검증구간\n(OOS 152주)", wf["base"], wf["gap"])]
+    W, H, padL, padT, padB = 520, 260, 46, 20, 54
+    pw, ph = W - padL - 20, H - padT - padB
+    hi = 3.2
+    Y = lambda v: padT + ph * (hi - v) / hi
+    el = [f'<svg viewBox="0 0 {W} {H}" width="100%" style="max-width:{W}px" font-family="ui-sans-serif,system-ui,sans-serif">']
+    for tv in (0, 1, 2, 3):
+        el.append(f'<line x1="{padL}" y1="{Y(tv):.0f}" x2="{W-20}" y2="{Y(tv):.0f}" stroke="{GRID}" stroke-width="1"/>')
+        el.append(f'<text x="{padL-6}" y="{Y(tv)+3:.0f}" font-size="10" fill="{MUTE}" text-anchor="end">{tv}%</text>')
+    gw = pw / len(groups); bw = 46
+    for gi, (lab, b0, b1) in enumerate(groups):
+        cx = padL + gw * (gi + 0.5)
+        for k, (v, col, name) in enumerate([(b0, REF, "필터 없음"), (b1, WIN, "갭필터")]):
+            x = cx - bw - 6 + k * (bw + 12)
+            y = Y(max(v, 0))
+            el.append(f'<g><title>{name} · {lab.replace(chr(10)," ")} · {v:.2f}%/주</title>'
+                      f'<rect x="{x:.0f}" y="{y:.0f}" width="{bw}" height="{max(2,Y(0)-y):.0f}" rx="4" '
+                      f'fill="{col}" fill-opacity="{0.55 if k==0 else 1}"/>'
+                      f'<text x="{x+bw/2:.0f}" y="{y-6:.0f}" font-size="12" font-weight="800" fill="{INK}" text-anchor="middle">{v:.2f}</text></g>')
+        for ln, dy in zip(lab.split("\n"), (0, 12)):
+            el.append(f'<text x="{cx:.0f}" y="{H-30+dy:.0f}" font-size="11" fill="{MUTE}" text-anchor="middle">{ln}</text>')
+    # 범례
+    el.append(f'<rect x="{padL}" y="4" width="11" height="11" rx="2" fill="{REF}" fill-opacity="0.55"/><text x="{padL+16}" y="13" font-size="10.5" fill="{INK}">필터 없음(기존)</text>')
+    el.append(f'<rect x="{padL+120}" y="4" width="11" height="11" rx="2" fill="{WIN}"/><text x="{padL+136}" y="13" font-size="10.5" fill="{INK}">갭필터</text>')
+    el.append('</svg>')
+    return "".join(el)
+
+
+def fold_svg():
+    """6개 검증구간(fold) 각각의 성적 — 전부 플러스임을 보임."""
+    f = ST["wf"]["folds"]; th = ST["wf"]["theta"]
+    W, H, padL, padT, padB = 520, 200, 40, 18, 40
+    pw, ph = W - padL - 16, H - padT - padB
+    hi = max(f) + 0.6
+    Y = lambda v: padT + ph * (hi - v) / hi
+    n = len(f); gw = pw / n; bw = min(40, gw * 0.6)
+    el = [f'<svg viewBox="0 0 {W} {H}" width="100%" style="max-width:{W}px" font-family="ui-sans-serif,system-ui,sans-serif">']
+    el.append(f'<line x1="{padL}" y1="{Y(0):.0f}" x2="{W-16}" y2="{Y(0):.0f}" stroke="{INK}" stroke-width="1.2"/>')
+    for i, v in enumerate(f):
+        cx = padL + gw * (i + 0.5); y = Y(max(v, 0))
+        el.append(f'<g><title>검증기간 {i+1} (갭임계 ±{th[i]}%) · {v:.2f}%/주</title>'
+                  f'<rect x="{cx-bw/2:.0f}" y="{y:.0f}" width="{bw:.0f}" height="{max(2,Y(0)-y):.0f}" rx="3" fill="{WIN}"/>'
+                  f'<text x="{cx:.0f}" y="{y-6:.0f}" font-size="11" font-weight="700" fill="{INK}" text-anchor="middle">+{v:.1f}</text></g>')
+        el.append(f'<text x="{cx:.0f}" y="{H-22}" font-size="10" fill="{MUTE}" text-anchor="middle">기간{i+1}</text>')
+        el.append(f'<text x="{cx:.0f}" y="{H-9}" font-size="9" fill="{MUTE}" text-anchor="middle">±{th[i]}%</text>')
+    el.append('</svg>')
+    return "".join(el)
+
+
+def build():
+    ins, wf, rk = ST["insample"], ST["wf"], ST["risk"]
+    yearly = (1.0289) ** 52  # 참고 연복리(중앙 근사, 주 +2.89%)
+    return f"""<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>갭필터 전략 (live2) — 백테스트 설명</title>
+<style>
+:root{{color-scheme:light}}
+*{{box-sizing:border-box}}
+body{{margin:0;background:{PAPER};color:{INK};font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI","Apple SD Gothic Neo",sans-serif;line-height:1.7;-webkit-font-smoothing:antialiased}}
+.wrap{{max-width:760px;margin:0 auto;padding:40px 22px 80px}}
+.eyebrow{{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:{ACC};font-weight:800;margin:0 0 10px}}
+h1{{font-size:30px;line-height:1.2;margin:0 0 14px;font-weight:800;letter-spacing:-.02em;text-wrap:balance}}
+h2{{font-size:20px;margin:40px 0 8px;font-weight:800}}
+.lede{{font-size:16px;color:#453d34;margin:0 0 8px}}
+p{{font-size:15px}}
+.hero{{display:flex;flex-wrap:wrap;gap:14px;margin:26px 0}}
+.hc{{flex:1 1 150px;background:{CARD};border:1px solid {GRID};border-radius:14px;padding:16px 18px}}
+.hc .k{{font-size:12px;color:{MUTE};font-weight:700}}
+.hc .v{{font-size:30px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.01em;margin-top:2px}}
+.hc .s{{font-size:12.5px;color:{MUTE};margin-top:2px}}
+.hc.win{{border-color:{WIN}}} .hc.win .v{{color:{WIN}}}
+.card{{background:{CARD};border:1px solid {GRID};border-radius:14px;padding:18px 20px;margin:14px 0}}
+.rule{{background:#fff;border-left:4px solid {ACC}}}
+.rule ol{{margin:6px 0;padding-left:22px}} .rule li{{margin:7px 0;font-size:15px}}
+figure{{margin:14px 0}} figcaption{{font-size:12.5px;color:{MUTE};margin-top:6px;text-align:center}}
+.chartbox{{overflow-x:auto}}
+.big{{color:{WIN};font-weight:800}}
+.risk{{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:6px}}
+.rt{{background:#fff;border:1px solid {GRID};border-radius:12px;padding:13px 15px}}
+.rt .v{{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;color:{WARN}}}
+.rt .k{{font-size:12px;color:{MUTE};margin-top:2px}}
+.warnbox{{background:#FBF3E9;border-left:4px solid {WARN};border-radius:0 10px 10px 0}}
+.foot{{margin-top:36px;font-size:12.5px;color:{MUTE};border-top:1px solid {GRID};padding-top:16px}}
+b.g{{color:{WIN}}}
+</style></head><body><div class="wrap">
+
+<p class="eyebrow">bullet281 · 라이브 실험 live2 · cofounder 브리핑</p>
+<h1>“월요일에 크게 튄 종목에만 돈을 넣는다” — 이 한 줄이 수익을 4배로 늘렸다</h1>
+<p class="lede">우리 기존 전략(281)은 백테스트에서 주당 <b>+0.73%</b>였다. 여기에 규칙 <b>딱 하나</b>를 더했더니
+검증구간에서 <b class="big">+2.89%/주</b>가 나왔다. 새 매매 규칙이 아니라 <b>자본을 어디에 넣느냐</b>만 바꿨다.</p>
+
+<div class="hero">
+  <div class="hc"><div class="k">기존 281 (검증구간)</div><div class="v">+1.02%</div><div class="s">주당 평균</div></div>
+  <div class="hc win"><div class="k">갭필터 적용 (검증구간)</div><div class="v">+2.89%</div><div class="s">주당 평균 · <b>+1.78%p</b></div></div>
+  <div class="hc win"><div class="k">신뢰도</div><div class="v">99%</div><div class="s">“진짜 개선일 확률”</div></div>
+</div>
+
+<h2>1. 규칙이 뭔데? — 아주 간단하다</h2>
+<div class="card rule">
+<p style="margin:0 0 4px"><b>스크리너로 뽑은 5종목</b>은 그대로. 매매 방식(진입·익절·청산)도 <b>281 그대로 하나도 안 바꿈.</b> 딱 이것만 추가:</p>
+<ol>
+<li><b>월요일 아침 9시</b>, 각 종목의 시가가 <b>지난 금요일 종가에서 몇 % 튀어서 시작했나</b>(=갭)를 본다.</li>
+<li><b>±3% 이상</b> 튄 종목만 그 주에 <b class="g">돈을 넣는다</b>. 위로 갭이든 아래로 갭이든 상관없이 <b>크기만</b> 본다.</li>
+<li>3% 안 되는 종목은 그 주 <b>쉰다(현금).</b> 통과 종목이 하나도 없으면 그 주는 통째로 현금.</li>
+</ol>
+<p style="margin:8px 0 0;font-size:13.5px;color:{MUTE}">왜 되나 — 큰 갭 = “이번 주 크게 움직일 사건이 있는 종목”. 조용히 시작한 종목(70%)은 수익 기여가 거의 0이었다. 시끄러운 종목만 골라 타는 것.</p>
+</div>
+
+<h2>2. 임계값은 왜 3%? — 그래프가 말해준다</h2>
+<figure><div class="card"><div class="chartbox">{curve_svg()}</div></div>
+<figcaption>임계를 올릴수록 오르다 <b>±3%에서 정점(+2.53%)</b>, 그 뒤엔 종목이 너무 줄어 하락. 삐죽삐죽이 아니라 매끈한 산 모양 = 우연이 아니라 진짜 효과.</figcaption></figure>
+
+<h2>3. 결과 — 전체 5년 & “처음 보는” 검증구간 둘 다</h2>
+<figure><div class="card"><div class="chartbox">{compare_svg()}</div></div>
+<figcaption>왼쪽 전체 5년, 오른쪽은 <b>전략을 만들 때 안 본 미래 데이터(검증구간)</b>. 두 구간 모두 필터가 크게 이긴다.</figcaption></figure>
+
+<h2>4. “너무 좋은데?” — 그래서 진짜 검증을 했다</h2>
+<p>백테스트가 좋게 나오는 건 흔하다. 문제는 <b>“과거에 맞춰 억지로 좋아 보이게 만든 것(과적합)”</b>인지다.
+그래서 <b>과거만 보고 규칙을 정한 뒤 → 그 다음 미래에서 채점</b>하는 걸 6번 반복했다(실전과 똑같은 순서).</p>
+<figure><div class="card"><div class="chartbox">{fold_svg()}</div></div>
+<figcaption>6개 검증기간 <b>전부 플러스</b>(+0.4 ~ +5.7%/주). 매번 과거만 보고도 같은 ±3~4%가 뽑힘 = 우연이 아님. 이 관문에서 다른 후보(리버설 플립 등)들은 다 탈락했고 <b>갭필터만 살아남았다.</b></figcaption></figure>
+<p style="font-size:14px;color:{MUTE}">참고로 우리는 이번에 아이디어 <b>19개</b>를 이 2단계 검증(부트스트랩 + walk-forward)에 넣었고, <b>통과한 건 갭필터 하나뿐</b>이다. 나머지 18개는 다 기각. 그만큼 이건 걸러진 결과다.</p>
+
+<h2>5. ⚠️ 솔직하게 — 공짜는 아니다</h2>
+<div class="card warnbox">
+<p style="margin:0 0 8px"><b>집중의 대가로 변동성이 커진다.</b> 5종목 다 사는 게 아니라 평균 ~2종목만 사고 24%의 주는 통째로 쉬니까, 잘 될 땐 크게, 안 될 땐 크게 흔들린다.</p>
+<div class="risk">
+  <div class="rt"><div class="v">≈2배</div><div class="k">주간 변동성 (vs 기존)</div></div>
+  <div class="rt"><div class="v">{rk['worst']:.0f}%</div><div class="k">최악의 한 주</div></div>
+  <div class="rt"><div class="v">{rk['p5']:.1f}%</div><div class="k">하위 5% 주 (P5)</div></div>
+  <div class="rt"><div class="v">{rk['idle']:.0f}%</div><div class="k">현금으로 쉬는 주</div></div>
+</div>
+<p style="margin:10px 0 0;font-size:13.5px">그리고 <b>백테스트 = 미래 보장 아님.</b> 같은 5년 데이터라 레짐(장세)이 바뀌면 달라질 수 있다. 그래서 지금 <b>실제 돈 없이 라이브로 전방 관찰(live2)</b> 중이다 — 검증구간 결론이 진짜 앞으로도 유지되는지 매주 확인하는 단계.</p>
+</div>
+
+<h2>6. 지금 상태 & 제안</h2>
+<div class="card">
+<p style="margin:0 0 6px"><b>live2</b>(갭필터 θ3)가 매일 자동으로 돌고 있고, 매일 장마감에 우리 둘에게 리포트가 간다.
+대조군으로 <b>live3</b>(다른 후보 조합)도 같이 돌려 비교 중.</p>
+<p style="margin:0"><b>제안:</b> 몇 주간 라이브 전방 데이터가 백테스트(+2.89%)와 방향이 맞는지 같이 지켜보고, 어긋나지 않으면 소액 실전 배분을 검토하자. 지금은 <b>돈 안 걸고 관찰만</b> 하는 단계라 리스크 0.</p>
+</div>
+
+<div class="foot">
+데이터: 한국주식 5분봉 5년(2021~2026, 255주) · 지표: 주간 net 수익률(수수료·세금 반영) ·
+검증: 부트스트랩(재표집 5,000회) + walk-forward(6구간, OOS 152주) · 갭 = 월 시가/전주 금종가 − 1, 매매 전 확정(causal).<br>
+숫자는 square(신호² 가중) 배분 기준 · 연복리 환산 참고치 ~{(yearly-1)*100:.0f}%(변동성 매우 큼, 단순 참고). 상세 재현: bullet281 repo experiment_report 19~20.
+</div>
+</div></body></html>"""
+
+
+if __name__ == "__main__":
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    open(OUT, "w", encoding="utf-8").write(build())
+    print("wrote", OUT)

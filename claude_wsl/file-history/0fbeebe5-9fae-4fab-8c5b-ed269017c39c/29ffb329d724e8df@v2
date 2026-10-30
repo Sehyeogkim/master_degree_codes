@@ -1,0 +1,18 @@
+"""[shim] 기존 CLI 보존 — function1.select_stocks 위임.
+
+종목선정 로직은 function1.py로 이동. 이 파일은 옛 `python3 select_stocks.py` 호출을 유지한다.
+새 코드는 function1.select_stocks(target_monday, ...) 또는 process2/process3를 직접 쓸 것.
+"""
+import os
+from function1 import select_stocks
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def main():
+    # 옛 하드코딩(직전주 2026-06-29~07-03)에 대응하는 target 월요일 = 2026-07-06
+    select_stocks("2026-07-06", with_names=True, out_path=os.path.join(HERE, "_top5.json"))
+
+
+if __name__ == "__main__":
+    main()

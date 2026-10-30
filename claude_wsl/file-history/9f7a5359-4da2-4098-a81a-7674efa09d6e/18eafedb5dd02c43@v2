@@ -1,0 +1,57 @@
+import json
+import collections
+
+S = "solid_0723"
+rows = [json.loads(l) for l in open(f"{S}/batch_progress.jsonl") if l.strip()]
+done = [r for r in rows if r.get("status") == "done"]
+fails = [r for r in rows if r.get("status") in ("failed", "timeout")]
+
+print(f"TOTAL recorded: {len(rows)}  done: {len(done)}  failed: {len(fails)}")
+
+
+def bucket(r):
+    if r.get("status") == "timeout":
+        return "timeout (>40min)"
+    e = str(r.get("error", ""))
+    if "HXT 3D mesh failed" in e:
+        return "HXT 3D mesh failed"
+    if "STEP4" in e:
+        return "STEP4 boolean failed"
+    if "STEP1" in e:
+        return "STEP1 boolean failed"
+    if "OpenCASCADE" in e:
+        return "OCC entity error"
+    if "exit -6" in e or "no STATUS" in e:
+        return "crash (exit -6 / no status)"
+    return "other: " + e[:50]
+
+
+c = collections.Counter(bucket(r) for r in fails)
+print("\nFAILURE BREAKDOWN:")
+for k, v in c.most_common():
+    print(f"  {v:3d}  {k}")
+
+# quality / size stats on successes
+mq = sorted(r["min_quality"] for r in done if r.get("min_quality") is not None)
+ne = [r["num_elements"] for r in done if r.get("num_elements")]
+sec = [r["seconds"] for r in done if r.get("seconds")]
+neg = sum(1 for r in done if r.get("neg_jacobian") == 0)
+
+
+def pct(a, p):
+    return a[int(len(a) * p)] if a else None
+
+
+print(f"\nSUCCESS STATS ({len(done)} meshes):")
+print(f"  neg-Jacobian == 0 : {neg}/{len(done)}")
+print(f"  min_quality  min={mq[0]:.4f}  p10={pct(mq,0.10):.4f}  median={pct(mq,0.5):.4f}  max={mq[-1]:.4f}")
+print(f"  #elements    total={sum(ne):,}  mean={sum(ne)//len(ne):,}  max={max(ne):,}")
+print(f"  time         total={sum(sec)/3600:.1f}h  mean={sum(sec)/len(sec)/60:.1f}min  max={max(sec)/60:.1f}min")
+
+# SOL split
+sol0 = [r for r in done if r["case"] <= 20]
+sol1 = [r for r in done if r["case"] >= 21]
+for name, grp in (("SOL=0 (case<=20)", sol0), ("SOL=1 (case>=21)", sol1)):
+    if grp:
+        q = sorted(r["min_quality"] for r in grp if r.get("min_quality") is not None)
+        print(f"  {name}: n={len(grp)}  median min_q={pct(q,0.5):.4f}  worst={q[0]:.4f}")

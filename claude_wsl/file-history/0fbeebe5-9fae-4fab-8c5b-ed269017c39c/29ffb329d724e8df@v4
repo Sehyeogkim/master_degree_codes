@@ -1,0 +1,19 @@
+"""[shim] 기존 CLI 보존 — screeners.momentum_v1.select_stocks 위임.
+
+종목선정 로직은 screeners/ 레지스트리로 이동(momentum_v1 = 옛 f_select_stocks).
+이 파일은 옛 `python3 select_stocks.py` 호출을 유지한다.
+새 코드는 screeners.get_screener(name).select_stocks(...) 또는 p_backtest/p_live를 직접 쓸 것.
+"""
+import os
+from screeners.momentum_v1 import select_stocks
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def main():
+    # 옛 하드코딩(직전주 2026-06-29~07-03)에 대응하는 target 월요일 = 2026-07-06
+    select_stocks("2026-07-06", with_names=True, out_path=os.path.join(HERE, "_top5.json"))
+
+
+if __name__ == "__main__":
+    main()

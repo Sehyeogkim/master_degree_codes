@@ -1,0 +1,24 @@
+#!/bin/bash
+# Wait for the meshing batch to reach a terminal state -- all 384 done, OR the
+# batch process gone -- then email the user. Both exits mail: a watcher that
+# only matches success stays silent through a crash, which looks identical to
+# "still running".
+cd /home/jeff/project/65_final_0723
+PY=/home/jeff/miniconda3/envs/ansys_new/bin/python
+
+while true; do
+  DONE=$(ls fluid_0723/case_*/meshing/mesh-complete/mesh-complete.mesh.vtu 2>/dev/null | wc -l)
+  [ "$DONE" -ge 384 ] && break
+  pgrep -f "mesh_all_g015[.]py" >/dev/null || break
+  sleep 60
+done
+
+DONE=$(ls fluid_0723/case_*/meshing/mesh-complete/mesh-complete.mesh.vtu 2>/dev/null | wc -l)
+if [ "$DONE" -ge 384 ]; then
+  SUBJECT="[lumen meshing] 완료 384/384"
+else
+  SUBJECT="[lumen meshing] 중단 - ${DONE}/384에서 멈춤"
+fi
+
+BODY=$($PY -c "import sys; sys.path.insert(0,'bin'); from notify_email import status_body; print(status_body())")
+$PY bin/notify_email.py "$SUBJECT" "$BODY"

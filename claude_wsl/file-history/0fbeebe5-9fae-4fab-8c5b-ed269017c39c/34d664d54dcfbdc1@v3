@@ -1,0 +1,122 @@
+"""p_live (Process 3) — 실시간(모의운영). cron 진입점, 두 모드.
+
+라이브 실험은 report/live/{project}/ 폴더 단위다 (설정 = info.md frontmatter).
+한 엔진×여러 선정기준, 또는 여러 엔진을 각각 폴더로 병렬 운영한다.
+--project 로 하나만, 생략하면 report/live/*/info.md 모든 프로젝트를 순회.
+
+  select (주말 1회): info.md 기준으로 다음 주 종목선정 → {proj}/_top5.json + _live_week.txt
+  update (평일 5분마다): _top5.json 읽어 월~now 5분봉으로 엔진 → {proj}/live.html 덮어씀
+                        (bars_5m가 월→now를 받고 차트폭이 봉수 비례라 캔들이 옆으로 자동 확장)
+
+cron:
+  0 18 * * 6        python3 p_live.py --mode select     # 모든 프로젝트
+  */5 9-15 * * 1-5  python3 p_live.py --mode update
+"""
+import os, sys, json, datetime
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from weekcal import week_bounds, to_monday
+from f_select_stocks import select_stocks, resolve_names
+from f_run_engine import run_engine, STRAT281, run as run281
+from f_build_report import build_report
+from live_config import all_projects, LIVE_ROOT
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _now_str():
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def _next_monday():
+    t = datetime.date.today()
+    return (t + datetime.timedelta(days=(7 - t.weekday()) % 7 or 7)).strftime("%Y-%m-%d")
+
+
+def _load_engine(name):
+    """엔진 이름 → (strat_dict, run_fn). engine281은 기본 import, 그 외는 engines/{name}/ 동적 로드."""
+    if name == "engine281":
+        return STRAT281, run281
+    epath = os.path.join(HERE, "..", "engines", name)
+    if epath not in sys.path:
+        sys.path.insert(0, epath)
+    from engine import run as erun
+    try:
+        from strategy import STRAT as estrat          # 표준 어댑터
+    except Exception:
+        import importlib
+        mod = importlib.import_module(name.replace("engine", "strategy"))  # 예: strategy281
+        estrat = getattr(mod, "STRAT" + name.replace("engine", ""))
+    return estrat, erun
+
+
+def _targets(project):
+    projs = all_projects()
+    if project:
+        projs = [p for p in projs if p["name"] == project]
+        if not projs:
+            raise SystemExit(f"라이브 프로젝트 '{project}' 없음 ({LIVE_ROOT}/{project}/info.md)")
+    if not projs:
+        raise SystemExit(f"라이브 프로젝트가 없음: {LIVE_ROOT}/*/info.md 를 먼저 만들 것")
+    return projs
+
+
+def select_one(cfg, monday=None):
+    monday = monday or _next_monday()
+    select_stocks(monday, cap_min=cfg["cap_min"], top_change=cfg["top_change"],
+                  top_value=cfg["top_value"], direction=cfg["direction"],
+                  with_names=True, out_path=cfg["top5_path"])
+    open(cfg["week_path"], "w").write(monday)
+    print(f"[{cfg['name']}] 선정 완료 → 가동 주 월요일 = {monday} (engine={cfg['engine']}, dir={cfg['direction']})")
+
+
+def update_one(cfg):
+    if not os.path.exists(cfg["top5_path"]):
+        print(f"[{cfg['name']}] _top5.json 없음 — select 먼저 필요(스킵)"); return
+    top = json.load(open(cfg["top5_path"]))
+    monday = (open(cfg["week_path"]).read().strip() if os.path.exists(cfg["week_path"])
+              else to_monday(datetime.date.today()).strftime("%Y-%m-%d"))
+    ws, we = week_bounds(monday)
+    strat, engine_run = _load_engine(cfg["engine"])
+    names = {r["code"]: r.get("name") for r in top}
+    if any(v is None for v in names.values()):
+        names.update(resolve_names([c for c, v in names.items() if v is None]))
+    sections = []
+    for sel in top:
+        code = sel["code"]; name = names.get(code) or code
+        sec = run_engine(code, ws, we, sel["fri_close"], strat=strat, engine_run=engine_run)
+        if not sec:
+            print(f"  {code} {name}: 5분봉 없음(스킵)"); continue
+        sec["name"] = name; sec["label"] = f"{name} ({code})"; sec["sel"] = sel
+        sections.append(sec)
+    html = build_report(sections, meta=dict(
+        stamp=_now_str(), live=True, intro=True, refresh=300,
+        doctitle=f"LIVE · {cfg['name']}",
+        h1=f"🔴 LIVE — {cfg['name']} · {cfg['engine']}",
+        subtitle=f"가동주 {monday} · 시총 {cfg['cap_min']/1e8:,.0f}억↑ "
+                 f"{'하락 숏' if cfg['direction']=='down' else '상승 롱'} Top{cfg['top_change']}→{cfg['top_value']}"))
+    os.makedirs(os.path.dirname(os.path.abspath(cfg["out_path"])), exist_ok=True)
+    open(cfg["out_path"], "w", encoding="utf-8").write(html)
+    print(f"[{cfg['name']}] [{_now_str()}] update → {cfg['out_path']} ({len(sections)}종목, 가동주 {monday})")
+
+
+def select(monday=None, project=None):
+    for cfg in _targets(project):
+        select_one(cfg, monday)
+
+
+def update(project=None):
+    for cfg in _targets(project):
+        update_one(cfg)
+
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--mode", choices=["select", "update"], required=True)
+    ap.add_argument("--project", help="특정 프로젝트만 (기본=report/live/* 전체)")
+    ap.add_argument("--monday", help="select: 가동 주 월요일 지정(기본=다음 월요일)")
+    a = ap.parse_args()
+    if a.mode == "select":
+        select(a.monday, a.project)
+    else:
+        update(a.project)

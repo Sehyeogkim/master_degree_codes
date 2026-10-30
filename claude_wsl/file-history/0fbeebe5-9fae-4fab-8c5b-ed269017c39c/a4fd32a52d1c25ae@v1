@@ -1,0 +1,8 @@
+Input: (이용자가 제공 예정)
+- 어떤 엔진을 사용 (engine281 = default)을 기준으로,
+- 어떤 종목 (이름 or 번호)
+- engine가동 시작 월요일 날짜
+- 분석을 어느 시점까지 진행? (deafult = now)
+
+Output: 해당 종목의 engine 가동 결과를 html보고서로 작성.
+보고서 양식, 형식 rule은 claude.md에 

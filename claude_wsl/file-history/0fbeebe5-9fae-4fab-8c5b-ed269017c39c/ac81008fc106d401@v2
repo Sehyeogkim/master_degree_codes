@@ -1,0 +1,10 @@
+# 대용량 백테스트 데이터 (로컬 전용)
+data/
+# 파이썬 캐시
+__pycache__/
+*.pyc
+# 파이프라인 생성 캐시/스냅샷
+pipeline/_top5.json
+# TradingView 로그인 정보 (절대 커밋 금지)
+pipeline/.tv_creds
+.DS_Store

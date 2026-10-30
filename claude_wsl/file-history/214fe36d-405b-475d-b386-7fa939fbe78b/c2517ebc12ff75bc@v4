@@ -1,0 +1,242 @@
+"""engine_fable2 테스트 — 실행: python3 engines/engine_fable2/test_fable2.py
+
+1) 회귀A: tp_reset=None + flip off  → engine281 과 실데이터 전 종목-주 일치.
+2) 회귀B: tp_reset=None + flip(d1~09:30x1) → engine_fable 동일설정과 일치.
+3) 골든: 사다리 리셋(3%) 손검증 — 리셋 발생/미달/숏 미러.
+"""
+import os, sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.join(ROOT, "engines", "engine_fable2"))
+sys.path.insert(0, os.path.join(ROOT, "engines", "engine_fable"))
+sys.path.insert(0, os.path.join(ROOT, "engines", "engine281"))
+
+import engine_fable2
+import engine_fable
+import engine as engine281
+
+STRAT281 = dict(tp_gate=0.08, entries=("trail",), stop_mode="none",
+                fee=0.00015, slip=0.0005, tax=0.0015, round_shares=True)
+FLIP = dict(flip_monday=True, flip_days=1, flip_cutoff_hm="09:30", flip_max=1)
+CLEAN = dict(tp_gate=0.08, entries=("trail",), stop_mode="none",
+             fee=0.0, slip=0.0, tax=0.0, round_shares=False)
+
+DATA = os.path.join(ROOT, "data", "data_creon_API", "intraday_5m_by_week")
+PASS = FAIL = 0
+
+
+def check(name, cond, extra=""):
+    global PASS, FAIL
+    if cond:
+        PASS += 1
+    else:
+        FAIL += 1
+        print(f"  FAIL {name}  {extra}")
+
+
+def B(dt, o, h, l, c):
+    return engine_fable2.Bar(dt, o, h, l, c, 0.0)
+
+
+def _all_csvs():
+    out = []
+    for wk in sorted(os.listdir(DATA)):
+        d = os.path.join(DATA, wk)
+        if not os.path.isdir(d):
+            continue
+        for f in sorted(os.listdir(d)):
+            if f.endswith("_5m.csv") and os.path.getsize(os.path.join(d, f)) > 100:
+                out.append(os.path.join(d, f))
+    return out
+
+
+# ── 1) 회귀 ────────────────────────────────────────────────────────
+def test_regression():
+    csvs = _all_csvs()
+    misA = misB = tested = 0
+    for path in csvs:
+        bars = engine_fable2.load_bars(path)
+        if not bars:
+            continue
+        F0 = bars[0].o
+        tested += 1
+        # A: 리셋X·플립X == 281
+        _, c0 = engine281.run(bars, F0, **STRAT281)
+        _, cA = engine_fable2.run(bars, F0, **STRAT281)
+        if abs(c0["weekly_return"] - cA["weekly_return"]) > 1e-12:
+            misA += 1
+        # B: 리셋X·플립(d1~09:30x1) == engine_fable
+        _, cf = engine_fable.run(bars, F0, **STRAT281, **FLIP)
+        _, cB = engine_fable2.run(bars, F0, **STRAT281, **FLIP)
+        if abs(cf["weekly_return"] - cB["weekly_return"]) > 1e-12:
+            misB += 1
+    check(f"회귀A: {tested}건 281 일치", misA == 0, f"불일치 {misA}")
+    check(f"회귀B: {tested}건 engine_fable(플립) 일치", misB == 0, f"불일치 {misB}")
+
+
+# ── 2) 골든: 리셋 발생 (롱, 3%) ────────────────────────────────────
+def _long_bars(b4_close):
+    return [
+        B("2026-01-05 09:05", 101, 105, 100, 104),   # 진입 없음
+        B("2026-01-05 09:10", 104, 106, 103, 105),   # 롱 @105 (신고점 104 돌파)
+        B("2026-01-05 09:15", 105, 121, 105, 120),   # 극값 120 (게이트 8.4 통과)
+        B("2026-01-05 09:20", 120, 120, 112, 113),   # lr=8/15=0.53 → 1단계 1/3 @113, ref=120
+        B("2026-01-05 09:25", 113, b4_close + 1, 113, b4_close),  # 새 극값
+        B("2026-01-05 09:30", b4_close, b4_close, 121, 122),      # 되돌림
+        B("2026-01-09 15:15", 122, 126, 121, 125),   # 금 강제청산 @125
+    ]
+
+
+def test_golden_reset():
+    # b4=130: 130 ≥ 120×1.03=123.6 → 리셋. 이후 122 lr=17/25=0.68 → 새 1단계 2/9 @122.
+    bars = _long_bars(130)
+    ev, ctx = engine_fable2.run(bars, 100.0, capital=1_000_000.0,
+                                tp_reset_pct=0.03, **CLEAN)
+    exp = 138.0 / 945.0                    # (1/105)[8/3 + 34/9 + 80/9]
+    check("골든: 리셋 1회", ctx["tp_resets"] == 1, f"resets={ctx['tp_resets']}")
+    check("골든: 리셋 수익 138/945", abs(ctx["weekly_return"] - exp) < 1e-9,
+          f"got={ctx['weekly_return']:.8f} exp={exp:.8f}")
+    exits = [e for e in ev if e.kind == "EXIT"]
+    check("골든: 청산 3회(1/3·2/9·4/9)", len(exits) == 3 and
+          abs(exits[0].frac - 1/3) < 1e-9 and abs(exits[1].frac - 2/9) < 1e-9
+          and abs(exits[2].frac - 4/9) < 1e-9,
+          f"fracs={[round(e.frac,4) for e in exits]}")
+
+    # 리셋 없음(None) 대조: 122 lr=0.68 tier1 은 이미 소화 → 홀드, 금 2/3 @125
+    _, ctx0 = engine_fable2.run(bars, 100.0, capital=1_000_000.0,
+                                tp_reset_pct=None, **CLEAN)
+    exp0 = 16.0 / 105.0
+    check("골든: 리셋off = 16/105", abs(ctx0["weekly_return"] - exp0) < 1e-9,
+          f"got={ctx0['weekly_return']:.8f}")
+    check("골든: 리셋off resets=0", ctx0["tp_resets"] == 0)
+
+
+def test_golden_below_threshold():
+    # b4=122 (<123.6): 리셋 미달 → 사다리 유지. 이후 113 lr=8/17=0.47 → 2단계 1/3 @113.
+    # 금요일 종가도 121(<123.6)로 두어 마지막 봉 신고점 리셋이 안 끼어들게 함.
+    bars = _long_bars(122)
+    bars[5] = B("2026-01-05 09:30", 122, 122, 112, 113)
+    bars[6] = B("2026-01-09 15:15", 113, 121, 113, 121)
+    ev, ctx = engine_fable2.run(bars, 100.0, capital=1_000_000.0,
+                                tp_reset_pct=0.03, **CLEAN)
+    exp = 32.0 / 315.0                     # (1/105)[8/3 + 8/3 + 16/3]
+    check("골든: 미달 → 리셋 없음", ctx["tp_resets"] == 0, f"resets={ctx['tp_resets']}")
+    check("골든: 미달 수익 32/315 (누적 사다리)", abs(ctx["weekly_return"] - exp) < 1e-9,
+          f"got={ctx['weekly_return']:.8f} exp={exp:.8f}")
+
+
+def test_golden_short_mirror():
+    # 숏 미러: 진입 @95, 극값 82 → 1/3 @88(ref 82) → 79 ≤ 82×0.97 리셋 → 2/9 @84 → 금 4/9 @80
+    bars = [
+        B("2026-01-05 09:05", 99, 99, 95, 96),
+        B("2026-01-05 09:10", 96, 96, 94, 95),      # 숏 @95
+        B("2026-01-05 09:15", 95, 95, 81, 82),      # 극값 82
+        B("2026-01-05 09:20", 82, 89, 82, 88),      # lr=7/13 → 1단계 1/3 @88
+        B("2026-01-05 09:25", 88, 88, 78, 79),      # 79 ≤ 79.54 → 리셋
+        B("2026-01-05 09:30", 79, 85, 79, 84),      # lr=11/16=0.69 → 새 1단계 2/9 @84
+        B("2026-01-09 15:15", 84, 84, 79, 80),      # 금 4/9 @80
+    ]
+    ev, ctx = engine_fable2.run(bars, 100.0, capital=1_000_000.0,
+                                tp_reset_pct=0.03, **CLEAN)
+    exp = 103.0 / 855.0                    # (1/95)[7/3 + 22/9 + 60/9]
+    check("골든: 숏 리셋 1회", ctx["tp_resets"] == 1, f"resets={ctx['tp_resets']}")
+    check("골든: 숏 수익 103/855", abs(ctx["weekly_return"] - exp) < 1e-9,
+          f"got={ctx['weekly_return']:.8f} exp={exp:.8f}")
+
+
+# ── 3) v2 골든 ─────────────────────────────────────────────────────
+def _v2_bars():
+    # 진입@105, 극값120, t1 1/3@113(ref120), 리셋(130), 되돌림 116, 금 @125
+    return [
+        B("2026-01-05 09:05", 101, 105, 100, 104),
+        B("2026-01-05 09:10", 104, 106, 103, 105),   # 롱 @105
+        B("2026-01-05 09:15", 105, 121, 105, 120),   # 극값 120
+        B("2026-01-05 09:20", 120, 120, 112, 113),   # 1단계 1/3 @113 (ref 120)
+        B("2026-01-05 09:25", 113, 131, 113, 130),   # 130 ≥ 123.6 → 리셋
+        B("2026-01-05 09:30", 130, 130, 115, 116),   # lr=11/25=0.44 → (새) 2단계 구간
+        B("2026-01-09 15:15", 116, 126, 116, 125),   # 금 강제청산 @125
+    ]
+
+
+def test_v2a_skip1():
+    # skip1: 새 사다리 1단계 건너뜀 → 116에서 2단계만 (2/3−1/3)×2/3=2/9 @116, 금 4/9 @125
+    ev, ctx = engine_fable2.run(_v2_bars(), 100.0, capital=1_000_000.0,
+                                tp_reset_pct=0.03, tp_reset_skip1=True, **CLEAN)
+    exp = 126.0 / 945.0        # (1/105)[8/3 + 22/9 + 80/9] = 2/15
+    check("v2A: 수익 2/15", abs(ctx["weekly_return"] - exp) < 1e-9,
+          f"got={ctx['weekly_return']:.8f} exp={exp:.8f}")
+    fr = [round(e.frac, 4) for e in ev if e.kind == "EXIT"]
+    check("v2A: 청산 1/3·2/9·4/9", fr == [round(1/3,4), round(2/9,4), round(4/9,4)], f"fr={fr}")
+
+    # 대조: skip1 없으면(v1) 116은 lr=0.44 → 2단계 target 2/3 → frac=(2/3−0)×… 잠깐, 리셋 후 116이 첫 익절
+    # → target 2/3 × base 2/3 = 4/9 @116, 금 2/9... v1 손검증:
+    _, ctx1 = engine_fable2.run(_v2_bars(), 100.0, capital=1_000_000.0,
+                                tp_reset_pct=0.03, **CLEAN)
+    exp1 = (1/105) * ((1/3)*8 + (4/9)*11 + (2/9)*20)
+    check("v2A대조(v1): 수익 일치", abs(ctx1["weekly_return"] - exp1) < 1e-9,
+          f"got={ctx1['weekly_return']:.8f} exp={exp1:.8f}")
+
+
+def test_v2b_regate():
+    # regate: 리셋(130) 시 anchor=25 → 극값이 25+8.4 이상 전까지 익절 비활성.
+    # 116 되돌림에도 익절 없음 → 금 2/3 @125.
+    ev, ctx = engine_fable2.run(_v2_bars(), 100.0, capital=1_000_000.0,
+                                tp_reset_pct=0.03, tp_regate=True, **CLEAN)
+    exp = 16.0 / 105.0         # (1/105)[8/3 + (2/3)20]
+    check("v2B: 재장전 홀드 16/105", abs(ctx["weekly_return"] - exp) < 1e-9,
+          f"got={ctx['weekly_return']:.8f} exp={exp:.8f}")
+    check("v2B: 리셋 1회·익절 1회뿐", ctx["tp_resets"] == 1 and
+          sum(1 for e in ev if e.kind == "EXIT") == 2)
+
+
+def test_v2c_frac():
+    # tp_frac=1/4, 리셋 없음: t1 1/4@113, t2 1/4@110, t3 1/4@101, 금 1/4@104
+    bars = [
+        B("2026-01-05 09:05", 101, 105, 100, 104),
+        B("2026-01-05 09:10", 104, 106, 103, 105),   # 롱 @105
+        B("2026-01-05 09:15", 105, 121, 105, 120),   # 극값 120
+        B("2026-01-05 09:20", 120, 120, 112, 113),   # lr=8/15 → 1단계
+        B("2026-01-05 09:25", 113, 113, 109, 110),   # lr=5/15=0.33 → 2단계
+        B("2026-01-05 09:30", 110, 110, 100, 101),   # lr<0.25 → 3단계
+        B("2026-01-09 15:15", 101, 105, 100, 104),   # 금 잔량 1/4 @104
+    ]
+    ev, ctx = engine_fable2.run(bars, 100.0, capital=1_000_000.0,
+                                tp_frac=0.25, **CLEAN)
+    exp = (1/105) * (0.25*8 + 0.25*5 + 0.25*(-4) + 0.25*(-1))   # = 2/105
+    check("v2C: 1/4 사다리 2/105", abs(ctx["weekly_return"] - exp) < 1e-9,
+          f"got={ctx['weekly_return']:.8f} exp={exp:.8f}")
+    fr = [round(e.frac, 4) for e in ev if e.kind == "EXIT"]
+    check("v2C: 청산 4×1/4", fr == [0.25, 0.25, 0.25, 0.25], f"fr={fr}")
+
+
+# ── 4) H2: 진입 확인 마진 ─────────────────────────────────────────
+def test_entry_margin():
+    # run_high=104(첫봉 종가). δ=0.5% → 104×1.005=104.52 초과 종가만 진입.
+    bars = [
+        B("2026-01-05 09:05", 101, 105, 100, 104),
+        B("2026-01-05 09:10", 104, 105, 103, 104.3),  # 104.3 < 104.52 → 진입 없음(δ=0.5%)
+        B("2026-01-05 09:15", 104.3, 106, 104, 105.5),  # 105.5 > 104.3×1.005=104.82 → 진입
+        B("2026-01-09 15:15", 105.5, 106, 104, 105),
+    ]
+    ev0, ctx0 = engine_fable2.run(bars, 100.0, capital=1_000_000.0, entry_margin=0.0, **CLEAN)
+    ev5, ctx5 = engine_fable2.run(bars, 100.0, capital=1_000_000.0, entry_margin=0.005, **CLEAN)
+    e0 = [e for e in ev0 if e.kind == "ENTRY"]
+    e5 = [e for e in ev5 if e.kind == "ENTRY"]
+    check("H2: δ=0 이면 104.3에 진입(기존)", len(e0) >= 1 and abs(e0[0].price - 104.3) < 1e-9,
+          f"e0={[x.price for x in e0]}")
+    check("H2: δ=0.5%면 104.3 스킵, 105.5 진입", len(e5) >= 1 and abs(e5[0].price - 105.5) < 1e-9,
+          f"e5={[x.price for x in e5]}")
+
+
+if __name__ == "__main__":
+    print("engine_fable2 테스트")
+    test_regression()
+    test_golden_reset()
+    test_golden_below_threshold()
+    test_golden_short_mirror()
+    test_v2a_skip1()
+    test_v2b_regate()
+    test_v2c_frac()
+    test_entry_margin()
+    print(f"\n결과: {PASS} pass, {FAIL} fail")
+    sys.exit(1 if FAIL else 0)

@@ -1,0 +1,72 @@
+"""fable 실험 총정리(2026-07-19)를 jeff+cofounder에게 발송. p_email creds 재사용.
+사용: python3 send_fable_summary_email.py [--dry-run] [--to a@b,c@d]"""
+import os, sys, ssl, smtplib, argparse
+from email.message import EmailMessage
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "pipeline"))
+from p_email import _load_creds
+
+DEFAULT_TO = ["kimse991228@gmail.com", "limsung7969@naver.com"]   # jeff + cofounder
+
+MD = os.path.join(ROOT, "report", "2026-07-19_fable_실험총정리.md")
+HTMLS = [
+    ("backtest_281_vs_fable.artifact.html",      "①_281_vs_리버설_4way.html"),
+    ("backtest_flip_sweep.artifact.html",        "②_플립스윕_개장25분.html"),
+    ("backtest_fable2_tp.artifact.html",         "③_익절_4변형.html"),
+    ("backtest_fable2_v3_gate.artifact.html",    "④_게이트x리셋_36조합.html"),
+]
+
+BODY = """<div style="font-family:sans-serif;max-width:720px;line-height:1.6">
+<h2 style="margin-bottom:4px">fable 실험 총정리 — 리버설 플립 &amp; 익절 방법론 (2026-07-19)</h2>
+<p style="color:#6B5E54;font-size:13px">CREON 5년 · 255주 · 1,233 종목-주 · 부트스트랩 SEED=42·B=5,000</p>
+<p><b>한 줄 요약:</b> 리버설 플립은 <b>월요일 개장 25분(~09:30·1회)만 유효</b> —
+square 주간평균 <b>+0.73% → +0.99%</b>. 익절 변형(리셋·스킵·재장전·축소)은 전부 기각,
+게이트 8→10% 상향만 추가 후보(+1.08%). <b>전부 OOS 검증 전 라이브 반영 금지.</b></p>
+<ul>
+<li><b>플립 v1~v3 기각</b>: 월요일 종일/화요일 확장 전부 손해 (whipsaw 65%) — 허용 넓힐수록 단조 악화.</li>
+<li><b>64조합 스윕 발견</b>: 09:15~09:30 고원만 281 상회(+0.86~0.99%), 09:35부터 절벽. 개장 반대신호=갭 반전 정보.</li>
+<li><b>익절 4변형 전부 base 이하</b> — 무손절 전략에서 익절 사다리는 유일한 방어선이자 국소 최적점.</li>
+<li><b>v3 발견</b>: 레버는 리셋(기여 0)이 아니라 게이트 — 10%가 산봉우리(+1.08%, P=82% 유의 미달).</li>
+<li><b>교훈</b>: 남은 개선 여지는 익절 미세조정이 아니라 진입·선정·배분 쪽.</li>
+</ul>
+<p style="font-size:13px"><b>첨부:</b> 총정리 MD + 보고서 HTML 4부(브라우저로 열기).<br>
+<span style="color:#6B5E54">한계: 동일 255주 재표집(과적합 미해결)·다중비교 선택편향 → walk-forward/OOS가 다음 스텝.</span></p>
+<p style="color:#6B5E54;font-size:12px">— bullet281 fable_backtest 실험 (main 머지 완료)</p></div>"""
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--to", help="수신자 override(쉼표)")
+    ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+    to = [x.strip() for x in a.to.split(",")] if a.to else DEFAULT_TO
+    subject = "[bullet281] fable 실험 총정리 — 플립(개장25분) 채택후보 & 익절 변형 전부 기각 (2026-07-19)"
+
+    msg = EmailMessage()
+    msg["To"] = ", ".join(to)
+    msg["Subject"] = subject
+    msg.set_content("HTML 지원 클라이언트에서 보세요. 상세는 첨부 MD/HTML.")
+    msg.add_alternative(BODY, subtype="html")
+    with open(MD, "rb") as f:
+        msg.add_attachment(f.read(), maintype="text", subtype="markdown",
+                           filename="fable_실험총정리_2026-07-19.md")
+    for src, name in HTMLS:
+        with open(os.path.join(ROOT, "report", src), "rb") as f:
+            msg.add_attachment(f.read(), maintype="text", subtype="html", filename=name)
+
+    if a.dry_run:
+        print(f"[dry-run] → {to}\n제목: {subject}\n첨부: MD + {len(HTMLS)} HTML")
+        return
+    sender, password = _load_creds()
+    msg["From"] = sender
+    ctx = ssl.create_default_context()
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ctx) as s:
+        s.login(sender, password)
+        s.send_message(msg)
+    print(f"전송 완료 → {', '.join(to)} | {subject}")
+
+
+if __name__ == "__main__":
+    main()

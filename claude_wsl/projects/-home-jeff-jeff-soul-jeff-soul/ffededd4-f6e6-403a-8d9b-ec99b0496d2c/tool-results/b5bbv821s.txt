@@ -1,0 +1,309 @@
+### adobe-for-creativity |v1.1.0 | 2026-06-17T21:41:02-04:00
+    Harness Adobe's creative AI-powered tools to edit images, automate design workflows, and bring creative visions to life — from background removal to vectorization and professional retouching.
+   skills: adobe-batch-edit-photos, adobe-create-pdfs-from-data, adobe-create-social-variations, adobe-design-from-template, adobe-edit-quick-cut, adobe-resize-photos-and-videos, adobe-retouch-portraits
+### agent-sdk-dev |vunknown | 2026-02-20T01:06:49Z
+    Development kit for working with the Claude Agent SDK
+   skills: 
+### airtable |v0.1.0 | 2026-06-09T08:34:38-07:00
+    Airtable is the database and operations layer for your agents — whether running product, marketing, sales, ops, HR, or a custom business app. It combines structured data with multiplayer visual surfaces (grid, kanban, calendar, gallery, timeline) humans and agents share — plus sy
+   skills: agent-activity-log, airtable-cli, airtable-filters, airtable-overview, marketing-ops, product-ops, sales-ops, show-airtable-link
+### amazon-location-service |v1.0.0 | 2026-06-18T19:21:20Z
+    Guide developers through adding maps, places search, geocoding, routing, and other geospatial features with Amazon Location Service, including authentication setup, SDK integration, and best practices.
+   skills: amazon-location-service
+### amplitude |vunknown | 2026-06-10T17:19:55-04:00
+    Use Amplitude as an expert analyst — instrument Amplitude, discover product opportunities, analyze charts, create dashboards, manage experiments, and understand users and accounts.
+   skills: add-analytics-instrumentation, analyze-account-health, analyze-ai-topics, analyze-chart, analyze-dashboard, analyze-experiment, analyze-feedback, compare-user-journeys, create-chart, create-dashboard, daily-brief, debug-replay
+### apollo-skills |v1.2.5 | 2026-06-04T12:15:49-04:00
+    Apollo GraphQL agent skills for Claude Code — Apollo Client, Server, Federation, Connectors, Router, Rover CLI, iOS, Kotlin, and the Apollo MCP server. Covers schema design, query optimization, and GraphQL best practices.
+   skills: apollo-client, apollo-connectors, apollo-federation, apollo-ios, apollo-kotlin, apollo-mcp-server, apollo-router, apollo-router-plugin-creator, apollo-server, graphql-operations, graphql-schema, rover
+### appwrite |v0.1.0 | 2026-04-19T18:47:37+05:30
+    Appwrite tools for Claude Code, including SDK skills, Appwrite MCP servers, and deployment commands.
+   skills: cli, dart, dotnet, go, kotlin, php, python, ruby, rust, swift, typescript
+### asana |vunknown | 2025-12-01T16:03:02-08:00
+    Asana project management integration. Create and manage tasks, search projects, update assignments, track progress, and integrate your development workflow with Asana's work management platform.
+   skills: 
+### atlan |v1.0.0 | 2026-06-11T13:13:54+08:00
+    Atlan data catalog plugin for Claude Code. Search, explore, govern, and manage your data assets through natural language. Powered by the Atlan MCP server with semantic search, lineage traversal, glossary management, data quality rules, and more.
+   skills: 
+### atlassian |vunknown | 2026-06-09T13:38:48-07:00
+    Connect to Atlassian products including Jira and Confluence. Search and create issues, access documentation, manage sprints, and integrate your development workflow with Atlassian's collaboration tools.
+   skills: capture-tasks-from-meeting-notes, generate-status-report, search-company-knowledge, spec-to-backlog, triage-issue
+### atomic-agents |vunknown | 2026-06-13T20:50:19+02:00
+    Comprehensive development workflow for building AI agents with the Atomic Agents framework. Includes specialized agents for schema design, architecture planning, code review, and tool development. Features guided workflows, progressive-disclosure skills, and best practice validat
+   skills: 
+### aws-agents |v1.0.0 | 2026-06-18T18:14:51Z
+    Build, deploy, and operate AI agents on AWS. Skills for scaffolding agents with Amazon Bedrock AgentCore, connecting tools, memory, policies, evaluation, debugging, and production hardening.
+   skills: agents-build, agents-connect, agents-debug, agents-deploy, agents-get-started, agents-harden, agents-optimize
+### aws-amplify |v1.0.0 | 2026-06-18T19:21:20Z
+    Build full-stack apps with AWS Amplify Gen 2 using guided workflows for authentication, data models, storage, GraphQL APIs, and Lambda functions.
+   skills: amplify-workflow
+### aws-dev-toolkit |v0.3.0 | 2026-05-19T10:46:41-07:00
+    AWS development toolkit — 34 skills, 11 agents, and 3 MCP servers for building, migrating, and performing architecture reviews on AWS.
+   skills: agentcore, api-gateway, aws-architect, aws-compare, aws-debug, aws-diagram, aws-health-check, aws-plan, bedrock, challenger, cloudfront, cost-check
+### aws-startup-advisor |v1.5.1 | 2026-06-16T18:51:25-07:00
+    Personalized architecture, cost, security, and migration guidance for startups. From day-one account setup and security baselines to production-ready infrastructure, cost optimization, and beyond. Includes AWS Activate Credits eligibility, 60+ exclusive startup offers, and multi-
+   skills: architect-for-startups, knowledge-base-for-startups, migration-to-aws, prompt-library-for-startups, start-building-for-startups
+### azure |v1.1.71 | 2026-06-18T09:46:26-07:00
+    Transform Claude into an Azure expert. This plugin integrates the Azure MCP server and specialized Azure skills to move beyond generic advice. It enables Claude to perform real-world tasks: listing resources, validating deployments, diagnosing infrastructure issues, and optimizin
+   skills: airunway-aks-setup, appinsights-instrumentation, azure-ai, azure-aigateway, azure-cloud-migrate, azure-compliance, azure-compute, azure-cost, azure-deploy, azure-diagnostics, azure-enterprise-infra-planner, azure-hosted-copilot-sdk
+### bigdata-com |v1.1.0 | 2026-06-11T17:42:10+02:00
+    Official Bigdata.com plugin providing financial research, analytics, and intelligence tools powered by Bigdata MCP.
+   skills: financial-research-analyst
+### bigquery-data-analytics |v0.2.1 | 2026-06-16T23:47:37+05:30
+    Connect, query, and generate data insights for BigQuery datasets and data.
+   skills: bigquery-ai-ml, bigquery-analytics, bigquery-data
+### box |v1.0.0 | 2026-05-05T15:29:39-07:00
+    Work with your Box content directly from Claude Code — search files, organize folders, collaborate with your team, and use Box AI to answer questions, summarize documents, and extract data without leaving your workflow.
+   skills: box, box, box-legal-workflows, box-legal-workflows, box-legal-workflows-contract, box-legal-workflows-contract, box-legal-workflows-intake, box-legal-workflows-intake, box-legal-workflows-ma, box-legal-workflows-ma
+### brightdata-plugin |v1.8.0 | 2026-06-11T15:24:13+03:00
+    Web scraping, Google search, structured data extraction, and MCP server integration powered by Bright Data. Includes 7 skills: scrape any webpage as markdown (with bot detection/CAPTCHA bypass), search Google with structured JSON results, extract data from 40+ websites (Amazon, L
+   skills: agent-onboarding, brand-listening, brd-browser-debug, bright-data-best-practices, bright-data-mcp, brightdata-cli, competitive-intel, data-feeds, design-mirror, discover-api, js-sdk-best-practices, live-research
+### carta-cap-table |v6.21.5 | 2026-06-18T20:32:59Z
+    Carta Cap Table plugin — skills and hooks for querying cap tables, grants, SAFEs, 409A valuations, waterfall scenarios, and more
+   skills: carta-compensation-benchmarks, carta-compensation-rolematcher, carta-conversion-calculator, carta-discover-commands, carta-grant-vesting, carta-interaction-reference, carta-market-benchmarks, carta-portfolio-alerts, carta-reporting, carta-reporting-excel, carta-reporting-markdown, carta-round-history
+### carta-crm |v0.8.1 | 2026-06-18T20:32:59Z
+    Manage the Carta CRM conversationally — search, add, update, and enrich investors, companies, contacts, deals, notes, and fundraisings via the Carta CRM MCP Server.
+   skills: add-company, add-contact, add-deal, add-fundraising, add-investor, add-note, enrich-company, lookup-fund-portfolio, search-companies, search-contacts, search-deals, search-fundraisings
+### carta-investors |v0.107.1 | 2026-06-21T05:40:10Z
+    Carta Investors plugin — skills for querying investor data, performance benchmarks, regulatory reporting, AGM deck generation, brand extraction, and more via the Carta MCP Server.
+   skills: carta-budget-actuals, carta-budget-scenarios, carta-budget-vs-actuals, carta-co-investors, carta-consolidating-balance-sheet, carta-consolidating-pnl, carta-create-budget, carta-download-tearsheet, carta-explore-data, carta-fetch-budget, carta-form-adv, carta-investors-tutorial
+### cds-mcp |v0.0.5 | 2026-06-02T15:56:40+02:00
+    AI-assisted development of SAP Cloud Application Programming Model (CAP) projects. Search CDS models and CAP documentation.
+   skills: 
+### chrome-devtools-mcp |v1.3.0 | 2026-06-19T09:48:30Z
+    Control and inspect a live Chrome browser from your coding agent. Record performance traces, analyze network requests, check console messages with source-mapped stack traces, and automate browser actions with Puppeteer.
+   skills: a11y-debugging, chrome-devtools, chrome-devtools-cli, debug-optimize-lcp, memory-leak-debugging, troubleshooting
+### circle-skills |v1.0.0 | 2026-05-26T12:10:50-04:00
+    Ship stablecoin apps faster. Best-practice skills for USDC payments, cross-chain transfers, wallets, and smart contracts — plus Circle's MCP server for real-time SDK and documentation guidance.
+   skills: agent-wallet-policy, bridge-stablecoin, fund-agent-wallet, pay-via-agent-wallet, swap-tokens, unify-balance, use-agent-wallet, use-arc, use-circle-cli, use-circle-wallets, use-developer-controlled-wallets, use-gateway
+### circleback |v1.0.0 | 2026-01-09T16:24:16-08:00
+    Circleback conversational context integration. Search and access meetings, emails, calendar events, and more.
+   skills: 
+### clickhouse |v1.0.0 | 2026-06-08T07:46:41Z
+    Connect Claude to your ClickHouse Cloud databases. Browse organizations, services, databases, and table schemas. Run read-only SQL queries against your data and get instant analytical answers. Monitor service backups, review billing costs, and inspect ClickPipe configurations - a
+   skills: clickhouse-best-practices, setup
+### clickhouse-best-practices |v0.3.0 | 2026-06-07T23:55:37-04:00
+    28 best practice rules for ClickHouse schema design, query optimization, and data ingestion — prioritized by impact
+   skills: chdb-datastore, chdb-sql, clickhouse-architecture-advisor, clickhouse-best-practices, clickhouse-js-node-coding, clickhouse-js-node-troubleshooting, clickhouse-managed-postgres-rca, clickhousectl-cloud-deploy, clickhousectl-local-dev
+### cockroachdb |v0.1.9 | 2026-05-12T09:53:15-04:00
+    Connect Claude Code directly to your CockroachDB clusters for hands-on database work — explore schemas, write optimized SQL, debug queries, and manage distributed database clusters. This plugin provides 14 tools across two active MCP backends (self-hosted MCP Toolbox and managed 
+   skills: analyzing-range-distribution, analyzing-schema-change-storage-risk, auditing-cloud-cluster-security, auditing-table-statistics, benchmarking-transaction-patterns, cockroachdb-sql, configuring-audit-logging, configuring-ip-allowlists, configuring-log-export, configuring-private-connectivity, configuring-sso-and-scim, designing-application-transactions
+### coderabbit |v1.1.1 | 2026-05-03T23:36:56-07:00
+    Your code review partner. CodeRabbit provides external validation using a specialized AI architecture and 40+ integrated static analyzers—offering a different perspective that catches bugs, security vulnerabilities, logic errors, and edge cases. Context-aware analysis via AST par
+   skills: autofix, code-review
+### codspeed |v1.0.0 | 2026-06-19T17:40:34+02:00
+    CodSpeed is the all-in-one performance testing toolkit. Dive into benchmarking results, flamegraphs, and performance comparisons — give Claude granular profiling context to pinpoint bottlenecks and autonomously iterate on performance via the CodSpeed MCP server.
+   skills: codspeed-optimize, codspeed-setup-harness
+### context7 |vunknown | 2025-12-01T16:03:02-08:00
+    Upstash Context7 MCP server for up-to-date documentation lookup. Pull version-specific documentation and code examples directly from source repositories into your LLM context.
+   skills: 
+### convex |v1.3.0 | 2026-06-17T00:31:56-07:00
+    Official Convex plugin for Claude Code with bundled Convex skills, the convex-expert subagent for code-writing, a runtime-error monitor, and MCP access for backend development, schema design, real-time features, auth, file storage, scheduled jobs, and AI agents.
+   skills: design, quickstart
+### data-agent-kit-starter-pack |v0.4.0 | 2026-06-18T16:30:15-07:00
+    This plugin provides a specialized suite of skills for data engineers and database practitioners working on Google Cloud. It acts as an expert assistant, allowing you to use natural language prompts in your preferred coding agent to architect complex data pipelines, transform dat
+   skills: accidental-data-loss-prevention, bigquery-data-transfer-service, building-data-apps, data-autocleaning, dataform-bigquery, dbt-bigquery, developing-with-bigquery, discovering-gcp-data-assets, federate-lakehouse-catalog, gcloud-auth-verification, gcp-composer-troubleshooting, gcp-data-pipelines
+### databases-on-aws |v1.3.2 | 2026-06-18T19:21:20Z
+    Expert database guidance for the AWS database portfolio. Design schemas, execute queries, handle migrations, and choose the right database for your workload.
+   skills: dsql
+### datahub-skills |v1.4.1 | 2026-05-25T08:53:56+02:00
+    DataHub development and interaction toolkit with connector planning, PR review, catalog search, metadata enrichment, lineage tracing, data quality management, and connection setup skills
+   skills: datahub-connector-planning, datahub-connector-pr-review, datahub-enrich, datahub-lineage, datahub-mfe-configure-app, datahub-mfe-create-app, datahub-quality, datahub-search, datahub-setup, load-standards, using-datahub
+### deploy-on-aws |v1.3.0 | 2026-06-18T19:21:20Z
+    Deploy applications to AWS with architecture recommendations, cost estimates, and IaC deployment.
+   skills: aws-architecture-diagram, deploy, elastic-beanstalk
+### desktop-commander |vunknown | 2026-06-17T18:43:08+03:00
+    MCP server for terminal commands, process management, and file operations across text, code, PDF, DOCX, Excel, images, and structured data.
+   skills: desktop-commander-overview
+### dominodatalab |v1.0.0 | 2026-06-16T15:32:55-03:00
+    Full Domino Data Lab platform support — workspaces, jobs, model deployment, experiment tracking, GenAI tracing, Spark/Ray/Dask, and app deployment for data science teams
+   skills: ai-gateway, app-deployment, data-connectivity, datasets, distributed-computing, domino-data-sdk, domino-governance, domino-taxonomy, domino-ui-bootstrap, domino-ui-design, environments, experiment-tracking
+### duckdb-skills |v0.2.4 | 2026-04-14T10:00:34+02:00
+    DuckDB-powered skills for Claude Code: read any data file, attach and query DuckDB databases, search DuckDB/DuckLake docs, search past session logs, and install/update DuckDB extensions.
+   skills: attach-db, convert-file, duckdb-docs, install-duckdb, query, read-file, read-memories, s3-explore, spatial
+### exa |v3.3.9 | 2026-06-08T12:15:52-07:00
+    Exa AI web search, deep research, and content extraction. Provides MCP tools and research skills for comprehensive web search, people discovery, company research, academic papers, and more.
+   skills: search
+### fiftyone |v1.0.3 | 2026-06-03T08:12:30-04:00
+    Build high-quality datasets and computer vision models. Visualize datasets, analyze models, find duplicates, run inference, evaluate predictions, and develop custom plugins.
+   skills: fiftyone-code-style, fiftyone-create-notebook, fiftyone-dataset-curation, fiftyone-dataset-export, fiftyone-dataset-import, fiftyone-dataset-inference, fiftyone-develop-plugin, fiftyone-embeddings-visualization, fiftyone-eval-plugin, fiftyone-find-duplicates, fiftyone-generate-data-lens-connector, fiftyone-issue-triage
+### firecrawl |v1.0.9 | 2026-06-15T17:33:26-04:00
+    Web scraping and crawling powered by Firecrawl. Turn any website into clean, LLM-ready markdown or structured data. Scrape single pages, crawl entire sites, search the web, and extract structured information. Includes an AI agent for autonomous multi-source data gathering - just 
+   skills: firecrawl-agent, firecrawl-cli, firecrawl-crawl, firecrawl-download, firecrawl-interact, firecrawl-map, firecrawl-monitor, firecrawl-parse, firecrawl-scrape, firecrawl-search
+### firestore-native |v0.3.1 | 2026-06-17T15:02:00-07:00
+    Connect and interact with Firestore databases, collections, and documents.
+   skills: firestore-data
+### forge-skills |v0.1.0 | 2026-06-19T10:09:46+10:00
+    Forge-focused skills and MCP configuration for Atlassian Forge: scaffold and deploy apps (forge create, templates, dev spaces), build Teamwork Graph connectors for Rovo Search/Rovo Chat, pre-deploy review, systematic debugging, plus Forge docs and Atlassian Design System lookups 
+   skills: forge-app-builder, forge-app-review, forge-connector, forge-cost-optimizer, forge-debugger, forge-security-review
+### greptile |vunknown | 2026-01-05T21:15:35-08:00
+    AI-powered codebase search and understanding. Query your repositories using natural language to find relevant code, understand dependencies, and get contextual answers about your codebase architecture.
+   skills: 
+### hookify |vunknown | 2026-05-19T17:53:52-07:00
+    Easily create custom hooks to prevent unwanted behaviors by analyzing conversation patterns or from explicit instructions. Define rules via simple markdown files.
+   skills: writing-rules
+### huggingface-skills |v1.0.8 | 2026-06-19T13:13:58+01:00
+    Build, train, evaluate, and use open source AI models, datasets, and spaces.
+   skills: hf-cli, hf-mem, huggingface-best, huggingface-community-evals, huggingface-datasets, huggingface-gradio, huggingface-llm-trainer, huggingface-local-models, huggingface-lora-space-builder, huggingface-paper-publisher, huggingface-papers, huggingface-spaces
+### hunter |v0.1.0 | 2026-06-16T12:08:18Z
+    Find and verify professional email addresses, search contacts by domain, and enrich company data -- directly in Claude.
+   skills: campaign-setup, company-enrichment, discover, domain-search, email-finder, email-verifier, list-builder, person-enrichment, prospecting
+### hyperframes |v0.6.121 | 2026-06-21T17:59:01-04:00
+    HyperFrames by HeyGen. Write HTML, render video. Compositions, GSAP and runtime adapter animations, captions, voiceovers, audio-reactive visuals, and website-to-video capture for HyperFrames.
+   skills: embedded-captions, faceless-explainer, general-video, graphic-overlays, hyperframes, hyperframes-animation, hyperframes-cli, hyperframes-core, hyperframes-creative, hyperframes-media, hyperframes-registry, motion-graphics
+### intercom |v0.1.0 | 2026-04-27T14:08:01-04:00
+    Intercom integration for Claude Code. Search conversations, analyze customer support patterns, look up contacts and companies, and install the Intercom Messenger. Connect your Intercom workspace to get real-time insights from customer data.
+   skills: customer-360, install-cli, install-messenger, intercom-analysis
+### knowledge-catalog |v0.5.2 | 2026-06-19T12:20:01+02:00
+    Connect to Knowledge Catalog to discover, manage, monitor, and govern data and AI artifacts across your data platform
+   skills: knowledge-catalog-discovery
+### learn-with-coursera |vunknown | 2026-05-18T15:13:50-07:00
+    Turn any learning intent into a personalized Coursera experience. Asks three quick questions (topic, familiarity, preferred format), searches Coursera's catalog, and delivers the right next step — a course, hands-on project, short video, or live roleplay — then maps a path forwar
+   skills: learn-with-coursera
+### legalzoom |v1.0.0 | 2026-02-20T22:56:04Z
+    Attorney guidance and legal tools for business and personal needs. AI-powered document review identifies critical risks and important clauses, advises when to engage an attorney, and routes to LegalZoom's network when professional expertise is needed.
+   skills: attorney-assist
+### linear |vunknown | 2025-12-16T15:13:40-08:00
+    Linear issue tracking integration. Create issues, manage projects, update statuses, search across workspaces, and streamline your software development workflow with Linear's modern issue tracker.
+   skills: 
+### logfire |v0.1.3 | 2026-06-10T14:21:51+05:30
+    Add Logfire observability to Python applications with auto-instrumentation for FastAPI, httpx, asyncpg, SQLAlchemy, and more
+   skills: logfire-instrumentation, logfire-query, logfire-ui
+### lumen |v0.0.41 | 2026-05-20T14:36:10+02:00
+    Precise local semantic code search via MCP. Indexes your codebase with Go AST parsing, embeds with Ollama or LM Studio, and exposes vector search to Claude through an MCP server — no cloud, no npm.
+   skills: doctor, reindex
+### mapbox |v1.0.0 | 2026-06-03T11:09:45-04:00
+    Mapbox skills and MCP servers for building location-aware applications with AI. Includes geospatial tools, style management, and patterns for web, iOS, Android, and AI agent frameworks.
+   skills: mapbox-android-patterns, mapbox-cartography, mapbox-data-visualization-patterns, mapbox-flutter-patterns, mapbox-geospatial-operations, mapbox-google-maps-migration, mapbox-ios-patterns, mapbox-location-grounding, mapbox-maplibre-migration, mapbox-mcp-devkit-patterns, mapbox-mcp-runtime-patterns, mapbox-search-integration
+### math-olympiad |vunknown | 2026-03-30T20:56:21+01:00
+    Solve competition math (IMO, Putnam, USAMO) with adversarial verification that catches what self-verification misses. Fresh-context verifiers attack proofs with specific failure patterns. Calibrated abstention over bluffing.
+   skills: math-olympiad
+### microsoft-docs |v0.3.1 | 2026-05-10T10:18:59+08:00
+    Access official Microsoft documentation, API references, and code samples for Azure, .NET, Windows, and more.
+   skills: microsoft-code-reference, microsoft-docs, microsoft-skill-creator
+### mintlify |vunknown | 2026-04-06T09:03:21-07:00
+    Build beautiful documentation sites with Mintlify. Convert non-markdown files into properly formatted MDX pages, add and modify content with correct component use, and automate documentation updates.
+   skills: mintlify
+### miro |v1.3.0 | 2026-06-17T12:29:42+02:00
+    Secure access to Miro boards. Enables AI to read board context, create diagrams, and generate code with enterprise-grade security.
+   skills: miro-browse, miro-code-explain-on-board, miro-code-review, miro-code-spec, miro-diagram, miro-doc, miro-table
+### monday-crm |v0.3.0 | 2026-06-18T15:17:59+02:00
+    Run your monday CRM in plain language. Build a pipeline from scratch, start the day with a ranked deal briefing, spin up a forecast dashboard, audit board health, clean up messy data in bulk, and turn meeting notes into deal updates. Every skill writes back into monday as a real 
+   skills: daily-briefing, data-cleanup, forecast, meeting-to-deal, workspace-builder
+### mongodb |v1.1.0 | 2026-06-03T23:20:48+03:00
+    Official Claude plugin for MongoDB (MCP Server + Skills). Connect to databases, explore data, manage collections, optimize queries, generate reliable code, implement best practices, develop advanced features, and more.
+   skills: mongodb-atlas-stream-processing, mongodb-connection, mongodb-mcp-setup, mongodb-natural-language-querying, mongodb-query-optimizer, mongodb-schema-design, mongodb-search-and-ai
+### netsuite-suitecloud |vunknown | 2026-06-19T13:06:32+02:00
+    NetSuite agent skills from Oracle — authoring guidance for SuiteCloud Development Framework (SDF) objects and UIF single-page-app components, plus runtime guidance for the NetSuite AI Service Connector.
+   skills: netsuite-ai-connector-instructions, netsuite-owasp-secure-coding, netsuite-sdf-project-documentation, netsuite-sdf-roles-and-permissions, netsuite-suitescript-records-reference, netsuite-suitescript-upgrade, netsuite-uif-spa-reference
+### nimble |v0.23.0 | 2026-06-15T23:27:16+03:00
+    Nimble web data toolkit — search, extract, map, crawl the web and work with structured data agents
+   skills: company-deep-dive, competitor-intel, competitor-positioning, healthcare-providers-enrich, healthcare-providers-extract, healthcare-providers-verify, local-places, market-finder, meeting-prep, nimble-agent-builder, nimble-databricks-data-products, nimble-web-expert
+### nvidia-skills |v1.0.0 | 2026-06-16T09:32:25-05:00
+    NVIDIA agent skills for accelerated-computing workflows — starting with cuOpt vehicle-routing optimization (VRP, TSP, PDP) via the cuOpt Python API.
+   skills: aiq-deploy, aiq-research, cuopt-user-rules, dynamo-interconnect-check, dynamo-router-starter, nemoclaw-user-get-started, omniverse-cad-to-simready, omniverse-realtime-viewer, omniverse-usd-performance-tuning, physical-ai-infrastructure-setup-and-resilient-scaling, physical-ai-neural-reconstruction
+### oracle-ai-data-platform-workbench-engineer-agent |v0.5.0 | 2026-06-16T11:54:50-06:00
+    Oracle AI Data Platform (AIDP) Workbench engineer agent for Claude Code — a 37-skill agent that operates the full Spark/Delta lakehouse in natural language. Discovers your catalog into a grounding cache, turns plain English into accurate Spark SQL, and runs the lifecycle (CREATE/
+   skills: aidp-agent-flows, aidp-agent-highcode, aidp-ai-sql, aidp-analyzing-data, aidp-audit, aidp-bundle, aidp-catalog-explore, aidp-catalog-init, aidp-cluster-ops, aidp-credentials, aidp-data-quality, aidp-data-sharing
+### outputai |v0.3.0 | 2026-06-18T12:21:30-07:00
+    Output.ai workflow development toolkit for Claude Code. Adds 5 specialist agents (planner, builder, debugger, prompt writer, quality reviewer), 40+ slash-command skills covering scaffolding, debugging, evaluation, and credential management, plus a SessionStart hook that auto-load
+   skills: output-build-workflow, output-credentials-edit, output-credentials-env-vars, output-credentials-init, output-debug-workflow, output-dev-agent-class, output-dev-code-style, output-dev-create-skeleton, output-dev-credentials, output-dev-eval-testing, output-dev-evaluator-function, output-dev-folder-structure
+### pigment |v1.0.8 | 2026-06-19T13:39:12+01:00
+    Analyze business data and build custom Pigment models, metrics, and boards through natural language.
+   skills: analyzing-pigment-data, designing-boards, designing-views, formatting-and-highlighting, integrating-external-data, modeling-pigment-applications, optimizing-pigment-performance, planning-cycles-pigment-applications, securing-pigment-applications, solving-specific-use-cases, writing-pigment-formulas
+### pinecone |v1.4.1 | 2026-05-26T15:31:28-05:00
+    Pinecone vector database integration. Streamline your Pinecone development with powerful tools for managing vector indexes, querying data, and rapid prototyping. Use slash commands like /quickstart to generate AGENTS.md files and initialize Python projects and /query to quickly e
+   skills: assistant, cli, docs, full-text-search, help, mcp, n8n, query, quickstart
+### planetscale |v1.0.0 | 2026-05-12T15:46:08-04:00
+    An authenticated hosted MCP server that accesses your PlanetScale organizations, databases, branches, schema, and Insights data. Query against your data, surface slow queries, and get organizational and account information.
+   skills: 
+### playground |vunknown | 2026-02-20T01:06:49Z
+    Creates interactive HTML playgrounds — self-contained single-file explorers with visual controls, live preview, and prompt output with copy button. Includes templates for design playgrounds, data explorers, concept maps, and document critique.
+   skills: playground
+### posthog |v1.1.39 | 2026-06-21T12:24:30+02:00
+    Access PostHog analytics, feature flags, experiments, error tracking, and insights directly from Claude Code.
+   skills: analyzing-experiment-session-replays, assessing-heatmaps, auditing-endpoints, auditing-experiments-flags, auditing-warehouse-source-health, auditing-warehouse-view-health, authoring-error-tracking-alerts, authoring-log-alerts, authoring-signals-scouts, building-workflows, choosing-trend-or-slope-view, cleaning-up-stale-feature-flags
+### postman |v1.2.0 | 2026-06-11T15:46:18-07:00
+    Full API lifecycle management for Claude Code. Sync collections, generate client code, discover APIs, run tests, create mocks, publish docs, and audit security. Powered by the Postman MCP Server.
+   skills: agent-ready-apis, generate-spec, postman-cli, postman-context, postman-knowledge, run-collection, send-request
+### prisma |vunknown | 2026-03-11T16:04:11-04:00
+    Prisma MCP integration for Postgres database management, schema migrations, SQL queries, and connection string management. Provision Prisma Postgres databases, run migrations, and interact with your data directly.
+   skills: 
+### pydantic-ai |v0.1.0 | 2026-06-10T14:21:51+05:30
+    Write accurate Pydantic AI code from the start. Up-to-date patterns, decision trees, and common gotchas for agents, tools, structured output, streaming, and multi-agent apps.
+   skills: building-pydantic-ai-agents
+### qdrant-skills |v1.0.0 | 2026-06-13T10:47:22+02:00
+    Agent skills for Qdrant vector search covering scaling, performance optimization, search quality, monitoring, deployment, model migration, version upgrades, and SDK usage across Python, TypeScript, Rust, Go, .NET, and Java.
+   skills: qdrant-clients-sdk, qdrant-deployment-options, qdrant-model-migration, qdrant-monitoring, qdrant-performance-optimization, qdrant-scaling, qdrant-search-quality, qdrant-version-upgrade
+### qt-development-skills |v1.5.0 | 2026-06-10T16:33:58Z
+    Agentic engineering skills for Qt software development — Qt C++/QML code review, QML coding, and Qt C++/QML code documentation.
+   skills: qt-cpp-docs, qt-cpp-review, qt-figma-component-generation, qt-figma-token-extraction, qt-qml, qt-qml-docs, qt-qml-profiler, qt-qml-review, qt-qml-test, qt-qml-test-run, qt-ui-design
+### quarkus-agent |v1.1.4 | 2026-06-19T00:24:37Z
+    MCP server for AI coding agents to create, manage, and interact with Quarkus applications. Provides tools for project scaffolding, dev mode lifecycle, extension skills, Dev MCP proxy, and documentation search.
+   skills: 
+### redis-development |vunknown | 2026-05-27T13:12:12+03:00
+    Redis development best practices — data structures, query engine, vector search, caching, and performance optimization
+   skills: 
+### remember |v0.8.2 | 2026-06-21T23:16:06+02:00
+    Continuous memory for Claude Code. Extracts, summarizes, and compresses conversations into tiered daily logs. Claude remembers what you did yesterday.
+   skills: remember
+### runway-api |v2.1.0 | 2026-04-21T17:48:24-04:00
+    Video generation at scale. Generate videos, images, and audio with Runway's API — batch ad campaigns, product videos, multishot stories, and creative iteration. Supports seedance2, gen4.5, veo3, Nano, Banana Pro, and more.
+   skills: rw-api-reference, rw-check-compatibility, rw-check-org-details, rw-fetch-api-reference, rw-generate-audio, rw-generate-image, rw-generate-video, rw-integrate-audio, rw-integrate-character-embed, rw-integrate-characters, rw-integrate-documents, rw-integrate-image
+### sagemaker-ai |v1.2.1 | 2026-06-18T19:21:20Z
+    Build, train, and deploy AI models with deep AWS AI/ML expertise brought directly into your coding assistants, covering the surface area of Amazon SageMaker AI.
+   skills: dataset-evaluation, dataset-transformation, directory-management, finetuning, finetuning-technique, hyperpod-cluster-debugger, hyperpod-issue-report, hyperpod-nccl, hyperpod-node-debugger, hyperpod-performance-debugger, hyperpod-slurm-debugger, hyperpod-ssm
+### sanity |v1.0.0 | 2026-06-17T14:29:06-07:00
+    Sanity content platform integration with MCP server, agent skills, and slash commands. Query and author content, build and optimize GROQ queries, design schemas, and set up Visual Editing.
+   skills: content-experimentation-best-practices, content-modeling-best-practices, portable-text-conversion, portable-text-serialization, sanity-best-practices, sanity-migration, seo-aeo-best-practices
+### sap-cds-mcp |v0.0.5 | 2026-06-02T15:56:40+02:00
+    AI-assisted development of SAP Cloud Application Programming Model (CAP) projects. Search CDS models and CAP documentation.
+   skills: 
+### sap-fiori-mcp-server |v1.4.1 | 2026-06-19T12:14:30Z
+    MCP server for SAP Fiori development tools for Claude Code. Build and modify SAP Fiori applications with AI assistance.
+   skills: sap-fiori-add-visual-filter, sap-fiori-analytical-chart
+### sap-mdk-server |v0.4.0 | 2026-05-18T12:27:49+08:00
+    MCP server for SAP Mobile Development Kit (MDK). Build and modify MDK applications with AI assistance — schema lookups, action validation, rule editing, and project scaffolding.
+   skills: 
+### semgrep |v2.0.1 | 2026-06-17T13:04:52-07:00
+    Semgrep catches security vulnerabilities in real-time and guides Claude to write secure code from the start.
+   skills: 
+### sentry |v1.0.0 | 2026-06-18T12:19:12-04:00
+    Sentry error monitoring integration. Access error reports, analyze stack traces, search issues by fingerprint, and debug production errors directly from your development environment.
+   skills: sentry-android-sdk, sentry-browser-sdk, sentry-cloudflare-sdk, sentry-cocoa-sdk, sentry-code-review, sentry-create-alert, sentry-dotnet-sdk, sentry-elixir-sdk, sentry-feature-setup, sentry-fix-issues, sentry-flutter-sdk, sentry-go-sdk
+### shopify |v1.0.0 | 2026-04-07T13:39:43-04:00
+    Shopify developer tools for Claude Code — search Shopify docs, generate and validate GraphQL, Liquid, and UI extension code
+   skills: 
+### shopify-ai-toolkit |v1.4.1 | 2026-06-04T11:08:50-04:00
+    Shopify's AI Toolkit provides 18 development skills for building on the Shopify platform, covering documentation search, API schema access, GraphQL and Liquid code validation, Hydrogen storefronts, Polaris UI extensions, store management via CLI, and onboarding guidance for both 
+   skills: shopify-admin, shopify-app-store-review, shopify-custom-data, shopify-customer, shopify-dev, shopify-functions, shopify-hydrogen, shopify-liquid, shopify-onboarding-dev, shopify-onboarding-merchant, shopify-partner, shopify-payments-apps
+### slack |v1.0.0 | 2026-06-19T10:24:13-07:00
+    Slack workspace integration. Search messages, access channels, read threads, and stay connected with your team's communications while coding. Find relevant discussions and context quickly.
+   skills: block-kit, create-slack-app, slack-api, slack-cli, slack-messaging, slack-search
+### sourcegraph |v0.1.0 | 2026-03-16T16:32:43-04:00
+    Code search and understanding across codebases. Search, read, and trace references across repositories; analyze refactor impact; investigate incidents via commit and diff search; run targeted security sweeps.
+   skills: searching-sourcegraph
+### togetherai-skills |v1.0.0 | 2026-06-18T18:58:07-07:00
+    Agent Skills for Together AI platform — inference, training, embeddings, audio, video, images, function calling, and infrastructure. Covers serverless chat completions, image/video generation, fine-tuning, batch inference, evaluations, sandboxes, dedicated endpoints, and GPU clus
+   skills: together-audio, together-batch-inference, together-chat-completions, together-dedicated-containers, together-dedicated-endpoints, together-embeddings, together-evaluations, together-fine-tuning, together-gpu-clusters, together-images, together-sandboxes, together-video
+### twilio-developer-kit |v0.3.1 | 2026-05-14T14:10:23-04:00
+    Twilio Skills provide procedural knowledge for AI coding agents — which APIs to use, in what order, and what to avoid. Covers SMS, Voice, WhatsApp, Verify, SendGrid, Compliance, and 30+ products.
+   skills: twilio-account-setup, twilio-agent-augmentation-architect, twilio-agent-connect, twilio-ai-agent-architect, twilio-call-recordings, twilio-cli-reference, twilio-compliance-onboarding, twilio-compliance-traffic, twilio-conference-calls, twilio-content-template-builder, twilio-conversation-intelligence, twilio-conversation-orchestrator
+### ui5 |vunknown | 2026-06-16T15:10:28Z
+    SAPUI5 / OpenUI5 plugin for coding agents. Create and validate UI5 projects, access API documentation, run UI5 linter, get development guidelines and best practices for UI5 development.
+   skills: ui5-best-practices, ui5-best-practices-integration-cards, ui5-best-practices-opa5
+### vercel |v0.44.0 | 2026-06-15T12:20:43-07:00
+    Vercel deployment platform integration. Manage deployments, check build status, access logs, configure domains, and control your frontend infrastructure directly from Claude Code.
+   skills: ai-gateway, ai-sdk, auth, bootstrap, chat-sdk, deployments-cicd, env-vars, knowledge-update, marketplace, microfrontends, next-cache-components, next-forge
+### vibe-prospecting |v0.1.62 | 2026-06-15T15:01:27Z
+    Vibe Prospecting connects Claude to live B2B company and contact data so users can search, match, enrich, filter, and export prospects at scale. It turns natural-language requests into structured GTM workflows for lead generation, CRM enrichment, company research, executive disco
+   skills: vibe-prospecting
+### youdotcom-agent-skills |v1.0.0 | 2026-05-11T07:43:13Z
+    You.com agent skills for web search, research with citations, and content extraction. Guided integrations for Vercel AI SDK, Claude Agent SDK, OpenAI Agents SDK, crewAI, LangChain, Microsoft Teams.ai, direct REST API, and bash CLI.
+   skills: teams-anthropic-integration, ydc-ai-sdk-integration, ydc-claude-agent-sdk-integration, ydc-crewai-mcp-integration, ydc-langchain-integration, ydc-openai-agent-sdk-integration, youdotcom-api, youdotcom-cli
+### zilliz |vunknown | 2026-05-26T10:20:34+08:00
+    Zilliz Cloud management plugin with 14 skills covering cluster lifecycle, collection schema, vector search, index tuning, bulk import, RBAC, backups, and monitoring.
+   skills: 
+### zoominfo |v1.0.1 | 2026-06-03T18:12:09+01:00
+    Search companies and contacts, enrich leads, find lookalikes, and get AI-ranked contact recommendations. Pre-built skills chain multiple ZoomInfo tools into complete B2B sales workflows.
+   skills: account-research, build-list, buying-committee, competitor-analysis, enrich-company, enrich-contact, find-similar, meeting-prep, personalize-email, recommend-contacts, score-accounts, score-leads

@@ -1,0 +1,26 @@
+#!/bin/bash
+# Resumable PEAK batch on cvbml02: ver2 traction + LAP_mesh, cases 0-999 missing peak.vtu.
+# Loops until STOP_PEAK appears. Each pass re-scans eligible (picks up newly re-meshed cases).
+set -u
+Q=/home/jeff/project/54_analysis
+LOG=$Q/PEAK_batch.log
+STOP=$Q/STOP_PEAK
+START=${START:-0}
+END=${END:-1000}
+NPROC=${NPROC:-16}
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate ansys_new
+cd $Q
+
+donecnt(){ n=0; for i in $(seq 0 999); do [ -f solid_data/case_$i/ansys_results_type1_expB_new/FC_case_${i}_peak.vtu ] && n=$((n+1)); done; echo $n; }
+
+echo "==== PEAK batch START $(date) done=$(donecnt)/1000 ====" >> "$LOG"
+while [ ! -f "$STOP" ]; do
+  pkill -9 -f '[a]nsys.e' 2>/dev/null; pkill -9 -f '[a]nsys251' 2>/dev/null; sleep 2
+  python "$Q/pymapdl_peak_pool.py" "$START" "$END" "$NPROC" >> "$LOG" 2>&1
+  echo "==== PEAK PASS END $(date) done=$(donecnt)/1000 ====" >> "$LOG"
+  [ -f "$STOP" ] && break
+  sleep 60
+done
+pkill -9 -f '[a]nsys.e' 2>/dev/null; pkill -9 -f '[a]nsys251' 2>/dev/null
+echo "==== PEAK batch EXIT $(date) done=$(donecnt)/1000 ====" >> "$LOG"

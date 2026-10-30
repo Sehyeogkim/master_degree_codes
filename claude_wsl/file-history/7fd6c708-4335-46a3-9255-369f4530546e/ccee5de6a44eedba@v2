@@ -1,0 +1,23 @@
+---
+name: 65-final-0723-workflow
+description: "65_final_0723 lumen pipeline runs on the cvbml/harvey servers, not locally"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: 7fd6c708-4335-46a3-9255-369f4530546e
+  modified: 2026-07-23T00:15:36.193Z
+---
+
+All 65_final_0723 work (lumen meshing → 1D → etc.) runs **on the servers** (cvbml01/cv1 primarily, also cv2 and harvey) — not on the local machine. See [[server-abbreviations]].
+
+**Why:** the toolchain lives only on the servers — Simmetrix `mesh_generator` binary + floating license under `/opt/cvbml/repos/SyntheticTreeGenerator`, the `master_python` package (egg-link'd into the `ansys_new` conda env), and gmsh/meshio/vtk. Local machine has none of it.
+
+**Key facts:**
+- Working dir on cv1: `/home/jeff/project/65_final_0723/`
+- Run with: `/home/jeff/miniconda3/envs/ansys_new/bin/python <script>.py` (has gmsh 4.14 / meshio 5.3.5 / vtk 9.5 + `lumen_codes`, `utils.utils_lumen`)
+- Proven reference pipeline: `cv1:/home/jeff/project/54_analysis/lumen_Simmetrix_meshing.py` (fluid meshing + tree/xyzts) and `lumen_1D.py` (later 1D stage).
+- Fluid meshing path: `lumen.stp` --gmsh+meshio--> `lumen.vtk` --vtk--> `lumen.vtp` --Simmetrix--> `mesh-complete/`. The mesher needs a triangulated `.vtp`, NOT raw CAD `.stp`.
+- `tree.dat`/`xyzts.dat` are rebuilt from morphology params via `VesselCADModel.CAD_instance_from_idx(case_id, parameter_csv)` — so a `parameter.csv` (row order == case index) is required for those, though meshing alone only needs `lumen.stp`.
+- Config: `pre_data/solver_path.json` holds simmetrix meshing+license, svSolver, and pul_1d solver paths.
+
+The runner `lumen_meshing_0723.py` (case_0..4 of geo_0723 → fluid_0723/) is set up on cv1 as of 2026-07-23.

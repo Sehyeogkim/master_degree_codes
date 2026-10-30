@@ -1,0 +1,138 @@
+"""
+Does the top-5% candidate pre-filter change the answer, or is it only a speed-up?
+
+Compares, at r = 0.015 cm:
+    n*_top5 = argmax of the neighbourhood mean, restricted to the top-5% raw-stress nodes
+    n*_all  = argmax of the neighbourhood mean over ALL valid wall nodes
+and reports how often they differ, by how far, and how much PSS changes.
+"""
+import numpy as np
+import pyvista as pv
+from scipy.spatial import cKDTree
+from multiprocessing import get_context
+
+SOLID = "/home/jeff/project/65_final_0723/solid_0723"
+R = 0.015
+Z_EPS = 0.02
+TOP_PCT = 95.0
+N_CASES = 384
+
+
+def neighbourhood_mean(pts, s, r):
+    """Vectorised radius-neighbourhood mean of s (NaN-aware) for every point."""
+    tree = cKDTree(pts)
+    nb = tree.query_ball_point(pts, r)
+    lens = np.fromiter((len(x) for x in nb), dtype=np.int64, count=len(nb))
+    cols = np.concatenate([np.asarray(x, dtype=np.int64) for x in nb])
+    rows = np.repeat(np.arange(len(pts)), lens)
+    valid = ~np.isnan(s)
+    sfill = np.where(valid, s, 0.0)
+    tot = np.bincount(rows, weights=sfill[cols], minlength=len(pts))
+    cnt = np.bincount(rows, weights=valid[cols].astype(float), minlength=len(pts))
+    m = np.divide(tot, cnt, out=np.full(len(pts), np.nan), where=cnt > 0)
+    return m, nb, tree
+
+
+def one(ci):
+    try:
+        p = pv.read(f"{SOLID}/case_{ci}/ansys_results_dist_0723/FC_case_{ci}_peak.vtk")
+        wall = np.asarray(p.point_data["WALL_IN_FC"]).astype(bool)
+        pts = np.asarray(p.points)
+        wz = pts[wall][:, 2]
+        mz = (pts[:, 2] > wz.min() + Z_EPS) & (pts[:, 2] < wz.max() - Z_EPS)
+        idx = np.where(wall & mz)[0]
+        pts_sub = pts[idx]
+        s = np.asarray(p.point_data["Principal_stress"], dtype=np.float64)[idx]
+
+        mean, nb, _ = neighbourhood_mean(pts_sub, s, R)
+        valid = ~np.isnan(s)
+
+        # unrestricted winner (over all valid nodes)
+        cand_all = np.where(valid & ~np.isnan(mean))[0]
+        n_all = cand_all[int(np.nanargmax(mean[cand_all]))]
+
+        # current implementation: restricted to the top-5% raw-stress nodes
+        thr = np.nanpercentile(s, TOP_PCT)
+        cand_top = np.where(valid & (s >= thr))[0]
+        n_top = cand_top[int(np.nanargmax(mean[cand_top]))]
+
+        def pss(n):
+            v = s[nb[n]]
+            return float(np.nanpercentile(v, 95.0))
+
+        # where does the unrestricted winner sit in the raw-stress distribution?
+        pct_rank = 100.0 * (np.sum(s[valid] < s[n_all]) / valid.sum())
+
+        return dict(
+            case=ci,
+            same=int(n_all == n_top),
+            dist=float(np.linalg.norm(pts_sub[n_all] - pts_sub[n_top])),
+            pss_top=pss(n_top),
+            pss_all=pss(n_all),
+            mean_top=float(mean[n_top]),
+            mean_all=float(mean[n_all]),
+            pct_rank=pct_rank,
+            n_cand_top=len(cand_top),
+            n_cand_all=len(cand_all),
+        )
+    except Exception as e:
+        print(f"[ERR] case_{ci}: {e}", flush=True)
+        return None
+
+
+if __name__ == "__main__":
+    with get_context("spawn").Pool(processes=20) as pool:
+        res = [r for r in pool.map(one, range(N_CASES)) if r]
+
+    same = np.array([r["same"] for r in res])
+    dist = np.array([r["dist"] for r in res])
+    pt = np.array([r["pss_top"] for r in res])
+    pa = np.array([r["pss_all"] for r in res])
+    mt = np.array([r["mean_top"] for r in res])
+    ma = np.array([r["mean_all"] for r in res])
+    pr = np.array([r["pct_rank"] for r in res])
+    nc = np.array([r["n_cand_top"] for r in res])
+    na = np.array([r["n_cand_all"] for r in res])
+
+    B = "=" * 96
+    print(B)
+    print(f"TOP-5% PRE-FILTER vs UNRESTRICTED SEARCH   (r = {R} cm, {len(res)} cases)")
+    print(B)
+    print(f"candidate set size: top-5% median={np.median(nc):.0f}   "
+          f"all-valid median={np.median(na):.0f}   "
+          f"speed-up factor ~{np.median(na)/np.median(nc):.1f}x")
+    print()
+    print(f"identical critical node : {100*same.mean():.1f}% of cases "
+          f"({same.sum()}/{len(res)})")
+    print(f"different critical node : {100*(1-same.mean()):.1f}% "
+          f"({len(res)-same.sum()} cases)")
+    print()
+    print("where the UNRESTRICTED winner sits in the raw-stress distribution:")
+    print(f"   percentile rank: min={pr.min():.2f}  p1={np.percentile(pr,1):.2f}  "
+          f"p5={np.percentile(pr,5):.2f}  median={np.median(pr):.2f}")
+    print(f"   below the 95th percentile (i.e. excluded by the filter): "
+          f"{100*(pr<95).mean():.1f}% of cases")
+    print()
+    rel_pss = (pa - pt) / pt * 100
+    rel_mean = (ma - mt) / mt * 100
+    print("effect on the reported PSS  (unrestricted - restricted):")
+    print(f"   median={np.median(rel_pss):+.3f}%  mean={rel_pss.mean():+.3f}%  "
+          f"p95|.|={np.percentile(np.abs(rel_pss),95):.3f}%  max|.|={np.abs(rel_pss).max():.3f}%")
+    print("effect on the neighbourhood mean at the winner (must be >= 0 by construction):")
+    print(f"   median={np.median(rel_mean):+.3f}%  max={rel_mean.max():+.3f}%")
+    print()
+    if (1 - same.mean()) > 0:
+        m = same == 0
+        print(f"among the {m.sum()} cases where the winner differs:")
+        print(f"   distance between the two nodes: median={np.median(dist[m]):.4f} cm  "
+              f"p90={np.percentile(dist[m],90):.4f}  max={dist[m].max():.4f}")
+        print(f"   PSS change: median={np.median(rel_pss[m]):+.3f}%  "
+              f"max|.|={np.abs(rel_pss[m]).max():.3f}%")
+        print(f"   raw-stress percentile rank of the unrestricted winner: "
+              f"median={np.median(pr[m]):.2f}  min={pr[m].min():.2f}")
+        worst = np.argsort(-np.abs(rel_pss))[:8]
+        print("   worst cases by |PSS change|:")
+        for i in worst:
+            if not same[i]:
+                print(f"     case_{res[i]['case']}: dPSS={rel_pss[i]:+.2f}%  "
+                      f"dist={dist[i]:.4f} cm  rank={pr[i]:.2f}")

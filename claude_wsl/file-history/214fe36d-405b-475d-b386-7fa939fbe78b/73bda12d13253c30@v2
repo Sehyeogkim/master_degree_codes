@@ -1,0 +1,116 @@
+"""flip 파라미터 스윕 — 창(flip_days·flip_cutoff_hm)×횟수(flip_max) 전 조합 병렬 탐색.
+
+목표: 주간평균수익률(배분규칙별)이 가장 높은 포지션 교체(리버설) 설정 찾기.
+방법: 1,233 종목-주 5분봉을 메모리에 1회 로드 → 설정별 엔진 재가동(멀티프로세스).
+      금액·신호·F0·커버리지는 weekly_records.json(281 파이프라인)과 동일.
+출력: sweep_flip_results.json (설정별 규칙별 주간평균 + 주별 수익률 벡터 + 플립 통계)
+
+사용: python3 sweep_flip.py [워커수=8]
+"""
+import os, sys, json, time
+import multiprocessing as mp
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "engines", "engine_fable"))
+import engine_fable
+import allocation
+
+DATA = os.path.join(ROOT, "data", "data_creon_API", "intraday_5m_by_week")
+OUT = os.path.join(HERE, "sweep_flip_results.json")
+
+# 281과 동일한 엔진 베이스 설정 (플립 파라미터만 스윕)
+BASE = dict(tp_gate=0.08, entries=("trail",), stop_mode="none",
+            fee=0.00015, slip=0.0005, tax=0.0015, round_shares=True)
+
+# ── 스윕 그리드 ──────────────────────────────────────────────────
+DAYS = [1, 2, 3, 5]                     # 플립 허용 선두 거래일 수 (5=한 주 전체)
+CUTS = [None, "09:30", "10:00", "12:00"]  # 마지막 창일 시각 상한
+MAXS = [1, 2, 3, 99]                    # 주당 최대 플립 (99=무제한)
+
+GRID = [("281", 0, None, 0)]            # 기준선: 플립 없음
+GRID += [(f"d{d}{('~'+c) if c else ''}x{m if m<99 else '∞'}", d, c, m)
+         for d in DAYS for c in CUTS for m in MAXS]
+
+DS = None   # (week, code, signal, F0, bars) — fork로 워커에 상속
+
+
+def load_dataset():
+    """weekly_records.json의 kept 종목-주 그대로 + 5분봉 로드 (1회)."""
+    wr = json.load(open(os.path.join(HERE, "weekly_records.json"), encoding="utf-8"))["weeks"]
+    ds = []
+    for w in sorted(wr):
+        d = os.path.join(DATA, w)
+        files = {}
+        for f in os.listdir(d):
+            if f.endswith("_5m.csv") and os.path.getsize(os.path.join(d, f)) > 100:
+                files[f.split("_")[0]] = os.path.join(d, f)
+        for s in wr[w]:
+            p = files.get(s["code"])
+            if not p:
+                continue
+            bars = engine_fable.load_bars(p)
+            if bars:
+                ds.append((w, s["code"], s["signal"], s["F0"], bars))
+    return ds
+
+
+def run_config(cfg):
+    """설정 1개 전 종목-주 가동 → 규칙별 주간평균 + 주별 벡터 + 플립 통계."""
+    label, days, cut, mx = cfg
+    flip_on = mx > 0
+    recs = {}
+    n = flip_hit = flips_total = 0
+    for w, code, sig, F0, bars in DS:
+        ev, ctx = engine_fable.run(
+            bars, F0, flip_monday=flip_on,
+            flip_days=max(days, 1), flip_cutoff_hm=cut, flip_max=mx, **BASE)
+        gap = None
+        for e in ev:
+            if e.kind == "ENTRY":
+                gap = e.direction * (e.price / F0 - 1)
+                break
+        recs.setdefault(w, []).append(dict(signal=sig, r=ctx["weekly_return"], gap=gap))
+        n += 1
+        if ctx["flips_used"] > 0:
+            flip_hit += 1
+            flips_total += ctx["flips_used"]
+    rules_mean, weekly_vec = {}, {}
+    for key, _lab, fn in allocation.RULES:
+        weekly = allocation.weekly_returns(recs, fn)
+        rules_mean[key] = sum(weekly) / len(weekly) * 100
+        weekly_vec[key] = weekly
+    sw = [s["r"] for w in recs for s in recs[w]]
+    return dict(label=label, days=days, cutoff=cut, max=mx,
+                sw_mean=sum(sw) / len(sw) * 100,
+                flip_rate=flip_hit / n * 100, flips_per_sw=flips_total / n,
+                rules_mean=rules_mean, weekly=weekly_vec)
+
+
+def main():
+    global DS
+    workers = int(sys.argv[1]) if len(sys.argv) > 1 else 8
+    t0 = time.time()
+    print(f"데이터 로드 중 …", flush=True)
+    DS = load_dataset()
+    print(f"  {len(DS)} 종목-주, {time.time()-t0:.0f}s. 스윕 {len(GRID)}설정 × {workers}워커", flush=True)
+    t1 = time.time()
+    with mp.Pool(workers) as pool:
+        results = pool.map(run_config, GRID)
+    print(f"스윕 완료 {time.time()-t1:.0f}s", flush=True)
+    json.dump(results, open(OUT, "w", encoding="utf-8"), ensure_ascii=False)
+    # 콘솔 요약: equal 주간평균 기준 top 12
+    base = next(r for r in results if r["label"] == "281")
+    ranked = sorted(results, key=lambda r: -r["rules_mean"]["equal"])
+    print(f"\n{'설정':14} {'equal':>8} {'square':>8} {'sw평균':>8} {'플립율':>7}")
+    for r in ranked[:12]:
+        print(f"  {r['label']:12} {r['rules_mean']['equal']:+7.3f}% {r['rules_mean']['square']:+7.3f}% "
+              f"{r['sw_mean']:+7.3f}% {r['flip_rate']:6.1f}%")
+    print(f"  {'…':12}")
+    print(f"  {'281(기준)':12} {base['rules_mean']['equal']:+7.3f}% {base['rules_mean']['square']:+7.3f}% "
+          f"{base['sw_mean']:+7.3f}%      —")
+    print("saved →", OUT)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,41 @@
+"""036930 tvDatafeed 5분봉 fetch를 여러 번 관측 — 원인 확정용.
+raw get_hist(n_bars=700) 결과와 우리 파이프라인 필터(_mk_bars) 결과를 함께 본다."""
+import os, sys, time
+sys.path.insert(0, "/home/jeff/bullet281/pipeline")
+sys.path.insert(0, "/home/jeff/bullet281/engines/engine281")
+import data_source as ds
+
+CODE = "036930"
+START, END = "2026-07-13", "2026-07-18"   # 그 주 [월, 토) — bars_5m와 동일 필터
+N = 6
+
+print(f"# 프로브: {CODE}  주간필터 start={START} end={END}  raw n_bars=700  반복 {N}회\n")
+from tvDatafeed import Interval
+for k in range(N):
+    t0 = time.time()
+    try:
+        df = ds._tv_client().get_hist(symbol=CODE, exchange="KRX",
+                                      interval=Interval.in_5_minute, n_bars=700)
+    except Exception as e:
+        print(f"[{k}] raw fetch EXC: {e!r}  ({time.time()-t0:.1f}s)")
+        continue
+    dt = time.time() - t0
+    if df is None or not len(df):
+        print(f"[{k}] raw=None/빈 df  ({dt:.1f}s)")
+        continue
+    idx = [str(x)[:16] for x in df.index]
+    raw_first, raw_last, raw_n = idx[0], idx[-1], len(idx)
+    # 파이프라인 필터 적용 (그 주만, 09:00~15:30)
+    rows = [(str(ix)[:16], float(r["open"]), float(r["high"]), float(r["low"]),
+             float(r["close"]), float(r.get("volume", 0))) for ix, r in df.iterrows()]
+    bars = ds._mk_bars(rows, START, END)
+    days = sorted({b.day for b in bars})
+    has_mon = "2026-07-13" in days
+    wk_first = bars[0].dt if bars else "—"
+    wk_last = bars[-1].dt if bars else "—"
+    perday = (len(bars) / len(days)) if days else 0
+    print(f"[{k}] raw {raw_n}봉 [{raw_first} … {raw_last}]  ({dt:.1f}s)")
+    print(f"     주간필터후 {len(bars)}봉  일수={len(days)}  일평균={perday:.0f}  "
+          f"월요일있음={has_mon}  [{wk_first} … {wk_last}]")
+    print(f"     days={days}")
+    time.sleep(2)

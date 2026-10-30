@@ -1,0 +1,62 @@
+"""
+Fluid mesh-independence: steady 3D PRE (case 0 only, grid size given as CLI arg).
+peak <- systolic (Q,R) ; low <- diastolic (Q,R)   -- BC 는 1D 결과라 3개 메쉬에서 동일하다.
+Input mesh : mesh_independent_test_fluid/mesh/<grid>/meshing/mesh-complete
+Output     : mesh_independent_test_fluid/mesh/<grid>/steady_3d/{peak,low}/
+Usage: mi_steady_pre.py <grid>          e.g. 0.015
+"""
+import os
+import sys
+import json
+import shutil
+from pathlib import Path
+
+sys.path.insert(0, "/home/jeff/repo/master_python/src")
+import utils.utils_lumen.paths as utils_paths
+import utils.utils_lumen.runner as runner
+
+ROOT = Path("/home/jeff/project/54_analysis")
+BASE = ROOT / "mesh_independent_test_fluid"
+SVPRE = "/opt/cvbml/repos/svSolverPrivate/build/svSolver-build/bin/svpre"
+SOLVER_INP_TEMPLATE = ROOT / "pre_data" / "scripts" / "solver.inp"
+
+CASE = 0
+NUM_TIMESTEPS = 500          # production 과 동일
+DT = 0.0001                  # production 과 동일
+RESTART_FREQ = 500           # 최종 스텝만 저장
+PHASE_MAP = {"peak": "systolic", "low": "diastolic"}
+PHASES = os.environ.get("PHASES", "peak low").split()
+
+
+def main():
+    grid = sys.argv[1]
+    meshing_dir = BASE / "mesh" / grid / "meshing"
+    st_dir = BASE / "mesh" / grid / "steady_3d"
+    rst_json = ROOT / "post_data" / "_1d_no_hyperemia" / f"_1d_json_{CASE}.json"
+
+    if not (meshing_dir / "mesh-complete").exists():
+        print(f"[skip] grid={grid}: mesh-complete missing -> {meshing_dir}")
+        sys.exit(1)
+
+    data = json.load(open(rst_json))[str(CASE)]
+    for name in PHASES:
+        phase = PHASE_MAP[name]
+        folder = st_dir / name
+        folder.mkdir(parents=True, exist_ok=True)
+        Q = data[phase]["Q"]
+        R = data[phase]["R"]
+        utils_paths.create_flow_file(str(folder / "inflow.flow"), Q)
+        utils_paths.create_svpre_file(folder / "model.svpre", meshing_dir)
+        shutil.copyfile(SOLVER_INP_TEMPLATE, folder / "solver.inp")
+        utils_paths.revise_inp_file(str(folder / "solver.inp"), {
+            "Resistance Values:": R,
+            "Number of Timesteps:": NUM_TIMESTEPS,
+            "Time Step Size:": DT,
+            "Number of Timesteps between Restarts:": RESTART_FREQ,
+        })
+        runner.run_svpre(str(folder), SVPRE)
+        print(f"[ok] grid={grid}/{name}: Q={Q:.6f} R={R:.1f} -> svpre done", flush=True)
+
+
+if __name__ == "__main__":
+    main()

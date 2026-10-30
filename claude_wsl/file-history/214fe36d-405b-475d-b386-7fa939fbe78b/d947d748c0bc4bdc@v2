@@ -1,0 +1,107 @@
+"""fable2 익절 사다리 리셋 임계(tp_reset_pct) 병렬 스윕.
+
+베이스 2종 × 임계 12종 = 24설정:
+  베이스: flip(d1~09:30x1, 채택후보) / noflip(281 진입·청산)
+  임계: 0.5,1,1.5,2,3,4,5,6,8,10,15% 및 None(리셋 없음=베이스 자체)
+사용: python3 sweep_reset.py  → sweep_reset_results.json
+"""
+import os, sys, json, time
+import multiprocessing as mp
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "engines", "engine_fable2"))
+import engine_fable2
+import allocation
+
+DATA = os.path.join(ROOT, "data", "data_creon_API", "intraday_5m_by_week")
+OUT = os.path.join(HERE, "sweep_reset_results.json")
+
+BASE = dict(tp_gate=0.08, entries=("trail",), stop_mode="none",
+            fee=0.00015, slip=0.0005, tax=0.0015, round_shares=True)
+FLIP = dict(flip_monday=True, flip_days=1, flip_cutoff_hm="09:30", flip_max=1)
+
+PCTS = [None, 0.005, 0.01, 0.015, 0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.10, 0.15]
+GRID = []
+for flip_on in (True, False):
+    for p in PCTS:
+        tag = "flip" if flip_on else "noflip"
+        plab = "none" if p is None else f"{p*100:g}%"
+        GRID.append((f"{tag}·r{plab}", flip_on, p))
+
+DS = None
+
+
+def load_dataset():
+    wr = json.load(open(os.path.join(HERE, "weekly_records.json"), encoding="utf-8"))["weeks"]
+    ds = []
+    for w in sorted(wr):
+        d = os.path.join(DATA, w)
+        files = {}
+        for f in os.listdir(d):
+            if f.endswith("_5m.csv") and os.path.getsize(os.path.join(d, f)) > 100:
+                files[f.split("_")[0]] = os.path.join(d, f)
+        for s in wr[w]:
+            p = files.get(s["code"])
+            if not p:
+                continue
+            bars = engine_fable2.load_bars(p)
+            if bars:
+                ds.append((w, s["code"], s["signal"], s["F0"], bars))
+    return ds
+
+
+def run_config(cfg):
+    label, flip_on, pct = cfg
+    recs = {}
+    n = reset_hit = resets_total = 0
+    for w, code, sig, F0, bars in DS:
+        kw = dict(BASE)
+        if flip_on:
+            kw.update(FLIP)
+        ev, ctx = engine_fable2.run(bars, F0, tp_reset_pct=pct, **kw)
+        gap = None
+        for e in ev:
+            if e.kind == "ENTRY":
+                gap = e.direction * (e.price / F0 - 1)
+                break
+        recs.setdefault(w, []).append(dict(signal=sig, r=ctx["weekly_return"], gap=gap))
+        n += 1
+        if ctx["tp_resets"] > 0:
+            reset_hit += 1
+            resets_total += ctx["tp_resets"]
+    rules_mean, weekly_vec = {}, {}
+    for key, _lab, fn in allocation.RULES:
+        weekly = allocation.weekly_returns(recs, fn)
+        rules_mean[key] = sum(weekly) / len(weekly) * 100
+        weekly_vec[key] = weekly
+    sw = [s["r"] for w in recs for s in recs[w]]
+    return dict(label=label, flip=flip_on, pct=pct,
+                sw_mean=sum(sw) / len(sw) * 100,
+                reset_rate=reset_hit / n * 100, resets_per_sw=resets_total / n,
+                rules_mean=rules_mean, weekly=weekly_vec)
+
+
+def main():
+    global DS
+    t0 = time.time()
+    DS = load_dataset()
+    print(f"{len(DS)} 종목-주 로드 {time.time()-t0:.0f}s. 스윕 {len(GRID)}설정")
+    with mp.Pool(8) as pool:
+        results = pool.map(run_config, GRID)
+    json.dump(results, open(OUT, "w", encoding="utf-8"), ensure_ascii=False)
+    for flip_on in (True, False):
+        tag = "flip(d1~09:30x1)" if flip_on else "noflip(281 진입)"
+        print(f"\n=== 베이스 {tag} ===")
+        print(f"{'임계':8} {'equal':>8} {'square':>8} {'quartic':>8} {'sw평균':>8} {'리셋발생':>8}")
+        for r in results:
+            if r["flip"] != flip_on:
+                continue
+            plab = "없음" if r["pct"] is None else f"{r['pct']*100:g}%"
+            print(f"  {plab:6} {r['rules_mean']['equal']:+7.3f}% {r['rules_mean']['square']:+7.3f}% "
+                  f"{r['rules_mean']['quartic']:+7.3f}% {r['sw_mean']:+7.3f}% {r['reset_rate']:7.1f}%")
+    print("saved →", OUT)
+
+
+if __name__ == "__main__":
+    main()

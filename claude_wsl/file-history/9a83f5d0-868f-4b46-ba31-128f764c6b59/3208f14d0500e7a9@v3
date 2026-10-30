@@ -1,0 +1,75 @@
+# -*- coding: utf-8 -*-
+"""yfinance 벌크 vs tvDatafeed 병렬 — 직전주 (월시가,금종가) 조달 속도·성공률 비교."""
+import time, threading, warnings, logging
+import concurrent.futures as cf
+warnings.filterwarnings("ignore"); logging.disable(logging.CRITICAL)
+
+CODES = ["005930","000660","373220","207940","005380","000270","068270","005490",
+         "035420","051910","006400","105560","055550","035720","012330","028260",
+         "066570","003670","096770","034730","015760","032830","003550","017670",
+         "030200","009150","011200","086790","316140","259960","018260","010130",
+         "011070","024110","090430","042700","240810","475150","353200","006340"]
+PM, PF = "2026-07-06", "2026-07-10"          # 직전주 월~금 (문자 비교용)
+N = len(CODES)
+print(f"종목 {N}개 · 직전주 {PM}~{PF}\n")
+
+# ---------- A) yfinance 벌크 (현재 방식) ----------
+import yfinance as yf
+t0 = time.time()
+dd = yf.download([c + ".KS" for c in CODES], start="2026-07-04", end="2026-07-12",
+                 interval="1d", progress=False, group_by="ticker", threads=True)
+ayf = {}
+for c in CODES:
+    try:
+        d = dd[c + ".KS"].dropna()
+        if len(d) >= 2:
+            ayf[c] = (float(d["Open"].iloc[0]), float(d["Close"].iloc[-1]))
+    except Exception:
+        pass
+tA = time.time() - t0
+print(f"[A] yfinance 벌크(1콜)   : {tA:6.1f}s · 성공 {len(ayf)}/{N}")
+
+# ---------- B) tvDatafeed 병렬 (스레드별 클라이언트, 2회 재시도) ----------
+from tvDatafeed import TvDatafeed, Interval
+tl = threading.local()
+def client():
+    if not hasattr(tl, "c"):
+        tl.c = TvDatafeed()
+    return tl.c
+def fetch(c):
+    for _ in range(2):
+        try:
+            df = client().get_hist(symbol=c, exchange="KRX",
+                                   interval=Interval.in_daily, n_bars=20)
+            if df is not None and len(df):
+                wk = [(str(ix)[:10], float(r["open"]), float(r["close"]))
+                      for ix, r in df.iterrows() if PM <= str(ix)[:10] <= PF]
+                if wk:
+                    return c, (wk[0][1], wk[-1][2])
+        except Exception:
+            pass
+    return c, None
+
+for W in (8, 16):
+    t0 = time.time()
+    res = {}
+    with cf.ThreadPoolExecutor(max_workers=W) as ex:
+        futs = {ex.submit(fetch, c): c for c in CODES}
+        for f in cf.as_completed(futs, timeout=280):
+            c, v = f.result()
+            if v:
+                res[c] = v
+    tB = time.time() - t0
+    print(f"[B] tvDatafeed 병렬 x{W:<2}   : {tB:6.1f}s · 성공 {len(res)}/{N}")
+
+# ---------- 값 일치 확인 (겹치는 종목) ----------
+both = [c for c in CODES if c in ayf and c in res]
+print(f"\n두 소스 다 성공: {len(both)}종목 · 값 차이(월시가 %):")
+for c in both[:8]:
+    yo, yc = ayf[c]; to, tc = res[c]
+    print(f"  {c}: yf월={yo:>9,.0f} tv월={to:>9,.0f} ({(to/yo-1)*100:+5.1f}%) | "
+          f"yf금={yc:>9,.0f} tv금={tc:>9,.0f}")
+
+# 유니버스(~400) 외삽
+print(f"\n외삽(종목당 시간 유지 가정, 유니버스 ~400개):")
+print(f"  yfinance 벌크는 종목수와 거의 무관(1콜) → 여전히 ~{tA:.0f}s급")

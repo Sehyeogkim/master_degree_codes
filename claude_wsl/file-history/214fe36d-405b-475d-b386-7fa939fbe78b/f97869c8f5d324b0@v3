@@ -1,0 +1,320 @@
+"""flip 파라미터 스윕 보고서 — sweep_flip_results.json → body-only HTML(아티팩트).
+사용: python3 make_sweep_report.py  → report/backtest_flip_sweep.artifact.html
+
+차트: ① Δ히트맵 스몰멀티플(flip_max별, 행=컷오프·열=일수, 다이버징+직접라벨)
+     ② top10 순위 바(부트스트랩 95% CI whisker, 281 기준선)
+     ③ d1·x1 컷오프 붕괴 곡선. 모든 셀/바에 <title> 툴팁."""
+import os, json, math, random, html
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+import bootstrap
+
+OUT = os.path.join(ROOT, "report", "backtest_flip_sweep.artifact.html")
+R = json.load(open(os.path.join(HERE, "sweep_flip_results.json"), encoding="utf-8"))
+BASE = next(r for r in R if r["label"] == "281")
+
+# 웜페이퍼(리포 톤) + 검증된 다이버징 폴 (#2E7D32/#C25744, 중립 회색)
+PAPER, INK, ACCENT, GRID = "#F0EEE6", "#211D18", "#CC785C", "#D9D3C7"
+MUTE, CARD = "#6B5E54", "#FBFAF6"
+POS, NEG, NEUT = "#2E7D32", "#C25744", "#EDE8DD"
+esc = html.escape
+
+RULE = "square"     # 헤드라인 지표: square 배분 주간평균 (기존 최고 causal 규칙)
+DAYS = [1, 2, 3, 5]
+CUTS = [("09:30", "~09:30"), ("10:00", "~10:00"), ("12:00", "~12:00"), (None, "종일")]
+MAXS = [(1, "1회"), (2, "2회"), (3, "3회"), (99, "무제한")]
+
+
+def get(days, cut, mx):
+    for r in R:
+        if r["days"] == days and r["cutoff"] == cut and r["max"] == mx:
+            return r
+    return None
+
+
+def paired(cfg_label, rule=RULE, B=5000, seed=42):
+    """주별 paired Δ(cfg−281) 부트스트랩."""
+    w1 = next(x for x in R if x["label"] == cfg_label)["weekly"][rule]
+    w0 = BASE["weekly"][rule]
+    d = [a - b for a, b in zip(w1, w0)]
+    n = len(d); rng = random.Random(seed)
+    means = sorted(sum(d[rng.randrange(n)] for _ in range(n)) / n for _ in range(B))
+    return dict(mean=sum(d) / n * 100, lo=means[int(B*.025)] * 100, hi=means[int(B*.975)] * 100,
+                p_pos=sum(1 for m in means if m > 0) / B, n_weeks=sum(1 for x in d if abs(x) > 1e-12))
+
+
+# ── ① Δ 히트맵 스몰멀티플 ────────────────────────────────────────
+def heatmap():
+    cw, ch, gap = 66, 36, 2
+    labL, labT = 56, 22
+    fw = labL + 4 * cw + 8
+    fh = labT + 4 * ch + 26
+    b0 = BASE["rules_mean"][RULE]
+    facets = []
+    for mx, mlab in MAXS:
+        el = [f'<svg viewBox="0 0 {fw} {fh}" width="{fw}" font-family="ui-sans-serif,system-ui,sans-serif">']
+        el.append(f'<text x="{labL}" y="13" font-size="11.5" font-weight="800" fill="{INK}">최대 {mlab}</text>')
+        for j, d in enumerate(DAYS):
+            el.append(f'<text x="{labL+j*cw+cw/2:.0f}" y="{labT+4*ch+16}" font-size="10" fill="{MUTE}" text-anchor="middle">{d}일</text>')
+        for i, (cut, clab) in enumerate(CUTS):
+            el.append(f'<text x="{labL-6}" y="{labT+i*ch+ch/2+3:.0f}" font-size="10" fill="{MUTE}" text-anchor="end">{clab}</text>')
+            for j, d in enumerate(DAYS):
+                r = get(d, cut, mx)
+                dv = r["rules_mean"][RULE] - b0
+                if abs(dv) < 0.03:
+                    fill, alpha = NEUT, 1.0
+                else:
+                    fill = POS if dv > 0 else NEG
+                    alpha = 0.18 + min(1.0, abs(dv) / 0.45) * 0.72
+                x, y = labL + j * cw, labT + i * ch
+                tip = f"{r['label']} · {RULE} {r['rules_mean'][RULE]:+.3f}%/주 (281 대비 {dv:+.3f}%p) · 플립율 {r['flip_rate']:.1f}%"
+                el.append(f'<g><title>{esc(tip)}</title>'
+                          f'<rect x="{x}" y="{y}" width="{cw-gap}" height="{ch-gap}" rx="4" fill="{fill}" fill-opacity="{alpha:.2f}"/>'
+                          f'<text x="{x+(cw-gap)/2:.0f}" y="{y+ch/2+3:.0f}" font-size="10.5" font-weight="700" '
+                          f'fill="{INK}" text-anchor="middle">{dv:+.2f}</text></g>')
+        el.append('</svg>')
+        facets.append("".join(el))
+    return '<div class="facets">' + "".join(f'<div class="facet">{f}</div>' for f in facets) + '</div>'
+
+
+# ── ② top10 순위 바 + CI ─────────────────────────────────────────
+def ranking():
+    ranked = sorted(R, key=lambda r: -r["rules_mean"][RULE])[:10]
+    if BASE not in ranked:
+        ranked.append(BASE)
+    stats = []
+    for r in ranked:
+        st = bootstrap.analyze(r["weekly"][RULE])
+        stats.append((r, st))
+    lo = min(min(0.0, s["ci_lo"]) for _, s in stats) - 0.15
+    hi = max(s["ci_hi"] for _, s in stats) + 0.15
+    W, rowh, labW, padR = 860, 30, 128, 14
+    pw = W - labW - padR
+    H = len(stats) * rowh + 34
+    X = lambda v: labW + pw * (v - lo) / (hi - lo)
+    b0 = BASE["rules_mean"][RULE]
+    el = [f'<svg viewBox="0 0 {W} {H}" width="100%" style="max-width:{W}px" font-family="ui-sans-serif,system-ui,sans-serif">']
+    for tv in [0.0, 0.5, 1.0, 1.5]:
+        if lo <= tv <= hi:
+            el.append(f'<line x1="{X(tv):.0f}" y1="8" x2="{X(tv):.0f}" y2="{H-24}" stroke="{GRID}" stroke-width="1"/>')
+            el.append(f'<text x="{X(tv):.0f}" y="{H-10}" font-size="10" fill="{MUTE}" text-anchor="middle">{tv:+.1f}%</text>')
+    el.append(f'<line x1="{X(b0):.0f}" y1="8" x2="{X(b0):.0f}" y2="{H-24}" stroke="{ACCENT}" stroke-width="1.6" stroke-dasharray="4 3"/>')
+    el.append(f'<text x="{X(b0)+4:.0f}" y="18" font-size="10" font-weight="700" fill="{ACCENT}">281 기준 {b0:+.2f}%</text>')
+    for i, (r, s) in enumerate(stats):
+        y = 24 + i * rowh
+        isbase = r["label"] == "281"
+        col = MUTE if isbase else (POS if s["obs_mean"] >= b0 else NEG)
+        name = "281 (기준)" if isbase else r["label"]
+        tip = (f"{name} · 평균 {s['obs_mean']:+.3f}%/주 · 95% CI [{s['ci_lo']:+.2f}, {s['ci_hi']:+.2f}] · "
+               f"P(>0) {s['prob_pos']*100:.0f}%" + ("" if isbase else f" · 플립율 {r['flip_rate']:.1f}%"))
+        el.append(f'<g><title>{esc(tip)}</title>')
+        el.append(f'<text x="{labW-8}" y="{y+4}" font-size="11" font-weight="{700 if isbase else 600}" fill="{INK}" text-anchor="end">{esc(name)}</text>')
+        x0, x1v = X(min(0, s["obs_mean"])), X(max(0, s["obs_mean"]))
+        el.append(f'<rect x="{X(0):.0f}" y="{y-7}" width="{max(1, X(s["obs_mean"])-X(0)):.0f}" height="14" rx="4" fill="{col}" fill-opacity="{0.5 if isbase else 0.85}"/>')
+        el.append(f'<line x1="{X(s["ci_lo"]):.0f}" y1="{y}" x2="{X(s["ci_hi"]):.0f}" y2="{y}" stroke="{INK}" stroke-width="1.2" opacity="0.55"/>')
+        for cx in (s["ci_lo"], s["ci_hi"]):
+            el.append(f'<line x1="{X(cx):.0f}" y1="{y-4}" x2="{X(cx):.0f}" y2="{y+4}" stroke="{INK}" stroke-width="1.2" opacity="0.55"/>')
+        el.append(f'<text x="{X(s["ci_hi"])+6:.0f}" y="{y+4}" font-size="10.5" font-weight="700" fill="{INK}">{s["obs_mean"]:+.2f}%</text>')
+        el.append('</g>')
+    el.append('</svg>')
+    return "".join(el)
+
+
+# ── ③ 미세 컷오프 곡선 (09:10~10:00, 5분 단위, d1·x1) ────────────
+FINE = None
+def _fine():
+    global FINE
+    if FINE is None:
+        p = os.path.join(HERE, "sweep_flip_fine.json")
+        FINE = json.load(open(p, encoding="utf-8")) if os.path.exists(p) else []
+    return FINE
+
+
+def decay():
+    pts = [(r["cutoff"], r) for r in _fine()]
+    b0 = BASE["rules_mean"][RULE]
+    W, H, padL, padB, padT = 860, 250, 52, 44, 18
+    pw, ph = W - padL - 18, H - padT - padB
+    vals = [r["rules_mean"][RULE] for _, r in pts] + [b0]
+    lo, hi = min(vals) - 0.1, max(vals) + 0.14
+    X = lambda i: padL + pw * (i + 0.5) / len(pts)
+    Y = lambda v: padT + ph * (hi - v) / (hi - lo)
+    el = [f'<svg viewBox="0 0 {W} {H}" width="100%" style="max-width:{W}px" font-family="ui-sans-serif,system-ui,sans-serif">']
+    # 고원(09:15~09:30) 배경 밴드
+    i15 = next(i for i, (c, _) in enumerate(pts) if c == "09:15")
+    i30 = next(i for i, (c, _) in enumerate(pts) if c == "09:30")
+    el.append(f'<rect x="{X(i15)-14:.0f}" y="{padT}" width="{X(i30)-X(i15)+28:.0f}" height="{ph}" fill="{POS}" fill-opacity="0.07"/>')
+    el.append(f'<text x="{(X(i15)+X(i30))/2:.0f}" y="{padT+13}" font-size="10" font-weight="700" fill="{POS}" text-anchor="middle">이기는 고원 09:15~09:30</text>')
+    for tv in (0.6, 0.8, 1.0):
+        if lo <= tv <= hi:
+            el.append(f'<line x1="{padL}" y1="{Y(tv):.0f}" x2="{W-18}" y2="{Y(tv):.0f}" stroke="{GRID}" stroke-width="1"/>')
+            el.append(f'<text x="{padL-6}" y="{Y(tv)+3:.0f}" font-size="10" fill="{MUTE}" text-anchor="end">{tv:+.1f}%</text>')
+    el.append(f'<line x1="{padL}" y1="{Y(b0):.0f}" x2="{W-18}" y2="{Y(b0):.0f}" stroke="{ACCENT}" stroke-width="1.4" stroke-dasharray="4 3"/>')
+    el.append(f'<text x="{W-20}" y="{Y(b0)-5:.0f}" font-size="10" font-weight="700" fill="{ACCENT}" text-anchor="end">281 {b0:+.2f}%</text>')
+    path = " ".join(f'{"M" if i==0 else "L"} {X(i):.0f} {Y(r["rules_mean"][RULE]):.0f}' for i, (_, r) in enumerate(pts))
+    el.append(f'<path d="{path}" fill="none" stroke="{INK}" stroke-width="2"/>')
+    peak = max(range(len(pts)), key=lambda i: pts[i][1]["rules_mean"][RULE])
+    for i, (lab, r) in enumerate(pts):
+        v = r["rules_mean"][RULE]
+        col = POS if v >= b0 else NEG
+        tip = (f"~{lab} · square {v:+.3f}%/주 · quartic {r['rules_mean']['quartic']:+.3f}% · "
+               f"종목-주 {r['sw_mean']:+.3f}% · 플립율 {r['flip_rate']:.1f}%")
+        rr = 6 if i == peak else 4.5
+        el.append(f'<g><title>{esc(tip)}</title>'
+                  f'<circle cx="{X(i):.0f}" cy="{Y(v):.0f}" r="{rr}" fill="{col}" stroke="{CARD}" stroke-width="2"/></g>')
+        if i in (0, i15, i30, peak, len(pts) - 1) or lab in ("09:20", "09:40", "09:50"):
+            el.append(f'<text x="{X(i):.0f}" y="{Y(v)-11:.0f}" font-size="10.5" font-weight="700" fill="{INK}" text-anchor="middle">{v:+.2f}%</text>')
+        el.append(f'<text x="{X(i):.0f}" y="{H-16}" font-size="10" fill="{MUTE}" text-anchor="middle">{lab}</text>')
+        el.append(f'<text x="{X(i):.0f}" y="{H-4}" font-size="9" fill="{MUTE}" text-anchor="middle" opacity="0.8">{r["flip_rate"]:.0f}%</text>')
+    el.append(f'<text x="{padL-38}" y="{H-4}" font-size="9" fill="{MUTE}">플립율</text>')
+    el.append('</svg>')
+    return "".join(el)
+
+
+# ── 표: top12 + 최악3 ───────────────────────────────────────────
+def table():
+    ranked = sorted((r for r in R if r["label"] != "281"), key=lambda r: -r["rules_mean"][RULE])
+    rows = []
+    def row(r, cls=""):
+        dv = r["rules_mean"][RULE] - BASE["rules_mean"][RULE]
+        col = "pos" if dv > 0.01 else ("neg" if dv < -0.01 else "")
+        return (f'<tr class="{cls}"><td><b>{esc(r["label"])}</b></td>'
+                f'<td class="num">{r["rules_mean"]["equal"]:+.2f}%</td>'
+                f'<td class="num">{r["rules_mean"]["linear"]:+.2f}%</td>'
+                f'<td class="num"><b>{r["rules_mean"]["square"]:+.2f}%</b></td>'
+                f'<td class="num">{r["rules_mean"]["quartic"]:+.2f}%</td>'
+                f'<td class="num">{r["sw_mean"]:+.2f}%</td>'
+                f'<td class="num {col}">{dv:+.2f}%p</td>'
+                f'<td class="num sub">{r["flip_rate"]:.1f}%</td></tr>')
+    rows.append(row(dict(BASE, label="281 (기준·플립 없음)"), "basehl"))
+    for r in ranked[:12]:
+        rows.append(row(r))
+    rows.append('<tr class="ellip"><td colspan="8">… (전체 65설정: sweep_flip_results.json)</td></tr>')
+    for r in ranked[-3:]:
+        rows.append(row(r, "dim"))
+    return "".join(rows)
+
+
+def build():
+    best = max(R, key=lambda r: r["rules_mean"][RULE])
+    b0 = BASE["rules_mean"][RULE]
+    pd = paired(best["label"])
+    st_best = bootstrap.analyze(best["weekly"][RULE])
+    st_base = bootstrap.analyze(BASE["weekly"][RULE])
+    nconf = len(R) - 1
+
+    return f"""<title>flip 파라미터 스윕 — 개장 25분의 발견</title>
+<style>
+.paper{{--paper:{PAPER};--ink:{INK};--acc:{ACCENT};--grid:{GRID};--mute:{MUTE};--pos:{POS};--neg:{NEG};--card:{CARD};
+background:var(--paper);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+line-height:1.62;-webkit-font-smoothing:antialiased;margin:0}}
+.paper *{{box-sizing:border-box}}
+.wrap{{max-width:1080px;margin:0 auto;padding:44px 24px 90px}}
+.eyebrow{{font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--acc);font-weight:800;margin:0 0 10px}}
+h1{{font-size:33px;line-height:1.14;margin:0 0 12px;font-weight:800;letter-spacing:-.02em;text-wrap:balance;max-width:24ch}}
+.lede{{font-size:15.5px;color:#453d34;max-width:66ch;margin:0 0 6px}}
+h2{{font-size:19px;margin:44px 0 4px;font-weight:800;letter-spacing:-.01em}}
+h2 .n{{color:var(--acc);font-variant-numeric:tabular-nums}}
+.sec-sub{{color:var(--mute);font-size:13px;margin:0 0 14px;max-width:80ch}}
+.pos{{color:var(--pos)}} .neg{{color:var(--neg)}}
+.verdict{{display:flex;flex-wrap:wrap;gap:14px;margin:30px 0 8px}}
+.vc{{flex:1 1 200px;background:var(--card);border:1px solid var(--grid);border-radius:12px;padding:16px 18px}}
+.vc .k{{font-size:11.5px;color:var(--mute);font-weight:700}}
+.vc .v{{font-size:26px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:3px}}
+.vc .d{{font-size:12.5px;color:var(--mute);margin-top:2px}}
+.vc.win{{border-color:{POS}}} .vc.win .v{{color:{POS}}}
+.vc.warn{{border-color:{ACCENT}}}
+.card{{background:var(--card);border:1px solid var(--grid);border-radius:12px;padding:16px 18px;margin:12px 0}}
+.facets{{display:flex;flex-wrap:wrap;gap:14px}}
+.facet{{flex:0 0 auto;background:var(--card);border:1px solid var(--grid);border-radius:10px;padding:10px 8px 4px}}
+.legend{{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--mute);margin:8px 2px 0}}
+.legend .sw{{display:inline-block;width:11px;height:11px;border-radius:3px;vertical-align:-1px;margin-right:4px}}
+table{{border-collapse:collapse;width:100%;font-size:12.5px}}
+th,td{{border-bottom:1px solid var(--grid);padding:7px 9px;text-align:left}}
+th{{font-size:10.5px;color:var(--mute);text-transform:uppercase;letter-spacing:.05em;font-weight:800}}
+td.num{{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}}
+tr.basehl{{background:#EDE8DD66}} tr.basehl td{{font-weight:700}}
+tr.dim{{opacity:.55}} tr.ellip td{{color:var(--mute);font-size:11px;text-align:center;padding:4px}}
+.sub{{color:var(--mute)}}
+.mech{{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-top:6px}}
+.mc{{background:var(--card);border:1px solid var(--grid);border-radius:12px;padding:16px 18px}}
+.mc .big{{font-size:23px;font-weight:800;font-variant-numeric:tabular-nums}}
+.mc .lab{{font-size:12.5px;color:var(--mute);margin-top:2px}}
+.mc p{{font-size:13px;margin:9px 0 0;color:#453d34}}
+.scrollx{{overflow-x:auto}}
+.foot{{margin-top:34px;font-size:12px;color:var(--mute);border-top:1px solid var(--grid);padding-top:16px}}
+.foot code,.sec-sub code{{background:#e7e1d5;padding:1px 5px;border-radius:4px;font-size:11.5px}}
+</style>
+<div class="paper"><div class="wrap">
+<p class="eyebrow">CREON 5년 · 255주 · {nconf}개 설정 병렬 스윕</p>
+<h1>리버설이 이기는 곳은 단 하나 — <span class="pos">개장 25분</span></h1>
+<p class="lede">플립(반대전환)의 <b>허용 창</b>(월~금 일수 × 시각 상한)과 <b>횟수 제한</b>을 전 조합 스윕했다.
+{nconf}개 설정 중 281을 이기는 영역은 <b>월요일 개장 직후(~09:30)뿐</b>이고, 창을 늦출수록·넓힐수록 단조 악화한다.
+최적 설정: <b>{esc(best['label'])}</b> — 월요일 09:30까지, 최대 1회.</p>
+
+<div class="verdict">
+  <div class="vc"><div class="k">281 기준 · {RULE} 주간평균</div><div class="v">{b0:+.2f}%</div><div class="d">CI [{st_base['ci_lo']:+.2f}, {st_base['ci_hi']:+.2f}] · P(&gt;0) {st_base['prob_pos']*100:.0f}%</div></div>
+  <div class="vc win"><div class="k">최적 {esc(best['label'])} · {RULE}</div><div class="v">{best['rules_mean'][RULE]:+.2f}%</div><div class="d">CI [{st_best['ci_lo']:+.2f}, {st_best['ci_hi']:+.2f}] · P(&gt;0) {st_best['prob_pos']*100:.0f}%</div></div>
+  <div class="vc win"><div class="k">플립율 (희소·정밀)</div><div class="v">{best['flip_rate']:.1f}%</div><div class="d">82/1,233 종목-주만 전환</div></div>
+  <div class="vc warn"><div class="k">paired Δ 유의성</div><div class="v">{pd['p_pos']*100:.0f}%</div><div class="d">Δ{pd['mean']:+.2f}%p · CI [{pd['lo']:+.2f}, {pd['hi']:+.2f}] — 5% 유의 미달</div></div>
+</div>
+
+<h2>스윕 맵 <span class="n">창 × 컷오프 × 횟수</span></h2>
+<p class="sec-sub">셀 = <b>{RULE} 주간평균의 281 대비 Δ(%p)</b>. 초록=개선·빨강=악화·회색≈무차이.
+행=마지막 창일 시각 상한, 열=허용 거래일 수, 패널=주당 최대 플립 횟수. 셀에 커서를 올리면 상세.</p>
+{heatmap()}
+<p class="legend"><span><span class="sw" style="background:{POS};opacity:.8"></span>281보다 높음</span>
+<span><span class="sw" style="background:{NEG};opacity:.8"></span>281보다 낮음</span>
+<span><span class="sw" style="background:{NEUT}"></span>±0.03 이내</span>
+<span>이기는 셀은 사실상 <b>~09:30 행뿐</b> — 그리고 횟수 패널이 바뀌어도 그 행은 거의 그대로(2번째 신호가 25분 안에 안 뜸)</span></p>
+
+<h2>미세 컷오프 곡선 <span class="n">09:10 → 10:00, 5분 단위</span></h2>
+<p class="sec-sub">월요일·1회 고정, 컷오프만 5분씩 이동한 {RULE} 주간평균. <b>09:15~09:30 고원</b>이 통째로 281 위,
+<b>09:35부터 절벽</b>. 09:10은 플립이 아예 발생하지 않아 281과 동일(포지션 성립+반대신호가 그 안엔 없음).
+경계 하나에 기댄 행운이 아니라 <b>구간 전체가 강건</b>하다는 게 핵심 — 단, 09:30/09:35 절벽의 정확한 위치는 표본 노이즈일 수 있다.
+참고로 그 뒤는 10:00 +0.69% · 12:00 +0.91% · 종일 +0.52%로 모두 고원 아래.</p>
+<div class="card scrollx">{decay()}</div>
+<div class="mech">
+  <div class="mc"><div class="big">09:15~30</div><div class="lab">이기는 고원 (+0.86~+0.99%)</div>
+    <p>요청 비교점 기준: 09:10 <b>플립 0회</b>(=281) · 09:20 <b>+0.86%</b> · <b>09:30 +0.99% 피크</b> · 09:40 <b>+0.63%</b> · 09:50 <b>+0.62%</b>. 고원 안은 전부 승, 09:35부터 전부 패.</p></div>
+  <div class="mc"><div class="big">+0.41%p</div><div class="lab">quartic에서 최대 개선(09:30)</div>
+    <p>quartic도 같은 모양으로 09:30 피크(+1.05%). 개선 폭이 신호가중이 강할수록 커진다 — 플립이 <b>큰 모멘텀 종목의 초반 붕괴</b>를 정확히 구제.</p></div>
+  <div class="mc"><div class="big">6.7%</div><div class="lab">고원 끝(09:30)의 플립율</div>
+    <p>09:15는 1.5%, 09:30은 6.7%, 종일은 28.5%. 늦출수록 플립이 늘지만 <b>09:35부터 새로 편입되는 플립은 전부 노이즈</b> — 곡선이 그 경계를 그대로 보여준다.</p></div>
+</div>
+
+<h2>순위 <span class="n">top 10 + 281</span></h2>
+<p class="sec-sub">{RULE} 주간평균 기준 상위 10개 설정. 막대=관측 평균, whisker=부트스트랩 95% CI(B=5,000), 점선=281.</p>
+<div class="card scrollx">{ranking()}</div>
+
+<h2>전 규칙 표 <span class="n">top 12 + 최악 3</span></h2>
+<div class="card scrollx"><table>
+<thead><tr><th>설정</th><th class="num">equal</th><th class="num">linear</th><th class="num">square</th><th class="num">quartic</th><th class="num">종목-주</th><th class="num">Δ square</th><th class="num">플립율</th></tr></thead>
+<tbody>{table()}</tbody></table></div>
+
+<h2>결론과 경고</h2>
+<div class="card"><ul style="margin:4px 0;padding-left:20px">
+<li><b>채택 후보</b>: <b>{esc(best['label'])}</b> (월요일 09:30까지 · 최대 1회). 모든 신호가중 규칙에서 281 대비 개선
+    (linear +0.14 · square +0.26 · quartic +0.41 · softmax +0.31%p), {RULE} CI가 0을 확실히 벗어남(P(&gt;0) {st_best['prob_pos']*100:.0f}%).</li>
+<li><b>메커니즘이 자연스럽다</b>: "개장 직후 갭 반전만 믿고, 그 뒤는 원래 추세를 홀드" — v1~v3에서 확인한
+    'whipsaw 손해'와 정확히 정합적. 미세 스윕에서 <b>09:15~09:30 고원 전체가 승</b>(경계 하나의 행운이 아님),
+    09:35부터 절벽 — 단 절벽의 정확한 5분 위치는 표본 노이즈 가능.</li>
+<li><b>경고 ①</b> {nconf}개 중 최고를 골랐다 — <b>선택 편향</b>. paired Δ CI [{pd['lo']:+.2f}, {pd['hi']:+.2f}]가 0을 포함(P={pd['p_pos']*100:.0f}%),
+    5% 유의 미달. 영향 주도 {pd['n_weeks']}/255뿐.</li>
+<li><b>경고 ②</b> 같은 255주 재표집이라 과적합 미해결. <b>walk-forward/OOS 검증 통과 전엔 라이브 반영 금지.</b></li>
+</ul></div>
+
+<div class="foot">
+데이터 <code>data/data_creon_API</code>(CREON 5분봉, 255주/1,233 종목-주) · 엔진 <code>engines/engine_fable</code>(파라미터: flip_days·flip_cutoff_hm·flip_max) ·
+스윕 <code>back_test/sweep_flip.py</code>(8프로세스 병렬, {nconf}설정) · 결과 <code>sweep_flip_results.json</code> · 부트스트랩 SEED=42·B=5,000.<br>
+"창"=주 선두 거래일 수(공휴일 시 실제 첫 거래일부터), 컷오프=창 마지막 날 시각 상한. 비용(수수료 1.5bp·슬리피지 5bp·거래세 15bp)·정수주 포함 net.
+관련 보고서: <code>backtest_281_vs_fable.artifact.html</code>(v1·v3·v2 4-way).
+</div>
+</div></div>"""
+
+
+if __name__ == "__main__":
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    open(OUT, "w", encoding="utf-8").write(build())
+    print("wrote", OUT)

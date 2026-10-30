@@ -1,0 +1,74 @@
+"""
+Mesh independence test runner (lumen, Simmetrix).
+
+For each mesh size in MESH_SIZES, generate a tetrahedral volume mesh from the
+lumen surface (lumen.vtp) using Simmetrix, and organize the output into a
+mesh-complete tree:
+
+  mesh/<size>/lumen/mesh-complete/
+    mesh-complete.mesh.vtu          # volume mesh (vtu)
+    mesh-complete.exterior.vtp      # exterior surface (vtp)
+    walls_combined.vtp
+    mesh-surfaces/{wall,inlet,outlet}.vtp
+"""
+
+import json
+import shutil
+from pathlib import Path
+
+from utils.meshing import assemble_mesh_tree
+import utils.runner as runner
+
+# ---- user input: mesh sizes to sweep ----
+MESH_SIZES = [0.02, 0.015, 0.01]
+
+# ---- paths / fixed parameters ----
+HERE = Path(__file__).resolve().parent
+INPUT_VTP = HERE / "lumen_mesh_test" / "lumen.vtp"
+CONFIG_PATH = HERE.parent / "simmetrix_path.json"
+OUTPUT_ROOT = HERE / "mesh"
+
+BOUNDARY_LAYER_THICKNESS = 0.005
+NUMBER_OF_BOUNDARY_LAYERS = 3
+
+
+def mesh_one(grid_size: float, config: dict) -> None:
+    """Mesh the lumen at a single grid size into mesh/<size>/lumen/."""
+    work_dir = OUTPUT_ROOT / str(grid_size) / "lumen"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    # Simmetrix input surface (kept inside the work dir)
+    input_copy = work_dir / "lumen.vtp"
+    shutil.copy2(INPUT_VTP, input_copy)
+
+    runner.run_simmetrix_license(license_path=config["simmetrix"]["license"])
+    runner.run_simmetrix_meshing(
+        vtp_path=input_copy,
+        exe_dir=work_dir,
+        simmetrix_path=config["simmetrix"]["meshing"],
+        grid_size=grid_size,
+        boundary_layer_thickness=BOUNDARY_LAYER_THICKNESS,
+        number_of_boundary_layers=NUMBER_OF_BOUNDARY_LAYERS,
+    )
+
+    assemble_mesh_tree(work_dir)
+
+    # Drop the input copy now that artifacts are organized under mesh-complete/
+    input_copy.unlink(missing_ok=True)
+
+    print(f"[done] grid_size={grid_size} -> {work_dir / 'mesh-complete'}")
+
+
+def main() -> None:
+    if not INPUT_VTP.exists():
+        raise FileNotFoundError(f"Input VTP not found: {INPUT_VTP}")
+
+    with open(CONFIG_PATH, "r") as f:
+        config = json.load(f)
+
+    for size in MESH_SIZES:
+        mesh_one(size, config)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,270 @@
+"""
+Post-processing for the 0723 solid (type1 / dist) simulation, fibrous cap domain.
+
+Reads FC_case_<i>_peak.vtk + FC_case_<i>_low.vtk from
+    solid_0723/case_<i>/ansys_results_dist_0723/
+restricts to the lumen-facing cap surface (WALL_IN_FC == old "Group == 5"), and
+outputs PSS / del_PSS + critical-node coords + z_MLA + circum_index.
+
+Cases 0-383.
+
+Definition of the vulnerability indices
+---------------------------------------
+    sigma_n      max principal stress at cap-surface node n
+    N_r(n)       cap-surface nodes within a distance r of node n
+    sigmabar_n   mean of sigma over N_r(n)   (nonlocal / locally averaged stress)
+
+    PSS      = max_n  sigmabar_n              evaluated on sigma(t_peak)
+    del_PSS  = max_n  sigmabar_n              evaluated on sigma(t_peak) - sigma(t_low)
+
+The maximisation runs over EVERY stress-carrying cap-surface node - there is no
+candidate pre-selection, and the reported value is the neighbourhood mean itself.
+This makes the selection criterion and the reported quantity the same statistic,
+leaving r as the only free parameter.
+
+    [superseded]  An earlier version restricted the search to the top 5% of raw
+    nodal stress and reported the 95th percentile inside the winning sphere.
+    That pre-filter changed the critical node in 4.7% of the 384 samples (the
+    true argmax of sigmabar fell as low as the 36th percentile of raw stress),
+    and it optimised a different statistic (mean) from the one it reported (Q95).
+    The neighbourhood mean is computed vectorised over all nodes, so dropping the
+    filter also costs nothing in runtime.
+
+Averaging is restricted to the cap SURFACE, so r is a lateral averaging length
+along the lumen-cap interface and does not average through the cap thickness.
+
+Notes
+-----
+* .vtk (legacy binary, FC-only grid) instead of the old .vtu
+* node mask: point_data["WALL_IN_FC"] (bool); the sim script tags
+  wall_in_fc_tag = 5, so this is the same node set as the old "Group == 5".
+* del_PSS uses the FULL range  peak - low  (NOT (peak - low) / 2)
+* stresses live on the corner nodes of the SOLID187 tetrahedra; the mid-side
+  nodes carry NaN and are excluded from the averages and from the candidate
+  centres (they are still valid geometry, but a neighbourhood centred on one
+  would not be centred on a stress-carrying node).
+* SPHERE RADIUS SENSITIVITY: every case is evaluated at 7 radii and written to
+  one CSV per radius.  The mesh is read and the KD-tree built ONCE per case.
+"""
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import pyvista as pv
+from scipy.spatial import cKDTree
+from multiprocessing import get_context
+
+PROJECT_DIR = Path(__file__).parent
+SOLID_DATA_DIR = PROJECT_DIR / "solid_0723"
+RESULT_SUBDIR = "ansys_results_dist_0723"
+PARAMETER_CSV_PATH = PROJECT_DIR / "pre_data" / "parameter.csv"
+OUT_DIR = Path("/home/jeff/project/66_post_processing_journal/LAP_data")
+
+N_CASES = 384
+OUT_TAG = "0727"
+
+# --- sphere-radius sensitivity study ---------------------------------------
+# (radius in cm, filename suffix)
+# The sweep deliberately brackets BOTH failure modes of the averaging radius:
+#   r = 0.005      : TOO SMALL.  Neighbourhood degenerates to a few nodes;
+#                    r/h = 1.3 for a local nodal spacing h ~ 40 um.
+#   r = 0.010-0.020: the plateau.  Candidate operating range.
+#   r = 0.030-0.080: TOO LARGE.  Included to expose the over-smoothing roll-off so
+#                    the plateau is visibly bounded on both sides rather than being
+#                    the flat tail of a monotone curve.
+# NOTE on suffixes: r0005 = 0.005 cm, r005 = 0.05 cm.  Easy to misread - the
+# leading zero count is what distinguishes them.
+SPHERE_RADII = [(0.005, "r0005"), (0.010, "r001"), (0.015, "r0015"), (0.020, "r002"),
+                (0.030, "r003"), (0.050, "r005"), (0.080, "r008")]
+
+STRESS_FIELD = "Principal_stress"
+Z_EPSILON = 0.02
+WALL_MASK_FIELD = "WALL_IN_FC"
+CHUNK = 1000          # centres per neighbour-query block (caps peak memory)
+
+N_PROC = 20
+
+
+from utils.utils_geo_mesh.main_CAD import CAD_instance_from_idx
+from utils.utils_geo_mesh.utils_CAD import y_center_lumen, alpha_theta
+
+
+def circum_index(cad, xyz):
+    """Circumferential position of a point, normalised by the local lipid half-arc."""
+    x, y, z = xyz
+    y_c = y_center_lumen(cad, z)
+    v1 = np.array([x, y - y_c])
+    v2 = np.array([0.0, 1.0])
+    cos_val = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+    angle = np.arccos(np.clip(cos_val, -1.0, 1.0))
+    return float(angle / alpha_theta(cad, z))   # alpha_theta is the half value, radian
+
+
+def neighbourhood_means(points, tree, fields, valid, radius, chunk=CHUNK):
+    """
+    NaN-aware mean of every field over the radius-r neighbourhood of every point.
+
+    Returns (means, counts) where means[k] is the averaged k-th field and counts
+    is the number of valid contributors, shared by all fields (identical masks).
+    Chunked so the neighbour index array stays bounded at the largest radii.
+    """
+    n = len(points)
+    filled = [np.where(valid, f, 0.0) for f in fields]
+    vf = valid.astype(np.float64)
+    tot = [np.empty(n) for _ in fields]
+    cnt = np.empty(n)
+    for a in range(0, n, chunk):
+        b = min(a + chunk, n)
+        nb = tree.query_ball_point(points[a:b], radius)
+        lens = np.fromiter((len(x) for x in nb), dtype=np.int64, count=b - a)
+        if lens.sum() == 0:
+            for t in tot:
+                t[a:b] = 0.0
+            cnt[a:b] = 0.0
+            continue
+        cols = np.concatenate([np.asarray(x, dtype=np.int64) for x in nb])
+        rows = np.repeat(np.arange(b - a), lens)
+        for t, f in zip(tot, filled):
+            t[a:b] = np.bincount(rows, weights=f[cols], minlength=b - a)
+        cnt[a:b] = np.bincount(rows, weights=vf[cols], minlength=b - a)
+    means = [np.divide(t, cnt, out=np.full(n, np.nan), where=cnt > 0) for t in tot]
+    return means, cnt
+
+
+def process_case(case_index):
+    """Returns {radius_suffix: row} for one case, or None if the case is skipped."""
+    case_index = int(case_index)
+    case_dir = SOLID_DATA_DIR / f"case_{case_index}" / RESULT_SUBDIR
+    peak_path = case_dir / f"FC_case_{case_index}_peak.vtk"
+    low_path = case_dir / f"FC_case_{case_index}_low.vtk"
+
+    if not peak_path.exists() or not low_path.exists():
+        print(f"[SKIP] case_{case_index}: VTK files not found", flush=True)
+        return None
+
+    fc_peak = pv.read(peak_path)
+    fc_low = pv.read(low_path)
+
+    if WALL_MASK_FIELD not in fc_peak.point_data:
+        print(f"[SKIP] case_{case_index}: no {WALL_MASK_FIELD} field", flush=True)
+        return None
+    mask_wall = np.asarray(fc_peak.point_data[WALL_MASK_FIELD]).astype(bool)
+    points = np.asarray(fc_peak.points)
+    if not mask_wall.any():
+        print(f"[SKIP] case_{case_index}: no {WALL_MASK_FIELD} nodes", flush=True)
+        return None
+
+    # Suspect-data filter (low must not exceed peak on the wall)
+    peak_eqv = np.asarray(fc_peak.point_data["EQV_stress"], dtype=np.float64)
+    low_eqv = np.asarray(fc_low.point_data["EQV_stress"], dtype=np.float64)
+    if np.nanmean(low_eqv[mask_wall]) > np.nanmean(peak_eqv[mask_wall]):
+        print(f"[SKIP] case_{case_index}: suspect data (low > peak)", flush=True)
+        return None
+
+    # Z masking: trim Z_EPSILON off both axial ends of the wall patch
+    wall_z = points[mask_wall][:, 2]
+    mask_z = ((points[:, 2] > wall_z.min() + Z_EPSILON) &
+              (points[:, 2] < wall_z.max() - Z_EPSILON))
+    gz_indices = np.where(mask_wall & mask_z)[0]
+    if len(gz_indices) == 0:
+        print(f"[SKIP] case_{case_index}: no nodes after z-masking", flush=True)
+        return None
+
+    points_sub = points[gz_indices]
+    s_peak = np.asarray(fc_peak.point_data[STRESS_FIELD], dtype=np.float64)[gz_indices]
+    s_low = np.asarray(fc_low.point_data[STRESS_FIELD], dtype=np.float64)[gz_indices]
+    s_delta = s_peak - s_low                      # full cyclic range, no /2
+    valid = ~np.isnan(s_peak)
+    if not valid.any():
+        print(f"[SKIP] case_{case_index}: no stress-carrying wall nodes", flush=True)
+        return None
+    valid_idx = np.where(valid)[0]
+    tree = cKDTree(points_sub)
+
+    try:
+        cad = CAD_instance_from_idx(case_index, str(PARAMETER_CSV_PATH))
+        z_mla = float(cad.z_peak)
+    except Exception as e:
+        print(f"[SKIP] case_{case_index}: CAD instance failed ({e})", flush=True)
+        return None
+
+    def fill(row, prefix, mean, cnt):
+        """Pick the critical node (argmax of the neighbourhood mean) and record it."""
+        m = mean[valid_idx]
+        if np.isnan(m).all():
+            return False
+        k = valid_idx[int(np.nanargmax(m))]
+        xyz = points_sub[k]
+        row[f"{prefix}_crit_x"] = float(xyz[0])
+        row[f"{prefix}_crit_y"] = float(xyz[1])
+        row[f"{prefix}_crit_z"] = float(xyz[2])
+        row[f"{prefix}_n_sphere"] = int(cnt[k])
+        try:
+            row[f"{prefix}_circum_index"] = circum_index(cad, xyz)
+        except Exception as e:
+            print(f"  [WARN] case_{case_index} {prefix} circum failed: {e}", flush=True)
+            row[f"{prefix}_circum_index"] = float("nan")
+        return float(mean[k])
+
+    out = {}
+    for radius, suffix in SPHERE_RADII:
+        (m_peak, m_delta), cnt = neighbourhood_means(
+            points_sub, tree, [s_peak, s_delta], valid, radius)
+
+        row = {"case_id": case_index, "sphere_radius": radius,
+               "n_wall_nodes": int(len(gz_indices)), "z_MLA": z_mla}
+
+        pss = fill(row, "PSS", m_peak, cnt)
+        dpss = fill(row, "delPSS", m_delta, cnt)
+        if pss is False or dpss is False:
+            print(f"[SKIP] case_{case_index} r={radius}: empty neighbourhoods",
+                  flush=True)
+            continue
+        row["PSS_Principal"] = pss
+        row["del_PSS_Principal"] = dpss
+        out[suffix] = row
+
+        print(f"[OK] case_{case_index} r={radius}: PSS={pss:.3e}, dPSS={dpss:.3e}, "
+              f"z_MLA={z_mla:.4f}, z_crit={row['PSS_crit_z']:.4f}, "
+              f"circum={row['PSS_circum_index']:.3f}, "
+              f"n_sph={row['PSS_n_sphere']}", flush=True)
+
+    return out or None
+
+
+COLUMNS = [
+    "case_id", "sphere_radius", "n_wall_nodes", "z_MLA",
+    "PSS_Principal", "del_PSS_Principal",
+    "PSS_n_sphere", "delPSS_n_sphere",
+    "PSS_crit_x", "PSS_crit_y", "PSS_crit_z", "PSS_circum_index",
+    "delPSS_crit_x", "delPSS_crit_y", "delPSS_crit_z", "delPSS_circum_index",
+]
+
+
+if __name__ == "__main__":
+    case_indices = list(range(0, N_CASES))
+    out_dir = OUT_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        with get_context("spawn").Pool(processes=N_PROC) as pool:
+            results = pool.map(process_case, case_indices)
+    except PermissionError:
+        print("Multiprocessing unavailable. Falling back to serial execution.")
+        results = [process_case(idx) for idx in case_indices]
+
+    results = [r for r in results if r]
+
+    frames = []
+    for radius, suffix in SPHERE_RADII:
+        rows = [r[suffix] for r in results if suffix in r]
+        df = pd.DataFrame(rows, columns=COLUMNS).sort_values("case_id")
+        output_path = out_dir / f"PSS_result_{OUT_TAG}_{suffix}.csv"
+        df.to_csv(output_path, index=False)
+        print(f"Saved {len(df)}/{N_CASES} rows to {output_path}")
+        frames.append(df)
+
+    # long-format file with every radius stacked, for the sensitivity plot
+    combined = pd.concat(frames).sort_values(["case_id", "sphere_radius"])
+    combined_path = out_dir / f"PSS_result_{OUT_TAG}_all_radii.csv"
+    combined.to_csv(combined_path, index=False)
+    print(f"Saved {len(combined)} rows to {combined_path}")

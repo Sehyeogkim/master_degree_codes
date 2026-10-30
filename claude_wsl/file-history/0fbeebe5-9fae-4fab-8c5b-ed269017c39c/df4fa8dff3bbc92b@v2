@@ -1,0 +1,166 @@
+"""p_email — 라이브 프로젝트 보고서 이메일 (순수 코드, cron 진입점). Gmail SMTP.
+
+  --kind selection  토요일 선정 후 : 다음주 selection.html 전송 (선정 요약 + 첨부)
+  --kind daily      월~목 장마감   : 이번주 live.html 전송 (중간 현황 스냅샷)
+  --kind final      금 장마감      : 이번주 live.html 전송 (최종)
+
+수신자 = 각 프로젝트 config.yaml 의 emails. 발신 = pipeline/.gmail_creds (gitignore).
+Gmail MCP 대신 smtplib를 쓰는 이유: cron/headless에서는 MCP(Claude 세션)를 못 쓰기 때문.
+
+.gmail_creds 형식 (둘 중 아무거나):
+  sender=kimse991228@gmail.com
+  password=abcd efgh ijkl mnop     # Google '앱 비밀번호' 16자리
+또는 2줄(발신주소/앱비밀번호)만 적어도 됨. (일반 로그인 비번은 Google이 막음 → 앱 비밀번호 필수)
+"""
+import os, sys, json, ssl, smtplib, datetime, argparse
+from email.message import EmailMessage
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from weekcal import to_monday
+from live_config import all_projects, week_paths
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CREDS = os.path.join(HERE, ".gmail_creds")
+POS, NEG, MUTED = "#2E7D32", "#C25744", "#6B5E54"
+
+
+def _load_creds():
+    if not os.path.exists(CREDS):
+        sys.exit(f"[p_email] {CREDS} 없음 — Gmail 발신주소+앱비밀번호 필요 "
+                 f"(형식: sender=/password= 또는 2줄). 일반 비번 아님, '앱 비밀번호' 발급 필요.")
+    sender = password = None
+    for line in open(CREDS, encoding="utf-8"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            k, v = line.split("=", 1); k = k.strip().lower(); v = v.strip()
+            if k in ("sender", "email", "user"):
+                sender = v
+            elif k in ("password", "pass", "app_password"):
+                password = v
+        elif sender is None:
+            sender = line
+        elif password is None:
+            password = line
+    if not sender or not password:
+        sys.exit("[p_email] .gmail_creds에서 발신주소/앱비밀번호 파싱 실패")
+    return sender, password
+
+
+def _next_monday():
+    t = datetime.date.today()
+    return (t + datetime.timedelta(days=(7 - t.weekday()) % 7 or 7)).strftime("%Y-%m-%d")
+
+
+def _table(headers, rows):
+    th = "".join(f"<th style='padding:6px 9px;background:#E6E0D4;text-align:left'>{h}</th>" for h in headers)
+    return (f"<table style='border-collapse:collapse;font-family:sans-serif;font-size:14px'>"
+            f"<tr>{th}</tr>{rows}</table>")
+
+
+def _summary_selection(monday, wp):
+    try:
+        top = json.load(open(wp["top5"]))
+    except Exception:
+        return "<p>선정 데이터 없음 (select 미실행?)</p>"
+    rows = "".join(
+        f"<tr><td style='padding:6px 9px'>{r.get('name', r['code'])} ({r['code']})</td>"
+        f"<td style='padding:6px 9px'>{r.get('mktcap', 0)/1e12:,.1f}조</td>"
+        f"<td style='padding:6px 9px;color:{POS if r.get('chg',0)>=0 else NEG}'>{r.get('chg', 0):+.1f}%</td>"
+        f"<td style='padding:6px 9px'>{r.get('mon_open', 0):,.0f}</td>"
+        f"<td style='padding:6px 9px'>{r.get('fri_close', 0):,.0f}</td></tr>" for r in top)
+    return (f"<h3>📋 선정 {len(top)}종목 · {monday} 주</h3>"
+            + _table(["종목", "시총", "직전주 변동율", "월 시가", "F0(금종가)"], rows))
+
+
+def _summary_results(monday, wp, label):
+    try:
+        res = json.load(open(wp["results"]))
+    except Exception:
+        return f"<p>{label} — 결과 데이터 없음 (아직 update 전)</p>"
+    st = res.get("stocks", [])
+    avg = (sum(s["weekly_return"] for s in st) / len(st) * 100) if st else 0.0
+    rows = "".join(
+        f"<tr><td style='padding:6px 9px'>{s['name']} ({s['code']})</td>"
+        f"<td style='padding:6px 9px;color:{POS if s['weekly_return']>=0 else NEG};font-weight:700'>{s['weekly_return']*100:+.2f}%</td>"
+        f"<td style='padding:6px 9px'>{'롱' if s['direction']>0 else ('숏' if s['direction']<0 else '—')}</td>"
+        f"<td style='padding:6px 9px'>{s['n_entries']}회</td>"
+        f"<td style='padding:6px 9px'>{len(s['exits'])}건</td></tr>" for s in st)
+    color = POS if avg >= 0 else NEG
+    return (f"<h3>📈 {label} · {monday} 주 <span style='color:{MUTED};font-size:13px'>(스냅샷 {res.get('stamp','')})</span></h3>"
+            f"<p>평균 주간수익률 <b style='color:{color}'>{avg:+.2f}%</b> · {len(st)}종목</p>"
+            + _table(["종목", "주간수익률", "방향", "진입", "청산"], rows))
+
+
+def _resolve(cfg, kind, monday):
+    """kind별 (가동주 월요일, 요약 HTML, 첨부파일, 제목)."""
+    if kind == "selection":
+        monday = monday or _next_monday()
+        wp = week_paths(cfg, monday)
+        return monday, _summary_selection(monday, wp), wp["selection"], f"[bullet281] {cfg['name']} 선정 · {monday} 주"
+    monday = monday or to_monday(datetime.date.today()).strftime("%Y-%m-%d")
+    wp = week_paths(cfg, monday)
+    label = "최종 보고서" if kind == "final" else "일일 현황"
+    return monday, _summary_results(monday, wp, label), wp["live"], f"[bullet281] {cfg['name']} {label} · {monday} 주"
+
+
+def build_message(cfg, kind, sender, monday=None):
+    emails = cfg.get("emails") or []
+    monday, body, attach, subject = _resolve(cfg, kind, monday)
+    html = (f"<div style='font-family:sans-serif;max-width:720px'>{body}"
+            f"<p style='color:{MUTED};font-size:13px;margin-top:16px'>— bullet281 자동 발송 · "
+            f"engine {cfg['engine']} · screener {cfg['screener']}<br>"
+            f"차트 포함 상세 리포트는 <b>첨부 HTML</b>을 브라우저로 여세요.</p></div>")
+    msg = EmailMessage()
+    msg["From"] = sender
+    msg["To"] = ", ".join(emails)
+    msg["Subject"] = subject
+    msg.set_content("HTML 지원 클라이언트에서 보세요. 상세는 첨부 HTML.")
+    msg.add_alternative(html, subtype="html")
+    if attach and os.path.exists(attach):
+        with open(attach, "rb") as f:
+            msg.add_attachment(f.read(), maintype="text", subtype="html",
+                               filename=f"{cfg['name']}_{monday}_{kind}.html")
+    return msg, emails, subject, (attach if os.path.exists(attach or "") else None)
+
+
+def send_project(cfg, kind, sender, password, monday=None):
+    if not (cfg.get("emails")):
+        print(f"[{cfg['name']}] 수신자 없음(config emails) — 스킵"); return
+    msg, emails, subject, attach = build_message(cfg, kind, sender, monday)
+    ctx = ssl.create_default_context()
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ctx) as s:
+        s.login(sender, password)
+        s.send_message(msg)
+    print(f"[{cfg['name']}] 전송 → {', '.join(emails)} | {subject} | 첨부 {'O' if attach else 'X'}")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--kind", choices=["selection", "daily", "final"], required=True)
+    ap.add_argument("--project", help="특정 프로젝트만 (기본=전체)")
+    ap.add_argument("--monday", help="가동 주 월요일 강제 지정")
+    ap.add_argument("--dry-run", action="store_true", help="전송 안 하고 대상·제목·첨부유무만 출력")
+    a = ap.parse_args()
+    projs = all_projects()
+    if a.project:
+        projs = [p for p in projs if p["name"] == a.project]
+    if not projs:
+        sys.exit("라이브 프로젝트 없음 (report/live/*/config.yaml)")
+
+    if a.dry_run:
+        for cfg in projs:
+            _, _, subject, attach = build_message(cfg, a.kind, "dry@run", a.monday)
+            print(f"[{cfg['name']}] → {cfg.get('emails')} | {subject} | 첨부 {attach or '없음'}")
+        return
+
+    sender, password = _load_creds()
+    for cfg in projs:
+        try:
+            send_project(cfg, a.kind, sender, password, a.monday)
+        except Exception as e:
+            print(f"[{cfg['name']}] 이메일 실패: {e}")
+
+
+if __name__ == "__main__":
+    main()

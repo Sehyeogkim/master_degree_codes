@@ -1,0 +1,183 @@
+#!/usr/bin/env python
+"""
+Retry pass 3 — fix the surface mesh, not the volume mesher.
+
+Pass 2 showed the "HXT 3D mesh failed" group is ALSO a 2D problem: with 3D
+Delaunay the errors became explicit --
+
+    case 6  : Invalid boundary mesh (overlapping facets) on surface 8
+    case 22 : PLC Error: A segment and a facet intersect at point
+
+-- i.e. the boundary (surface) mesh built by algo2d=2 (Automatic -> MeshAdapt)
+is self-intersecting, so no 3D algorithm can succeed.  Keeping algo2d=2 for
+that group was the mistake.
+
+Ladder per case (20-min cap each rung, first success wins):
+  A. algo2d=5 (Delaunay)          + algo3d=1  (Delaunay)  @ 0.05
+  B. algo2d=6 (Frontal-Delaunay)  + algo3d=10 (HXT)       @ 0.06
+
+Rung B doubles as the plan for `Impossible to mesh periodic surface` (case 54),
+where plain Delaunay also failed -- Frontal-Delaunay builds the surface mesh
+differently, and the coarser size reduces 1D intersections.
+
+Cases whose last error is a CAD/boolean failure are skipped outright: those die
+before any mesher runs, so no algorithm setting can help them.
+"""
+import json
+import re
+import time
+import glob
+import subprocess
+import threading
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+HERE = Path(__file__).resolve().parent
+PY = "/home/jeff/miniconda3/envs/ansys_new/bin/python"
+
+NPROC = 12
+WORKERS = 5
+PER_CASE_TIMEOUT = 1200          # 20 min per rung
+RUNGS = [(0.05, 5, 1), (0.06, 6, 10)]   # (mesh_size, algo2d, algo3d)
+
+SOLID = HERE / "solid_0723"
+LOGDIR = SOLID / "logs"; LOGDIR.mkdir(parents=True, exist_ok=True)
+PROG = SOLID / "retry_progress.jsonl"
+STATUS = SOLID / "retry_status.json"
+MARKER = SOLID / "batch_retry.marker"
+COARSE_LOG = SOLID / "coarsened_cases.json"
+
+# errors that mean the CAD/boolean stage died -- meshing never started
+GEOM_ERROR = re.compile(
+    r"STEP\d Failed|Unknown OpenCASCADE entity|Unknown model region|Fragments failed|BOPAlgo",
+    re.I,
+)
+
+
+def last_status_per_case():
+    last = {}
+    for f in (SOLID / "batch_progress.jsonl", PROG):
+        if f.exists():
+            for line in f.read_text(errors="replace").splitlines():
+                if line.strip():
+                    try:
+                        r = json.loads(line)
+                    except ValueError:
+                        continue
+                    last[r["case"]] = r
+    return last
+
+
+def msh_path(c):
+    return SOLID / f"case_{c}" / "dist_run" / "solid_type_1_dist.msh"
+
+
+have = {int(p.split("case_")[1].split("/")[0])
+        for p in glob.glob(str(SOLID / "case_*" / "dist_run" / "solid_type_1_dist.msh"))}
+LAST = last_status_per_case()
+missing = [c for c in range(1, 384) if c not in have]
+GEOM = [c for c in missing if GEOM_ERROR.search(str((LAST.get(c) or {}).get("error", "")))]
+CASES = [c for c in missing if c not in GEOM]
+
+_lock = threading.Lock()
+counts = {"total": len(CASES), "done": 0, "failed": 0, "timeout": 0, "skipped": 0,
+          "running": 0, "coarsened": 0, "skipped_geometry": len(GEOM)}
+coarsened = {}
+if COARSE_LOG.exists():
+    try:
+        coarsened = json.loads(COARSE_LOG.read_text())
+    except ValueError:
+        pass
+start_time = time.time()
+
+
+def write_status():
+    with _lock:
+        s = dict(counts)
+        s["start_time"] = start_time
+        s["elapsed"] = round(time.time() - start_time, 1)
+        STATUS.write_text(json.dumps(s, indent=2))
+        COARSE_LOG.write_text(json.dumps(coarsened, indent=2))
+
+
+def record(entry):
+    entry["ts"] = time.time()
+    entry["pass"] = 3
+    with _lock:
+        with open(PROG, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+        st = entry.get("status")
+        if st in counts:
+            counts[st] += 1
+        if st == "done" and entry.get("mesh_size") == 0.06:
+            counts["coarsened"] += 1
+            coarsened[str(entry["case"])] = 0.06
+    write_status()
+
+
+def attempt(c, size, a2, a3, tag):
+    logf = LOGDIR / f"case{c}_{tag}.log"
+    t0 = time.time()
+    try:
+        with open(logf, "w") as lf:
+            p = subprocess.run(
+                [PY, "mesh_one_dist.py", str(c), str(NPROC), str(size), str(a2), str(a3)],
+                cwd=str(HERE), stdout=lf, stderr=subprocess.STDOUT,
+                timeout=PER_CASE_TIMEOUT,
+            )
+        for line in reversed(logf.read_text(errors="replace").splitlines()):
+            if line.startswith("STATUS "):
+                return json.loads(line[len("STATUS "):])
+        return {"status": "failed", "error": f"no STATUS line (exit {p.returncode})"}
+    except subprocess.TimeoutExpired:
+        return {"status": "timeout"}
+    except Exception as e:
+        return {"status": "failed", "error": f"{type(e).__name__}: {e}"}
+    finally:
+        del t0
+
+
+def run_case(c):
+    with _lock:
+        counts["running"] += 1
+    write_status()
+    entry = {"case": c}
+    try:
+        for i, (size, a2, a3) in enumerate(RUNGS):
+            st = attempt(c, size, a2, a3, f"p3r{i+1}")
+            st.update({"mesh_size": size, "algo2d": a2, "algo3d": a3, "rung": i + 1})
+            if st.get("status") == "done":
+                entry.update(st)
+                break
+            entry.update(st)          # keep the last rung's outcome if all fail
+    finally:
+        with _lock:
+            counts["running"] -= 1
+    record(entry)
+    return entry
+
+
+def main():
+    if MARKER.exists():
+        MARKER.unlink()
+    write_status()
+    print(f"[retry3] {len(CASES)} cases, {WORKERS}-wide, nproc={NPROC}, "
+          f"cap={PER_CASE_TIMEOUT//60}min/rung, rungs={RUNGS}", flush=True)
+    print(f"[retry3] skipping {len(GEOM)} CAD/boolean-failure cases (no mesher runs): {GEOM}", flush=True)
+    print(f"[retry3] cases: {CASES}", flush=True)
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        futs = [ex.submit(run_case, c) for c in CASES]
+        for fut in as_completed(futs):
+            e = fut.result()
+            print(f"[case {e.get('case')}] {e.get('status')} rung={e.get('rung')} "
+                  f"size={e.get('mesh_size')} algo=({e.get('algo2d')},{e.get('algo3d')}) "
+                  f"elem={e.get('num_elements')} min_q={e.get('min_quality')} "
+                  f"neg={e.get('neg_jacobian')} {e.get('seconds')}s "
+                  f"{str(e.get('error',''))[:70]}", flush=True)
+    MARKER.write_text("DONE\n")
+    write_status()
+    print("[retry3] COMPLETE")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,9 @@
+# Memory Index
+
+- [tvDatafeed nologin](tvdatafeed-nologin.md) — 실시간 5분봉 소스; 로그인은 깨져도 nologin으로 충분
+- [Live cron system](live-cron-system.md) — 라이브 시뮬 cron 가동 중; 프로젝트폴더·screeners·p_email 구조
+- [Portfolio allocation look-ahead](portfolio-allocation-lookahead.md) — gap⁴ 배분은 사후 계산·라이브 미호출; 실시간 실행정책 미정
+- [TradingView Perf.W formula](tradingview-perfw-formula.md) — 주간성능=최신종가/7일전바 시가−1; 우리 chg와 정의 다름(참고 병기)
+- [Live fetch guard](live-fetch-guard.md) — 036930 0% 오보 원인(yfinance 1봉 오염)+단조 가드 수정; test_fetch_guard.py
+- [KOSDAQ yfinance suffix bug](kosdaq-yfinance-suffix-bug.md) — yfinance 코스피=.KS/코스닥=.KQ; .KS-only가 코스닥 전량 누락(선정 버그)→_dl_daily 폴백 수정
+- [최종 종목선정 방법](final-selection-method.md) — 2026-07-19 확정: 시총5천억↑→주-주변동율 Top20→일거래대금(Value.Traded) Top5

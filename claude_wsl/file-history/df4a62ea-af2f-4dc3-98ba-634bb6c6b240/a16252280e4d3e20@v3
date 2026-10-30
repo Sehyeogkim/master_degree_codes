@@ -1,0 +1,46 @@
+#!/bin/bash
+# Parallel-only rerun: peak@NP (port 50052) || low@NP (port 50100), distinct ports.
+# Reuses cdb already present in test_par/case_C/{par_peak,par_low}. Pauses & resumes batch.
+# Usage: test_driver_par.sh <case> <nproc_each>
+set -u
+Q=/home/jeff/project/54_analysis
+C=${1:-508}
+NP=${2:-15}
+LOG=$Q/test_par/driver_par_${NP}.log
+source ~/miniconda3/etc/profile.d/conda.sh; conda activate ansys_new
+cd $Q
+echo "==== PARALLEL RERUN case $C nproc=$NP START $(date) ====" | tee -a $LOG
+
+# pause batch
+touch $Q/STOP_LAP
+pkill -9 -f '[r]un_plaque_batch.sh LAP'
+pkill -9 -f '[a]nsys.e'; pkill -9 -f '[a]nsys251'
+sleep 6
+echo "paused; ansys.e=$(pgrep -c ansys.e 2>/dev/null || echo 0)" | tee -a $LOG
+
+# ensure cdb present in both par dirs (reuse seq cdb); regenerate seq cdb if missing
+if [ ! -f $Q/test_par/case_$C/seq/total_solid1.cdb ]; then
+  echo "seq cdb missing -> rebuild via a quick both-run skipped; aborting" | tee -a $LOG
+fi
+for sub in par_peak par_low; do
+  mkdir -p $Q/test_par/case_$C/$sub
+  cp -n $Q/test_par/case_$C/seq/total_solid1.cdb $Q/test_par/case_$C/$sub/total_solid1.cdb 2>/dev/null
+  rm -f $Q/test_par/case_$C/$sub/FC_case_${C}_*.vtk
+done
+
+echo "---- PARALLEL peak@$NP(:50052) || low@$NP(:50100) ----" | tee -a $LOG
+tp0=$(date +%s)
+python test_bc.py $C peak $NP par_peak 50052 >> $LOG 2>&1 &
+P1=$!
+python test_bc.py $C low  $NP par_low  50100 >> $LOG 2>&1 &
+P2=$!
+wait $P1; wait $P2
+tp1=$(date +%s)
+echo ">>> PARALLEL(nproc=$NP) wall = $((tp1-tp0))s" | tee -a $LOG
+
+# resume batch
+pkill -9 -f '[a]nsys.e'; pkill -9 -f '[a]nsys251'; sleep 3
+rm -f $Q/STOP_LAP $Q/STOP_CP
+setsid nohup bash run_plaque_batch.sh LAP >> LAP_batch.out 2>&1 </dev/null & disown
+echo "==== resumed batch; PARALLEL RERUN(nproc=$NP) DONE $(date) ====" | tee -a $LOG
+grep -E 'MAPDL port|SOLVE=|meshprep|PARALLEL.*wall' $LOG | tail -20 | tee -a $LOG

@@ -1,0 +1,24 @@
+f = "/home/jeff/project/54_analysis/batch_LAP_0728_resume.py"
+s = open(f).read()
+old = '''def write_status():
+    with _lock:
+        s = dict(counts)
+        s["start_time"] = start_time
+        s["elapsed"] = round(time.time() - start_time, 1)
+        STATUS.write_text(json.dumps(s, indent=2))'''
+new = '''def write_status():
+    with _lock:
+        s = dict(counts)
+        s["start_time"] = start_time
+        s["elapsed"] = round(time.time() - start_time, 1)
+    try:  # atomic write; never let a status-file OSError kill the batch
+        tmp = STATUS.with_suffix(".tmp")
+        tmp.write_text(json.dumps(s, indent=2))
+        tmp.replace(STATUS)
+    except OSError as e:
+        print(f"[warn] write_status failed: {e}", flush=True)'''
+assert old in s, "anchor not found"
+open(f, "w").write(s.replace(old, new))
+import py_compile
+py_compile.compile(f, doraise=True)
+print("patched write_status (atomic + OSError-safe); compiles OK")

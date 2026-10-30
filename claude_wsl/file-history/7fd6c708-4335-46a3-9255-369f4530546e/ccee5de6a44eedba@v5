@@ -1,0 +1,43 @@
+---
+name: 65-final-0723-workflow
+description: "65_final_0723 lumen pipeline runs on the cvbml/harvey servers, not locally"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: 7fd6c708-4335-46a3-9255-369f4530546e
+  modified: 2026-07-23T02:16:04.804Z
+---
+
+All 65_final_0723 work (lumen meshing → 1D → etc.) runs **on the servers** (cvbml01/cv1 primarily, also cv2 and harvey) — not on the local machine. See [[server-abbreviations]].
+
+**Why:** the toolchain lives only on the servers — Simmetrix `mesh_generator` binary + floating license under `/opt/cvbml/repos/SyntheticTreeGenerator`, the `master_python` package (egg-link'd into the `ansys_new` conda env), and gmsh/meshio/vtk. Local machine has none of it.
+
+**Key facts:**
+- Working dir on cv1: `/home/jeff/project/65_final_0723/`
+- Run with: `/home/jeff/miniconda3/envs/ansys_new/bin/python <script>.py` (has gmsh 4.14 / meshio 5.3.5 / vtk 9.5 + `lumen_codes`, `utils.utils_lumen`)
+- Proven reference pipeline: `cv1:/home/jeff/project/54_analysis/lumen_Simmetrix_meshing.py` (fluid meshing + tree/xyzts) and `lumen_1D.py` (later 1D stage).
+- Fluid meshing path: `lumen.stp` --gmsh+meshio--> `lumen.vtk` --vtk--> `lumen.vtp` --Simmetrix--> `mesh-complete/`. The mesher needs a triangulated `.vtp`, NOT raw CAD `.stp`.
+- `tree.dat`/`xyzts.dat` are rebuilt from morphology params via `VesselCADModel.CAD_instance_from_idx(case_id, parameter_csv)` — so a `parameter.csv` (row order == case index) is required for those, though meshing alone only needs `lumen.stp`.
+- Config: `pre_data/solver_path.json` holds simmetrix meshing+license, svSolver, and pul_1d solver paths.
+
+The runner `lumen_meshing_0723.py` (case_0..4 of geo_0723 → fluid_0723/) is set up on cv1 as of 2026-07-23. grid_size 0.015 gave ~1.2M tetra/case (~6M total for 5); 0.01 gives ~2.4x.
+
+**Q-ramp 3D stage runs on harvey (SLURM), not cv1.** As of 2026-07-23, case_0..4 slab/FlowHist all generated & validated.
+- Mesh transfer cv1→harvey is via **local relay** (cv1 cannot SSH harvey directly — key not trusted). `cv1→local→harvey`.
+- harvey working dir: `/home/jeff/project/65_final_0723/`. Q-ramp needs only ONE pre_data file: `pre_data/scripts/solver_ramp.inp` (copied into q_ramp_dir, then revised); model.svpre/inflow.flow are generated.
+- Adapted runner: `Q_ramp_0723.py` (from user's `Q_ramp.py`; picks case via env `QRAMP_CASE`). Two fixes vs original: (1) copy `xyzts.dat` into the q_ramp run dir — **required** or svsolver won't write slab.txt; (2) `Path(__file__).resolve().parent` so svpre gets absolute mesh paths.
+- svpre/svsolver binaries: `/home/wj0220/svSolverPrivate/build/svSolver-build/bin/` (world-exec). SLURM: partition `defaults` (harvey02-07, 96 cores each). Job needs `module load cmake/3.25.2 gcc/11.3.0 mpi/gcc-11.3.0/openmpi-4.1.5` + LD_LIBRARY_PATH to svSolver + VTK-8.2.0.
+- Parallel run: `run_q_ramp_array.sh` (`#SBATCH --array=1-4`, one 96-core job per case per node). ~3.5 min/case. Outputs `post_data/{slab/slab_i.txt, flowhist/FlowHist_i.dat}`.
+- slab.txt shape check: rows = n_timesteps/slab_store = 500/5 = 100; cols = num_tree_points = 50.
+- Full pipeline order: meshing(cv1) → Q-ramp 3D(harvey, slab/FlowHist) → regression+ROM → tree_abc.dat → 1D ROM(cv1) → 3D steady → wall traction.
+
+**1D ROM stage runs on cv1** via `lumen_1D_0723.py` (adapted from 54_analysis/lumen_1D.py: exec_dir=fluid_0723/case_{i}, cases 0-4, NUM_WORKERS=5, multiprocessing.Pool). Needs slab/FlowHist in `post_data/` (relayed from harvey via local). Binaries: pul_solver `/home/jeff/repo/SyntheticTreeGenerator/build/apps/PulsatileTreeSolver/pulsatile_tree_solver`, converter `/opt/cvbml/repos/.../PointDataConverter/point_data_converter`. Output per case: `fluid_0723/case_i/pulsatile_1d_B_new/_1d_rst.json` (systolic/diastolic/mean {Q,Pin,Pout,R}, pressures in dynes/cm²).
+
+**Coronary BC references (for paper), set in `lumen_codes/pulsatile_1d.py` create_bc_types (as of 2026-07-23):**
+- Q_mean = 0.495 cc/s (29.7 ml/min LAD) — Johnson et al. 2007.
+- R_total = P_mean/Q_mean (P_mean = 93 mmHg); split Ra:Ra_micro:Rv = 0.32:0.52:0.16.
+- **Compliance C_total = 0.36** (written with E-5 ⇒ 3.6e-6, the PER-OUTLET value) — ratio **Ca:Cim = 0.11:0.89** (SimVascular). Ref: https://simvascular.github.io/clinical/coronary.html. SimVascular LCA total capacitance 3.6e-5 is the AGGREGATE over all LCA outlets; our single-vessel (1-outlet) model uses 3.6e-5/~10 ≈ 3.6e-6 ⇒ C_total=0.36.
+- **DECISIVE FINDING (2026-07-23): compliance magnitude flips systolic/diastolic dominance.** C_total=0.36 (per-outlet) ⇒ diastolic-dominant flow, dia/sys phase-mean ≈ 2.0-2.2× (matches real LAD physiology, correct). C_total=3.6 (aggregate on single outlet) ⇒ systolic-dominant (unphysiological). **Use 0.36.** (An earlier "compliance doesn't matter" conclusion was invalid — the 0.36 edit had gone to a different output dir `pulsatile_1d/` while comparison read stale `pulsatile_1d_B_new/`.)
+- NOTE: systolic/diastolic in post_processing_1d are sampled at argmax/argmin(P_in) (aortic pressure extremes), NOT the flow-waveform phases — so the point-sampled Qsys/Qdia can mislead; use phase-averaged flow rate to judge dominance. Output dir is now `pulsatile_1d/` (user renamed from `pulsatile_1d_B_new`).
+- **hyperemia** = arg `hyperimia` of create_bc_types (default False = rest, the MAIN case). True ⇒ R_total/=3.5 (adenosine), needed only for FFR. Two runs required: rest (main) + hyperemia (FFR).
+- rest run of case_0-4 done 2026-07-23; ΔP(Pin−Pout) tracks DOS as expected; Pin_sys matches input SBP.

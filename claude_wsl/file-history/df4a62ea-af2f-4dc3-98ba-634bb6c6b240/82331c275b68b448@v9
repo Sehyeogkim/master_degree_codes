@@ -1,0 +1,23 @@
+---
+name: lap-cp-sim-54analysis
+description: "54_analysis LAP + CP solid ANSYS sim on cvbml02, cases 500-999, wall BC synced from harvey no-hyperemia"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: df4a62ea-af2f-4dc3-98ba-634bb6c6b240
+  modified: 2026-07-28T10:00:19.526Z
+---
+
+Solid ANSYS structural sim for **54_analysis** on cvbml02 (ws2), two plaque types **LAP** (low-attenuation) and **CP** (calcified), cases 500-999. Ported from the 65 sim (`pymapdl_simulation_ver5_fibrous.py`, PCG+OUTOFCORE+cell_sets patch) with paths only changed — see [[ansys-sim-cvbml02]], [[solid-dist-sim-cvbml01]].
+
+**Scripts (on ws2 in `/home/jeff/project/54_analysis/`):**
+- `pymapdl_sim_LAP.py` / `pymapdl_sim_CP.py` — differ only by `PLAQUE="LAP"|"CP"` constant in `__main__`.
+- `run_plaque_batch.sh <LAP|CP>` — infinite resumable loop (pass + 90s sleep), bracket-safe pkill, stops when `STOP_<PLAQUE>` file appears. Args: START=500 END=1000 NPROC=20.
+- **LOW-ONLY, 2 cases at a time (2026-07-28, latest user request — supersedes peak‖low):** user said "peak 안 돌리고 low만, 두 케이스씩 각 nproc 20". Orchestrator (`__main__`) builds `eligible` = cases with mesh + low csv + no low vtk, then runs a **WORKER POOL of PARN=3** (2026-07-28: was fixed-groups, but one slow case blocked the whole group → switched to a pool that refills each slot the instant a case finishes). Each slot = a `pymapdl_solve_bc.py` subprocess (DIFFERENT case, bc=low, @nproc 20 = ~54 cores, `start_new_session=True` so it's a process-group leader). On finish/fail, `finalize()` **always** rmtrees `case_{i}/low` scratch + cdb (final vtk is in parent case dir). Safety: **per-case TIMEOUT=9000s** (2.5h) → `os.killpg` the whole group (python + MAPDL child) and skip, freeing disk; **disk guard MIN_FREE_GB=450** won't start a new case if free disk is low. Reason: huge meshes (e.g. case 569, 662MB) blow PCG in-core → out-of-core sparse-direct fallback → **~357GB `.DSPtri` scratch** and hours per case; the pool lets such a case grind in ONE slot without blocking the other two, and the timeout/disk-guard bound the damage. Monitor orphan-scan is the backstop. 2×20 = 40 cores. Each case's solve_bc builds its own cdb in its `low_dir`. Ports: `_ports(ci)` low_port = 50200+ci%50 (two concurrent cases → different ci → different port); solve_bc retries launch 4× on bumped port. Done-criterion & donecnt now = **low vtk only** (wrapper + plaque_status updated). Cases 500-529ish already have peak+low from earlier; new cases get low only.
+- **HISTORY/gotchas:** fixed ports 50052/50100 caused intermittent "MAPDL failed to start gRPC server" (TIME_WAIT) → fixed with rotating ports. RESTART GOTCHA: must kill `pymapdl_sim_{LAP,CP}.py` orchestrator too (not just wrapper+solve_bc+ansys) or a stale orchestrator keeps running OLD in-memory code → TWO orchestrators → two cases at once / old ports. Full-nuke list: `[r]un_plaque_batch [p]ymapdl_sim_LAP.py [p]ymapdl_solve_bc.py [a]nsys.e [a]nsys251`, verify 0, then ONE clean start. Benchmark (508): seq 1×@30=900s vs parallel 2×@15=~718s (~20%, not 2×). Each writes `FC_case_{i}_{bc}.vtk` to the case dir; after both land, scratch subdirs+cdb are rm'd. Benchmark (case 508): sequential @30 = 900s/case vs parallel @15 = ~718s (~20% faster, NOT 2× — nproc halving slows each solve ~1.9×). nproc=20 chosen as middle ground (40 cores total, fits 64).
+- Mesh: flat files `{PLAQUE}_mesh/solid_{PLAQUE}_{i}.msh`. Output: `ansys_{PLAQUE}_0728/case_{i}/FC_case_{i}_{peak,low}.vtk` (user-chosen naming 2026-07-28; vtk filename keeps 65's `FC_case_{i}` since plaque is already in the parent dir). Case dir IS the ANSYS exec/scratch dir; wipe leaves only the 2 FC vtks.
+- Params: `pre_data/parameter_0728.csv`. material.json in pre_data.
+
+**Wall BC (critical):** `post_data/wall_no_hyperemia/{peak,low}/wall_{bc}_case_{i}.csv`, cols x,y,z,Tx,Ty,Tz,Pressure (col 7). **ws2 has NO route to harvey** — sync runs on the LOCAL box: `sync_wall_harvey.sh` (scratchpad), 60s loop rsync `--ignore-existing` harvey->local->ws2, no --delete. Wall data is plaque-agnostic → same csv unlocks both LAP & CP case i. harvey fills sequentially from 500 (its own [[steady3d-nohyperemia-54analysis]] run). A case runs only when mesh + BOTH peak&low csv present, else skipped and retried next pass.
+
+**Order:** user chose SEQUENTIAL — LAP first. **As of 2026-07-28 the user said "just do LAP only now" → CP auto-handoff DISABLED; run LAP only, CP on hold until user decides.** Full-auto monitoring: Notion page `3ab2a46d-c68c-81ca-8894-fd852400d608`, email kimse991228@gmail.com on each plaque's completion, self-heal dead ANSYS scratch.

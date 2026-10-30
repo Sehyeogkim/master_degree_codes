@@ -1,0 +1,236 @@
+"""p_live (Process 3) — 실시간(모의운영). cron 진입점, 두 모드.
+
+라이브 실험은 report/live/{project}/ 폴더 단위다 (설정 = info.md frontmatter).
+한 엔진×여러 선정기준, 또는 여러 엔진을 각각 폴더로 병렬 운영한다.
+--project 로 하나만, 생략하면 report/live/*/info.md 모든 프로젝트를 순회.
+
+  select (주말 1회): info.md 기준으로 다음 주 종목선정 → {proj}/_top5.json + _live_week.txt
+  update (평일 5분마다): _top5.json 읽어 월~now 5분봉으로 엔진 → {proj}/live.html 덮어씀
+                        (bars_5m가 월→now를 받고 차트폭이 봉수 비례라 캔들이 옆으로 자동 확장)
+
+cron:
+  0 18 * * 6        python3 p_live.py --mode select     # 모든 프로젝트
+  */5 9-15 * * 1-5  python3 p_live.py --mode update
+"""
+import os, sys, json, datetime
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from weekcal import week_bounds, to_monday
+from screeners import get_screener
+from f_run_engine import run_engine, STRAT281, run as run281
+from f_build_report import build_report, selection_report
+from live_config import all_projects, week_paths, LIVE_ROOT
+from data_source import load_bars_csv, MIN_WEEK_BARS
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CAPITAL = 10_000_000.0                       # 엔진 가동 기준자본 (run_engine 기본과 동일)
+
+
+def _pick_bars(fresh, prior, min_bars=MIN_WEEK_BARS):
+    """단조 선택: 이번 fetch(fresh)와 직전 틱 CSV(prior=마지막 정상) 중 더 완전한 쪽.
+
+    정상 틱은 봉이 계속 누적돼 fresh≥prior → fresh(최신). fetch가 순간 부실(예: yfinance
+    1봉, 월요일 유실 부분 fetch)하면 fresh<prior → prior로 되돌린다. 반환 (bars, reused)."""
+    if len(prior) > len(fresh) and len(prior) >= min_bars:
+        return prior, True
+    return fresh, False
+
+
+def _now_str():
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def _next_monday():
+    t = datetime.date.today()
+    return (t + datetime.timedelta(days=(7 - t.weekday()) % 7 or 7)).strftime("%Y-%m-%d")
+
+
+def _load_engine(name):
+    """엔진 이름 → (base_strat_dict, run_fn).
+
+    engine281은 기본 import. 그 외는 engines/{name}/({name}.py | engine.py)를
+    **파일 경로로 직접 로드**한다 — `from engine import run` 방식은 f_run_engine이
+    이미 engine281을 sys.modules['engine']에 캐시해둬서 조용히 281이 재사용되는
+    사고가 난다(에러 없이 다른 엔진인 척 동작). 고유 모듈명으로 격리해 그 충돌을 차단.
+
+    base_strat는 281 기본값이며, 엔진별 차이는 config.yaml의 `strat:` 오버라이드로 준다."""
+    if name == "engine281":
+        return dict(STRAT281), run281
+    import importlib.util
+    epath = os.path.abspath(os.path.join(HERE, "..", "engines", name))
+    fp = next((os.path.join(epath, f) for f in (f"{name}.py", "engine.py")
+               if os.path.exists(os.path.join(epath, f))), None)
+    if fp is None:
+        raise SystemExit(f"엔진 모듈 없음: {epath}/({name}.py | engine.py)")
+    spec = importlib.util.spec_from_file_location(f"_live_engine_{name}", fp)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mod
+    spec.loader.exec_module(mod)
+    if not hasattr(mod, "run"):
+        raise SystemExit(f"엔진 {name}: run() 없음 ({fp})")
+    return dict(STRAT281), mod.run
+
+
+def _targets(project):
+    projs = all_projects()
+    if project:
+        projs = [p for p in projs if p["name"] == project]
+        if not projs:
+            raise SystemExit(f"라이브 프로젝트 '{project}' 없음 ({LIVE_ROOT}/{project}/info.md)")
+    if not projs:
+        raise SystemExit(f"라이브 프로젝트가 없음: {LIVE_ROOT}/*/info.md 를 먼저 만들 것")
+    return projs
+
+
+def select_one(cfg, monday=None):
+    monday = monday or _next_monday()
+    wp = week_paths(cfg, monday)
+    os.makedirs(wp["week_dir"], exist_ok=True)          # 그 주 월요일 날짜 폴더 신규 생성
+    scr = get_screener(cfg["screener"])
+    top = scr.select_stocks(monday, cap_min=cfg["cap_min"], top_change=cfg["top_change"],
+                            top_value=cfg["top_value"], direction=cfg["direction"],
+                            with_names=True, out_path=wp["top5"])
+    # 선정보고서(selection.html) — 순수 코드 렌더 (agent 불필요)
+    html = selection_report(top, meta=dict(
+        project=cfg["name"], monday=monday, stamp=_now_str(),
+        engine=cfg["engine"], screener=cfg["screener"], cap_min=cfg["cap_min"],
+        top_change=cfg["top_change"], top_value=cfg["top_value"],
+        direction=cfg["direction"], desc=cfg["desc"]))
+    open(wp["selection"], "w", encoding="utf-8").write(html)
+    print(f"[{cfg['name']}] 선정 완료 {len(top)}종목 → {wp['week_dir']}/ "
+          f"(월 {monday}, screener={cfg['screener']}, engine={cfg['engine']}, dir={cfg['direction']})")
+
+
+def update_one(cfg):
+    monday = to_monday(datetime.date.today()).strftime("%Y-%m-%d")   # 이번 주 월요일 = 폴더명
+    wp = week_paths(cfg, monday)
+    if not os.path.exists(wp["top5"]):
+        print(f"[{cfg['name']}] {monday}/_top5.json 없음 — 토요일 select 먼저 필요(스킵)"); return
+    top = json.load(open(wp["top5"]))
+    ws, we = week_bounds(monday)
+    strat, engine_run = _load_engine(cfg["engine"])
+    strat.update(cfg.get("strat") or {})      # config.yaml strat: 오버라이드 (엔진 파라미터)
+    scr = get_screener(cfg["screener"])
+    names = {r["code"]: r.get("name") for r in top}
+    if any(v is None for v in names.values()):
+        names.update(scr.resolve_names([c for c, v in names.items() if v is None]))
+    sections = []
+    for sel in top:
+        code = sel["code"]; name = names.get(code) or code; F0 = sel["fri_close"]
+        sec = run_engine(code, ws, we, F0, strat=strat, engine_run=engine_run)
+        fresh = sec["bars"] if sec else []
+        # 단조 가드: 이번 fetch가 직전 틱 CSV(마지막 정상)보다 짧으면 되돌린다.
+        # (tv 순간 공백→yfinance 1봉 오염, 부분 fetch로 월요일 유실 등을 차단 — 오보 대신 직전 정상 유지)
+        prior = load_bars_csv(os.path.join(wp["bars_dir"], f"{code}_5m.csv"))
+        bars, reused = _pick_bars(fresh, prior)
+        if reused:
+            events, ctx = engine_run(bars, F0, capital=CAPITAL, **strat)
+            sec = dict(code=code, F0=F0, bars=bars, events=events, ctx=ctx,
+                       source="직전스냅샷(재사용)", nbar=len(bars))
+            print(f"  {code} {name}: 이번 fetch {len(fresh)}봉 < 직전 {len(prior)}봉 → 직전 데이터 재사용")
+        if not sec or len(sec["bars"]) < MIN_WEEK_BARS:
+            print(f"  {code} {name}: 5분봉 부족({len(fresh)}봉, 직전 {len(prior)}봉) — 스킵"); continue
+        sec["name"] = name; sec["label"] = f"{name} ({code})"; sec["sel"] = sel
+        sections.append(sec)
+    # [실험19] 갭 크기 자본 필터 (config gap_theta %) — θ3 전방 관찰용.
+    # 갭 = 월요일 첫 5분봉 시가 / F0 − 1. |갭|≥θ 종목만 배분(신호² 가중), 없으면 전액 현금(0%).
+    gap_theta = cfg.get("gap_theta")
+    gap_note = ""
+    gap_qual = []
+    gap_port = 0.0
+    if gap_theta is not None:
+        th = float(gap_theta)
+        for s in sections:
+            gp = (s["bars"][0].o / s["F0"] - 1) * 100 if s.get("bars") else None
+            s["gap_pct"] = gp
+            s["qualified"] = (gp is not None and abs(gp) >= th)
+            tag = (f"갭 {gp:+.1f}% " if gp is not None else "갭 ?") + \
+                  ("✅배분" if s["qualified"] else "❌현금")
+            s["label"] = f"{s['label']} · {tag}"
+        gap_qual = [s for s in sections if s.get("qualified")]
+        if gap_qual:
+            wts = [max(s["sel"].get("chg") or 0.0, 0.0) ** 2 for s in gap_qual]
+            sw = sum(wts)
+            if sw <= 0:
+                gap_port = sum(s["ctx"]["weekly_return"] for s in gap_qual) / len(gap_qual)
+            else:
+                gap_port = sum(w * s["ctx"]["weekly_return"] for w, s in zip(wts, gap_qual)) / sw
+        gap_note = (f"<br><b style='color:#2E7D32'>갭필터 θ{th:g}%</b> · "
+                    f"통과 {len(gap_qual)}/{len(sections)}"
+                    f"{'' if gap_qual else ' → 전액 현금'} · 필터 포트폴리오 "
+                    f"<b>{gap_port*100:+.2f}%</b> (통과분 신호² 가중)")
+    now = datetime.datetime.now()
+    wd = ["월", "화", "수", "목", "금", "토", "일"][now.weekday()]
+    exact = now.strftime(f"%Y-%m-%d ({wd}) %H:%M:%S")
+    # 데이터 최신봉 = 소스가 준 마지막 5분봉 시각 (시계와 다를 수 있음 → 데이터 지연 가시화).
+    # tvDatafeed nologin은 당일 봉이 ~15-20분 늦게 올라옴 → 지연 15분 초과 때만 경고.
+    last_bars = [s["bars"][-1].dt for s in sections if s.get("bars")]
+    data_latest = max(last_bars) if last_bars else "—"
+    stale = ""
+    try:
+        lag = (now - datetime.datetime.strptime(data_latest[:16], "%Y-%m-%d %H:%M")).total_seconds() / 60
+        if lag > 15:
+            stale = f" ⚠️데이터 지연 {int(lag)}분(소스 피드)"
+    except Exception:
+        pass
+    html = build_report(sections, meta=dict(
+        stamp=now.strftime("%Y-%m-%d %H:%M:%S"), live=True, intro=True, refresh=300,
+        doctitle=f"LIVE · {cfg['name']}",
+        h1=f"🔴 LIVE — {cfg['name']} · {cfg['engine']}",
+        subtitle=f"<b style='color:#CC785C'>🕒 분석 시각 {exact}</b> · "
+                 f"<b>📊 데이터 최신봉 {data_latest}</b>{stale} · 5분 갱신<br>"
+                 f"가동주 {monday} · 시총 {cfg['cap_min']/1e8:,.0f}억↑ "
+                 f"{'하락 숏' if cfg['direction']=='down' else '상승 롱'} Top{cfg['top_change']}→{cfg['top_value']}"
+                 + gap_note))
+    os.makedirs(wp["week_dir"], exist_ok=True)
+    open(wp["live"], "w", encoding="utf-8").write(html)
+
+    # 원본 데이터 축적 — 5분봉 CSV(백테스터 포맷) + 엔진 결과 스냅샷 JSON. 매 틱 덮어씀(월→now 전체).
+    os.makedirs(wp["bars_dir"], exist_ok=True)
+    snap = {"stamp": now.strftime("%Y-%m-%d %H:%M:%S"), "monday": monday,
+            "engine": cfg["engine"], "screener": cfg["screener"], "stocks": []}
+    if gap_theta is not None:
+        snap["gap_theta"] = float(gap_theta)
+        snap["gap_portfolio"] = dict(
+            n_qual=len(gap_qual), qualified=[s["code"] for s in gap_qual],
+            ret=gap_port)
+    for s in sections:
+        with open(os.path.join(wp["bars_dir"], f"{s['code']}_5m.csv"), "w", encoding="utf-8") as f:
+            f.write("datetime,open,high,low,close,volume\n")
+            for b in s["bars"]:
+                f.write(f"{b.dt},{b.o},{b.h},{b.l},{b.c},{b.v}\n")
+        ents = [e for e in s["events"] if e.kind == "ENTRY"]
+        exs = [e for e in s["events"] if e.kind == "EXIT"]
+        snap["stocks"].append(dict(
+            code=s["code"], name=s.get("name", s["code"]),
+            weekly_return=s["ctx"]["weekly_return"], F0=s["F0"],
+            gap_pct=s.get("gap_pct"), qualified=s.get("qualified"),
+            direction=(ents[0].direction if ents else 0), n_entries=len(ents),
+            entries=[dict(dt=e.dt, price=e.price, reason=e.reason) for e in ents],
+            exits=[dict(dt=e.dt, marker=e.marker, price=e.price, pnl=e.pnl, reason=e.reason) for e in exs],
+            source=s["source"], nbar=len(s["bars"])))
+    json.dump(snap, open(wp["results"], "w", encoding="utf-8"), ensure_ascii=False, indent=2)
+    print(f"[{cfg['name']}] [{_now_str()}] update → {wp['live']} "
+          f"(+bars/{len(sections)} CSV +results.json, 가동주 {monday})")
+
+
+def select(monday=None, project=None):
+    for cfg in _targets(project):
+        select_one(cfg, monday)
+
+
+def update(project=None):
+    for cfg in _targets(project):
+        update_one(cfg)
+
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--mode", choices=["select", "update"], required=True)
+    ap.add_argument("--project", help="특정 프로젝트만 (기본=report/live/* 전체)")
+    ap.add_argument("--monday", help="select: 가동 주 월요일 지정(기본=다음 월요일)")
+    a = ap.parse_args()
+    if a.mode == "select":
+        select(a.monday, a.project)
+    else:
+        update(a.project)

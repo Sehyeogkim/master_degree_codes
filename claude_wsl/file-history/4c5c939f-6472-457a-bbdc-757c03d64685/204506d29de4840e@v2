@@ -1,0 +1,28 @@
+---
+name: lap-lowonly-hyperemia-54analysis
+description: "54_analysis LAP solid ANSYS on ws1 (cases 0-499) — LOW-only even/odd batch, and the resting-vs-hyperemia PSS sensitivity finding"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: 4c5c939f-6472-457a-bbdc-757c03d64685
+  modified: 2026-07-28T07:53:32.425Z
+---
+
+54_analysis **LAP** solid ANSYS (fibrous-cap PSS) on **ws1 (cvbml01)**, cases **0-499**, started 2026-07-28. Distinct from [[lap-cp-sim-54analysis]] (that = cvbml02, cases 500-999, LAP→CP sequential). Reuses 65's `pymapdl_simulation_ver5_fibrous.py` class (PCG, FC mat_id=3, ×0.1 scale, surface tags 4/5/6, material.json vessel1/lipid2/fc3/cal8), only paths + concurrency-scope changed. Scripts on ws1 `~/project/54_analysis/`: `pymapdl_sim_LAP_0728.py`, `pymapdl_sim_CP_0728.py`, driver `driver_low.sh`. mesh `LAP_mesh/solid_LAP_{i}.msh` (flat), out `ansys_LAP_0728/case_{i}/FC_case_{i}_{peak,low}.vtk`. param `pre_data/parameter_0728.csv` (row idx=case id), `pre_data/material.json`. CP mesh `CP_mesh/solid_CP_{i}.msh` adds ca(mat8) domain but still extract FC(mat3).
+
+**wall BC = RESTING (non-hyperemia).** `post_data/wall_no_hyperemia/{peak,low}/wall_{ph}_case_{i}.csv` (7-col x,y,z,Tx,Ty,Tz,**Pressure=col7**), produced live on harvey by [[steady3d-nohyperemia-54analysis]]. **ws1 has NO route to harvey** → relay `harvey → local WSL → ws1` every 60s via local `scratchpad/wall_relay.sh` (rsync no --delete, accumulate). /MAP reads col7 pressure.
+
+**KEY SCIENTIFIC FINDING (resting vs hyperemia, 41 cases, mean |traction|=√(Tx²+Ty²+Tz²)=PSS-driving load):**
+- **peak (systolic): +1.9%** (0.8–4.7%) → PSS essentially **BC-insensitive / defensible**.
+- **low (diastolic): resting +39%** higher than hyperemia (14–82%).
+- **ΔPSS driver (peak−low): −22%** (5–42%) → ΔPSS **IS BC-sensitive**.
+- Mechanism (confirmed from 1D json Pin/Pout): inlet pressure waveform **identical** (systolic & diastolic Pin same); hyperemia only cuts outlet R (~2.4× sys, ~3.7× dia) → higher flow → big diastolic **distal Pout drop** (case0: resting Pout_dia 114k vs hyper 74k). Systolic ≈ aortic SBP in both. For no_hyp, |traction| ≈ Pressure col7 (213764≈213765).
+- **Old paper PSS** `past_results/PSS_result_expB_type2.csv` (May) = **hyperemia + traction-VECTOR method** (`pymapdl_simulation_ver1/ver2.py` INPUT `apply_traction_{bc}.txt`, SFE PRES 3-comp; wall_expB_new is 6-col Tx,Ty,Tz, NO pressure). `ver5_fibrous` = scalar /MAP col4. Current = scalar /MAP col7. scalar≈traction-vector (viscous shear ≪ pressure), so method diff negligible for PSS; real diff is BC state.
+
+**Decision (user):** compute **LOW-only** under resting (`FC_case_{i}_low.vtk`); reuse existing hyperemia peak PSS (≈resting). Corrected ΔPSS ≈ peak_hyper − low_resting.
+
+**Run design — 2 cases at once via parity split, nproc 20 each:**
+`python pymapdl_sim_LAP_0728.py <start> 500 20 --step 2 --port <p> --suffix <S>`; driver `driver_low.sh <LABEL> <pyargs>` re-loops (resumable, skip if low vtk exists; skip no-mesh; wait if low csv absent) with 120s gap.
+- even: `driver_low.sh LAP_even pymapdl_sim_LAP_0728.py 0 500 20 --step 2 --port 50052 --suffix E`
+- odd:  `driver_low.sh LAP_odd  pymapdl_sim_LAP_0728.py 1 500 20 --step 2 --port 50072 --suffix O`
+`--suffix` → launch jobname `-j LAP{E,O}_{i}_low` at EVERY ANSYS rank level (bash/mpirun/ansysdis251/ansys.e) → **scoped kill `pkill -9 -f '-j LAP{E,O}_'` is unique per process** (never cross-kills the sibling, the Workbench GUI `runwb2`, or the gmsh meshing jobs). Distinct ports avoid gRPC 50052 collision (both defaulting to 50052 was why concurrent LAP+CP earlier failed with "Connection refused"). **pkill self-match gotcha**: a pattern that appears in the ssh shell's own cmdline kills the shell (exit 255 / silent) — use bracket trick `'[p]ymapdl_sim_LAP'`, `'[-]j LAP'`, or kill by PID. `pgrep -c -f PAT` over ssh also self-counts (+1). ws1 load ~90 (128 core) w/ meshing; RAM ~440G free; LAP mesh ~281MB (~1.65M elem), CP ~1GB.

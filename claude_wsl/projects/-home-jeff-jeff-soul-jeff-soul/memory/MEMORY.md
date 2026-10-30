@@ -1,0 +1,7 @@
+- [Daily skill-report cron](daily-skill-report-cron.md) — 매일 6am Windows 스케줄러로 새 스킬 리포트 + 텔레그램
+- [Todo scheduler cron](todo-scheduler-cron.md) — 매일 7am 구글 캘린더 일정 브리핑 + 텔레그램 (whatshouldIdo 스킬)
+- [YouTube digest cron](youtube-digest-cron.md) — 매일 8am Gemini 영상 요약 + Claude 큐레이션 다이제스트 + 텔레그램
+- [Gmail send tool](gmail-send-tool.md) — 실제 메일 발송 (SMTP+앱비번, .claude/tools/send_email.py); MCP은 초안만
+- [PaperFlow MVP](paperflow-mvp.md) — Manuscript Compiler 제품; MVP v0는 별도 레포 paperflow-app (figureai 재사용 X)
+- [AI-news cron → Discord](ai-news-cron-discord.md) — ai_news_cron이 텔레그램→디스코드로 전환; Discord API는 User-Agent 헤더 필수
+- [SV 프런티어 지원](sv-frontier-application.md) — KAIST 실리콘밸리 프런티어 창업도전형 지원; 제출서류·마감 6/24 23:59

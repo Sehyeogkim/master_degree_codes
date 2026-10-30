@@ -1,0 +1,40 @@
+# engine_fable — 281 + 월요일 1회 리버설 (실험)
+
+`engine281`을 통째로 복사한 뒤 **월요일 한정 1회 포지션 전환(리버설 손절)** 규칙만
+추가한 실험 엔진. **281 폴더는 불변**이며 이 폴더는 독립적으로 실험한다.
+
+## 파일
+| 파일 | 역할 |
+|---|---|
+| `engine_fable.py` | engine281/engine.py 복사 + `run(..., flip_monday=False)` 규칙 추가. 자기완결(외부 엔진 import 없음). 모듈명 충돌 회피 위해 파일명 분리. |
+| `strategy_fable.py` | fable 정식 정의 `STRAT_FABLE`(=STRAT281 값 + `flip_monday=True`), `run_fable`. |
+| `test_flip.py` | 회귀(플립 off == 281) + 골든(합성 플립) + 엣지 테스트. |
+
+## fable 규칙 (281 대비 diff)
+281의 모든 규칙(신고점 돌파 진입 · +8% 게이트 후 피보 익절 · 무손절 · 금 15:15 청산 · 비용)
+**그대로**에 아래만 추가:
+
+- **롱 보유 중**, 종가가 **숏 진입 기준선**을 하향 돌파 → 롱 전량 손절 후 즉시 전량 숏 전환.
+- **숏 보유 중**, 종가가 **롱 진입 기준선**을 상향 돌파 → 숏 전량 손절 후 즉시 전량 롱 전환.
+- 전환은 **월요일(그 주 첫 거래일)에만**, **최대 1회**.
+
+**"진입 기준선" = 트레일링 진입신호(대칭 해석).** 281은 진입선이 고정이 아니라 그 주
+신고점/신저점 트레일이므로, 플립 트리거 = 반대방향 트레일 진입신호의 발화를 그대로 재사용:
+- 롱 보유 중 숏신호 = 음봉 & 종가 < run_low & 종가 < short_gate
+- 숏 보유 중 롱신호 = 양봉 & 종가 > run_high & 종가 > long_gate
+
+전환된 포지션은 fresh 포지션으로 281 규칙 그대로 관리(자기 +8% 게이트·무손절·금 15:15).
+`flip_monday=False`(기본) → 281과 **수치 완전 동일**.
+
+## 사용법
+```python
+import sys; sys.path.insert(0, "engines/engine_fable")
+from strategy_fable import run_fable
+from engine_fable import load_bars
+
+bars = load_bars("data/.../{code}_5m.csv")
+events, ctx = run_fable(bars, F0=prior_friday_close)
+print(ctx["weekly_return"], ctx["flips_used"])
+```
+
+back_test 파이프라인 연동은 `back_test/run_all_fable.py` 참조 (run_fn 주입).

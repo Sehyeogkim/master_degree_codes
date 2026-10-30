@@ -1,0 +1,57 @@
+"""p_report (Process 1) — 원자 단위: 종목 + 기간 → 주(월~금)별 섹션 → 1 HTML.
+
+기간을 주 단위로 쪼개 각 주 F0(직전 금종가)로 엔진을 돌리고, 주별 섹션을 하나의 워크스루로 렌더.
+사용: python3 p_report.py 005930 2026-06-01 2026-07-06 [--out out.html] [--live]
+"""
+import os, sys, datetime
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from weekcal import weeks_in_range, week_bounds, prior_week
+from data_source import f0_close
+from f_select_stocks import resolve_names
+from f_run_engine import run_engine, STRAT281
+from f_build_report import build_report
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _now():
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def report(code, start, end, *, name=None, strat=STRAT281, live=False, stamp=None, out_path=None):
+    """종목·기간 → 주별 섹션 HTML 문자열 반환(+out_path 주면 저장)."""
+    name = name or resolve_names([code]).get(code, code)
+    sections = []
+    for m in weeks_in_range(start, end):
+        ws, we = week_bounds(m)
+        _, pf, *_ = prior_week(m)
+        F0, _ = f0_close(code, pf)
+        if F0 is None:
+            continue
+        sec = run_engine(code, ws, we, F0, strat=strat)
+        if not sec:
+            continue
+        sec["name"] = name
+        sec["label"] = f"{m} 주"
+        sec["sel"] = dict(chg=0.0, val=0.0, fri_close=F0, mon_open=F0)   # 임의기간이라 선정통계 없음
+        sections.append(sec)
+    html = build_report(sections, meta=dict(
+        stamp=stamp or _now(), live=live, intro=False,
+        doctitle=f"281 · {name}({code})",
+        h1=f"281 · {name} ({code}) — {start}~{end}",
+        subtitle="기간 주별 281 가동 · F0 = 각 주 직전 금종가"))
+    if out_path:
+        os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+        open(out_path, "w", encoding="utf-8").write(html)
+        print("wrote", os.path.abspath(out_path), f"({len(sections)}주)")
+    return html
+
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("code"); ap.add_argument("start"); ap.add_argument("end")
+    ap.add_argument("--out", default=os.path.join(HERE, "..", "report", "p_report.html"))
+    ap.add_argument("--live", action="store_true")
+    a = ap.parse_args()
+    report(a.code, a.start, a.end, live=a.live, out_path=a.out)

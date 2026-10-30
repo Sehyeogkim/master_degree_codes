@@ -1,0 +1,106 @@
+#!/usr/bin/env python
+"""Print a Notion-flavored-markdown dashboard for the dist meshing batch.
+Reads solid_0723/{batch_status.json, batch_progress.jsonl} + counts msh files."""
+import json
+import os
+import time
+import glob
+
+S = os.path.join(os.path.dirname(os.path.abspath(__file__)), "solid_0723")
+TOTAL = 383
+WORKERS = 4
+
+
+def load():
+    rows = []
+    p = os.path.join(S, "batch_progress.jsonl")
+    if os.path.exists(p):
+        for l in open(p):
+            l = l.strip()
+            if l:
+                try:
+                    rows.append(json.loads(l))
+                except Exception:
+                    pass
+    return rows
+
+
+def fmt_dur(sec):
+    sec = int(sec)
+    h, rem = divmod(sec, 3600)
+    m, _ = divmod(rem, 60)
+    return f"{h}h {m}m" if h else f"{m}m"
+
+
+rows = load()
+done = [r for r in rows if r.get("status") == "done"]
+skipped = [r for r in rows if r.get("status") == "skipped"]
+fails = [r for r in rows if r.get("status") in ("failed", "timeout")]
+
+start = None
+if os.path.exists(os.path.join(S, "batch_status.json")):
+    try:
+        start = json.load(open(os.path.join(S, "batch_status.json"))).get("start_time")
+    except Exception:
+        pass
+elapsed = (time.time() - start) if start else 0
+
+# running = dist_run dirs (case>=1) with no final msh AND not already recorded terminal
+finished_cases = {r.get("case") for r in rows
+                  if r.get("status") in ("done", "failed", "timeout", "skipped")}
+running = []
+for d in glob.glob(os.path.join(S, "case_*", "dist_run")):
+    try:
+        c = int(d.split("case_")[1].split(os.sep)[0])
+    except Exception:
+        continue
+    if c >= 1 and c not in finished_cases and not os.path.exists(os.path.join(d, "solid_type_1_dist.msh")):
+        running.append(c)
+running.sort()
+
+finished = len(done) + len(fails) + len(skipped)
+remaining = TOTAL - finished
+avg = (sum(r.get("seconds", 0) or 0 for r in done) / len(done)) if done else 0
+eta = (remaining * avg / WORKERS) if (avg and remaining > 0) else 0
+
+neg0 = sum(1 for r in done if r.get("neg_jacobian") == 0)
+worst_minq = min([r.get("min_quality") for r in done if r.get("min_quality") is not None], default=None)
+marker_done = os.path.exists(os.path.join(S, "batch_dist.marker"))
+
+now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+L = []
+L.append("# 🥌 HXT meshing — distance field (case 1–383)")
+L.append("")
+badge = "✅ **COMPLETE**" if marker_done else "🟢 running"
+L.append(f"{badge}  ·  **Updated:** {now}  ·  **Elapsed:** {fmt_dur(elapsed)}"
+         + (f"  ·  **ETA:** ~{fmt_dur(eta)}" if (eta and not marker_done) else ""))
+L.append("")
+L.append("## Progress")
+L.append(f"✅ Done **{len(done)}** / {TOTAL}  ·  ❌ Failed **{len(fails)}**  ·  "
+         f"⏳ Running **{len(running)}**  ·  ⏭ Skipped **{len(skipped)}**  ·  Remaining **{remaining}**")
+if done:
+    wq = f"{worst_minq:.4f}" if worst_minq is not None else "n/a"
+    L.append("")
+    L.append(f"Neg-Jacobian = 0 on **{neg0} / {len(done)}** done  ·  worst min-quality: **{wq}**  ·  avg **{fmt_dur(avg)}**/case")
+L.append("")
+L.append("## Currently running")
+L.append(", ".join(f"case_{c}" for c in running[:12]) or "—")
+L.append("")
+L.append("## Recent completions")
+L.append("| case | #elem | min_q | neg-jac | sec |")
+L.append("| --- | --- | --- | --- | --- |")
+for r in done[-10:][::-1]:
+    mq = r.get("min_quality")
+    mq = f"{mq:.4f}" if isinstance(mq, (int, float)) else "—"
+    ne = r.get("num_elements")
+    ne = f"{ne:,}" if isinstance(ne, int) else "—"
+    L.append(f"| {r.get('case')} | {ne} | {mq} | {r.get('neg_jacobian')} | {r.get('seconds')} |")
+if fails:
+    L.append("")
+    L.append("## Failures")
+    for r in fails[-15:]:
+        err = str(r.get("error", r.get("status")))[:120]
+        L.append(f"- **case_{r.get('case')}** ({r.get('status')}): {err}")
+
+print("\n".join(L))

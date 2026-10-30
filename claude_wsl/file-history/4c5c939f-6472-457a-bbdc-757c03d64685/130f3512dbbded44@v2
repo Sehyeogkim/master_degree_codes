@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# One pipeline tick:
+#  1) COPY every completed local case (>=5) not yet on harvey (mesh + tree.dat + xyzts.dat)
+#  2) run qramp_dispatch.sh on harvey (single-node serial submit)
+set -u
+LOCAL=/home/jeff/project/65_final_0723
+REMOTE_BASE=/home/jeff/project/65_final_0723/fluid_0723
+COPY=/tmp/claude-1000/-home-jeff-project-65-final-0723/4c5c939f-6472-457a-bbdc-757c03d64685/scratchpad/copy_case_to_harvey.sh
+MINCASE=5
+
+# cases already present on harvey (have meshing/mesh-complete)
+mapfile -t ONHARVEY < <(ssh -o BatchMode=yes harvey \
+  "for d in $REMOTE_BASE/case_*; do [ -d \"\$d/meshing/mesh-complete\" ] && basename \"\$d\" | sed 's/case_//'; done" 2>/dev/null)
+declare -A HAS; for n in "${ONHARVEY[@]}"; do HAS[$n]=1; done
+
+copied=()
+for d in "$LOCAL"/fluid_0723/case_*; do
+  n=$(basename "$d" | sed 's/case_//')
+  [ "$n" -ge "$MINCASE" ] 2>/dev/null || continue
+  # local completion: tree + xyzts + mesh-complete
+  [ -f "$d/tree.dat" ] && [ -f "$d/xyzts.dat" ] && [ -d "$d/meshing/mesh-complete" ] || continue
+  [ -n "${HAS[$n]:-}" ] && continue   # already on harvey
+  if bash "$COPY" "$n" >/dev/null 2>&1; then copied+=("$n"); fi
+done
+echo "copy: [${copied[*]:-none}]"
+
+# dispatch q_ramp jobs on harvey
+ssh -o BatchMode=yes harvey "bash $LOCAL/qramp_dispatch.sh" 2>&1

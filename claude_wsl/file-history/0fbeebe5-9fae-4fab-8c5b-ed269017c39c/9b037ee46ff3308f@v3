@@ -1,0 +1,12 @@
+"""[shim] 기존 CLI 보존 — 이번 주 라이브 리포트 생성을 p_live.update에 위임.
+
+렌더 로직(week_chart/narrative/skeleton)은 f_build_report.py, 오케스트레이션은 p_live.py로 이동.
+옛 `python3 run_live_report.py`는 _top5.json으로 이번 주 라이브 리포트를 갱신한다.
+새 코드는 p_live(실시간)·p_backtest(과거)·p_report(임의 종목·기간)을 직접 쓸 것.
+"""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from p_live import update
+
+if __name__ == "__main__":
+    update()

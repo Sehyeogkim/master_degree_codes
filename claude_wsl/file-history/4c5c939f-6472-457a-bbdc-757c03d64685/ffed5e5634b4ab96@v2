@@ -1,0 +1,75 @@
+# -*- coding: utf-8 -*-
+"""Speed test: old ver2 (SFE-text pressure + native MAPDL post) on ONE LAP low case,
+using our resting data. Times prep_bc / solve / extract and prints eqv_max so we can
+compare against the /MAP baseline (case 4: prep~30s solve~114s eqv_max 3.92e5).
+
+Usage: sfe2_test.py <case> <nproc> <port>
+Runs in ansys_LAP_0728/case_<c>/_sfe2/ (does not touch production FC vtk).
+"""
+import sys, time, pathlib
+import numpy as np
+HERE = pathlib.Path("/home/jeff/project/54_analysis")
+sys.path.insert(0, str(HERE))
+import pymapdl_simulation_ver2 as V2
+
+case = int(sys.argv[1])
+nproc = int(sys.argv[2]) if len(sys.argv) > 2 else 20
+port = int(sys.argv[3]) if len(sys.argv) > 3 else 50400
+BC = "low"
+
+param = HERE / "pre_data" / "parameter_0728.csv"
+matjson = HERE / "pre_data" / "material.json"
+walldir = HERE / "post_data" / "wall_no_hyperemia"
+wall_csv = walldir / BC / f"wall_{BC}_case_{case}.csv"
+msh = HERE / "LAP_mesh" / f"solid_LAP_{case}.msh"
+exec_dir = HERE / "ansys_LAP_0728" / f"case_{case}" / "_sfe2"
+exec_dir.mkdir(parents=True, exist_ok=True)
+
+print(f"### SFE2 test case {case} nproc {nproc} port {port}")
+T0 = time.time()
+# wall_folder_path = exec_dir so apply_traction_low.txt lands in the scratch dir
+w = V2.PYMAPDL_worker(case, exec_dir, exec_dir, str(param), port_num=port, nproc=nproc)
+
+t = time.time()
+cdb = w.pymapdl_msh_to_cdb(msh, type=1)   # LAP is type1 (tags 1-7)
+w.cdb_path = cdb
+print(f"[time] msh->cdb: {time.time()-t:.2f}s")
+
+t = time.time()
+w.pymapdl_launch()
+print(f"[time] launch: {time.time()-t:.2f}s")
+
+w.bc_type = BC
+w.casename = f"SFE2_case_{case}_{BC}"
+w.mapdl.jobname = w.casename
+
+t = time.time()
+w.pymapdl_prep_bc(wall_csv)                # SFE-text pressure application
+prep_dt = time.time() - t
+print(f"[time] PREP_BC (SFE): {prep_dt:.2f}s")
+
+w.pymapdl_prep_mat(str(matjson))
+
+t = time.time()
+w.pymapdl_solve()                          # PCG tol 1e-5
+solve_dt = time.time() - t
+print(f"[time] SOLVE: {solve_dt:.2f}s")
+
+t = time.time()
+data = w._extract_fc_results()             # native MAPDL post
+out_vtu = exec_dir / f"FC_case_{case}_{BC}.vtu"
+w._build_fc_vtu(data, str(out_vtu))
+extract_dt = time.time() - t
+print(f"[time] EXTRACT+VTU (native post): {extract_dt:.2f}s")
+
+w.safe_mapdl_exit()
+import os
+os.system("pkill -9 -f '[-]j SFE2_' 2>/dev/null; true")
+
+eqv = np.asarray(data["nodal_eqv_stress"], dtype=float)
+eqv = eqv[np.isfinite(eqv)]
+print("\n================ SFE2 RESULT case", case, "================")
+print(f"  msh->cdb + launch + prep + solve + extract = TOTAL {time.time()-T0:.1f}s")
+print(f"  PREP_BC(SFE) = {prep_dt:.2f}s   SOLVE = {solve_dt:.2f}s   EXTRACT(native) = {extract_dt:.2f}s")
+print(f"  eqv_max = {eqv.max():.3e}   eqv_mean = {eqv.mean():.3e}   (/MAP baseline case4: 3.920e5)")
+print(f"  vtu -> {out_vtu} ({out_vtu.stat().st_size/1e6:.1f} MB)")

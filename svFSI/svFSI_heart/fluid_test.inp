@@ -1,0 +1,114 @@
+#----------------------------------------------------------------
+# General simulation parameters
+
+Continue previous simulation: 1
+Number of spatial dimensions: 3
+Number of time steps: 5000
+Time step size: 0.001
+Spectral radius of infinite time step: 0.50
+Searched file name to trigger stop: STOP_SIM
+
+Save results in folder: ./96_FSI_heart_test_01
+Save results to VTK format: 1
+Name prefix of saved VTK files: result
+Increment in saving VTK files: 50
+Start saving after time step: 1
+
+Increment in saving restart files: 50
+Convert BIN to VTK format: 0
+
+Verbose: 1
+Warning: 0
+Debug: 0
+
+#----------------------------------------------------------------
+# Mesh data
+Add mesh: lumen {
+   Mesh file path: ./mesh/mesh-complete.mesh.vtu
+   
+   #Inlet
+   Add face: aorta_inlet {
+      Face file path: ./mesh/mesh-surfaces/inlet.vtp
+   }
+
+   #wall
+   Add face: lumen_wall {
+      Face file path: ./mesh/mesh-surfaces/wall.vtp
+   }
+   
+   #Aorat_outlet
+   Add face: aorta_outlet {
+      Face file path: ./mesh/mesh-surfaces/outlet_aor.vtp
+   }
+
+   Add face: LAD {
+      Face file path: ./mesh/mesh-surfaces/outlet_cor.vtp
+   }
+}
+
+
+#----------------------------------------------------------------
+# Equations
+Add equation: fluid {
+   Coupled: 1
+   Min iterations: 3
+   Max iterations: 10
+   Tolerance: 1e-4
+   Backflow stabilization coefficient: 0.2
+
+   Density: 1.06
+   Viscosity: Constant {Value: 0.04}
+
+   Output: Spatial {
+      Velocity: t
+      Pressure: t
+      Traction: t
+      WSS: t
+   }
+
+   LS type: NS
+   { 
+      #Preconditioner:      FSILS
+      Max iterations:      10
+      NS-GM max iterations: 3
+      NS-CG max iterations: 500
+      Tolerance:           1D-3
+      NS-GM tolerance:     1D-3
+      NS-CG tolerance:     1D-3
+      Krylov space dimension: 50
+   }
+
+   Couple to cplBC: SI {
+      Number of unknowns: 7
+      0D code file path: cplBC/cplBC.exe
+      Unknowns initialization file path: cplBC/foo.ini
+      File name for 0D-3D communication: CPLBC_0D_3D.tmp
+      File name for saving unknowns: cplBC_AllData
+      Number of user-defined outputs: 5
+   }
+
+   #wall Bc
+   Add BC: lumen_wall {
+      Type: Dir
+      Value: 0.0
+   }
+
+
+   #inlet BC
+   Add BC: aorta_inlet {
+      Type: Dir
+      Time dependence: Coupled
+      Impose flux: t
+   }
+
+   #outlet BC
+   Add BC: aorta_outlet {
+      Type: Neu
+      Time dependence: Coupled
+   }
+
+   Add BC: LAD {
+      Type: Neu
+      Time dependence: Coupled
+   }
+}

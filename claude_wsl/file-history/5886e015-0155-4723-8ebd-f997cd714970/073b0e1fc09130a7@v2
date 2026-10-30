@@ -1,0 +1,32 @@
+import sys
+sys.path.insert(0, "/home/jeff/bullet281/pipeline")
+sys.path.insert(0, "/home/jeff/bullet281/engines/engine281")
+import data_source as ds
+from f_run_engine import run_engine, STRAT281, run as run281
+
+CODE = "036930"; START, END = "2026-07-13", "2026-07-18"; F0 = 191900.0
+
+# (1) 전체 bars_5m (tv 메인 → 부실시 yfinance) + 엔진
+bars, src = ds.bars_5m(CODE, START, END)
+print(f"[bars_5m] source={src}  {len(bars)}봉  "
+      f"[{bars[0].dt if bars else '—'} … {bars[-1].dt if bars else '—'}]")
+sec = run_engine(CODE, START, END, F0, strat=STRAT281, engine_run=run281)
+if sec:
+    ents = [e for e in sec["events"] if e.kind == "ENTRY"]
+    exs = [e for e in sec["events"] if e.kind == "EXIT"]
+    print(f"[engine] weekly_return={sec['ctx']['weekly_return']*100:+.2f}%  "
+          f"진입={len(ents)}  청산={len(exs)}")
+    for e in ents:
+        print(f"   ENTRY {e.dt} @ {e.price:,.0f}  dir={e.direction}")
+else:
+    print("[engine] None (스킵)")
+
+# (2) yfinance fallback 단독
+print("\n[yfinance 단독]")
+try:
+    yb = ds._bars_yf(CODE, START, END)
+    days = sorted({b.day for b in yb})
+    print(f"   {len(yb)}봉  일수={len(days)}  월요일있음={'2026-07-13' in days}  "
+          f"[{yb[0].dt if yb else '—'} … {yb[-1].dt if yb else '—'}]  days={days}")
+except Exception as e:
+    print(f"   EXC: {e!r}")

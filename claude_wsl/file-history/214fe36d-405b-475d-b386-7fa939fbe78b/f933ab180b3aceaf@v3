@@ -1,0 +1,208 @@
+"""fable 오케스트레이터 — engine_fable(281 + 월요일 플립)로 백테스트.
+weekly_records_fable.json 생성 → 규칙별 부트스트랩 → fable 단독 리포트 + 281 vs fable 비교.
+사용: python3 run_all_fable.py
+
+281 baseline은 기존 weekly_records.json 재사용(없으면 281로 생성). fable은 동일 주/종목/
+신호/F0/필터에 엔진만 교체 → 순수 '월요일 플립' 효과를 부트스트랩으로 비교."""
+import os, sys, json, datetime, html
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "engines", "engine_fable"))
+
+import allocation, bootstrap, report, build_weekly
+import engine_fable
+from strategy_fable import STRAT_FABLE, STRAT_FABLE_V2, STRAT_FABLE_V3
+
+# 변형: (키, 파일접미, 설명, strat)
+VARIANTS = [
+    ("v1", "",    "월요일 · 최대 1회",       STRAT_FABLE),
+    ("v3", "_v3", "월요일 · 최대 2회",       STRAT_FABLE_V3),
+    ("v2", "_v2", "화요일 10:00까지 · 최대 2회", STRAT_FABLE_V2),
+]
+
+WR_281 = os.path.join(HERE, "weekly_records.json")
+WR_FAB = os.path.join(HERE, "weekly_records_fable.json")
+OUT_FAB = os.path.join(ROOT, "report", "backtest_allocation_bootstrap_fable.html")
+OUT_CMP = os.path.join(ROOT, "report", "backtest_281_vs_fable.html")
+
+
+def _load_or_build_281():
+    if os.path.exists(WR_281):
+        return json.load(open(WR_281, encoding="utf-8"))
+    print("weekly_records.json(281) 없음 → 281 build")
+    recs, stats = build_weekly.build()
+    data = dict(stats=stats, weeks=recs)
+    json.dump(data, open(WR_281, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    return data
+
+
+def _build_fable():
+    print("fable build (engine_fable, flip_monday=True) …")
+    recs, stats = build_weekly.build(strat=STRAT_FABLE, run_fn=engine_fable.run)
+    data = dict(stats=stats, weeks=recs)
+    json.dump(data, open(WR_FAB, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    return data
+
+
+def _results(weeks_recs):
+    """[(key,label,stats,causal)] — 규칙별 부트스트랩."""
+    out = []
+    for key, label, fn in allocation.RULES:
+        weekly = allocation.weekly_returns(weeks_recs, fn)
+        st = bootstrap.analyze(weekly)
+        out.append((key, label, st, key in allocation.CAUSAL))
+    return out
+
+
+def _meta(weeks_recs, stats, title_engine):
+    now = datetime.datetime.now()
+    wd = ["월", "화", "수", "목", "금", "토", "일"][now.weekday()]
+    return dict(stamp=now.strftime(f"%Y-%m-%d ({wd}) %H:%M") + f" · {title_engine}",
+                seed=bootstrap.SEED, B=bootstrap.B,
+                coverage=dict(weeks_used=len(weeks_recs), stock_weeks=stats["stock_weeks"],
+                              kept=stats["kept"], no_daily=stats["no_daily"], bad_f0=stats["bad_f0"]))
+
+
+# ── 281 vs fable 비교 리포트 (기존 톤 재사용) ─────────────────────
+def _cmp_html(res281, resfab, meta):
+    BG, INK, ACCENT, GRID = report.BG, report.INK, report.ACCENT, report.GRID
+    POS, NEG, LOOK = report.POS, report.NEG, report.LOOK
+    esc = html.escape
+    by281 = {k: s for k, l, s, c in res281}
+    rows = []
+    for key, label, sf, causal in resfab:
+        s0 = by281[key]
+        d = sf["obs_mean"] - s0["obs_mean"]
+        dcol = POS if d > 0 else (NEG if d < 0 else INK)
+        tag = "" if causal else ' style="opacity:.72"'
+        badge = "" if causal else ' <span class="look">look-ahead</span>'
+        rows.append(
+            f'<tr{tag}><td><b>{esc(key)}</b>{badge}<br><span class="sub">{esc(label)}</span></td>'
+            f'<td class="num">{s0["obs_mean"]:+.2f}%</td>'
+            f'<td class="num sub2">[{s0["ci_lo"]:+.2f}, {s0["ci_hi"]:+.2f}]</td>'
+            f'<td class="num">{sf["obs_mean"]:+.2f}%</td>'
+            f'<td class="num sub2">[{sf["ci_lo"]:+.2f}, {sf["ci_hi"]:+.2f}]</td>'
+            f'<td class="num big" style="color:{dcol}">{d:+.2f}%p</td>'
+            f'<td class="num">{s0["prob_pos"]*100:.0f}% → {sf["prob_pos"]*100:.0f}%</td></tr>')
+    rows = "".join(rows)
+
+    # causal 규칙 중 최고 대비
+    c281 = max((r for r in res281 if r[3]), key=lambda r: r[2]["obs_mean"])
+    cfab = max((r for r in resfab if r[3]), key=lambda r: r[2]["obs_mean"])
+    eq0 = next(s for k, l, s, c in res281 if k == "equal")
+    eqf = next(s for k, l, s, c in resfab if k == "equal")
+    cov = meta["coverage"]
+
+    return f"""<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>281 vs fable — 월요일 1회 리버설 효과</title>
+<style>
+:root{{color-scheme:light}}*{{box-sizing:border-box}}
+body{{margin:0;background:{BG};color:{INK};font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.6}}
+.wrap{{max-width:1000px;margin:0 auto;padding:32px 22px 72px}}
+h1{{font-size:25px;margin:0 0 4px}}
+.subtitle{{color:#6B5E54;font-size:13.5px;margin-bottom:22px}}
+h2{{font-size:17px;margin:34px 0 12px;border-bottom:2px solid {ACCENT};padding-bottom:5px;display:inline-block}}
+.card{{background:#fff;border:1px solid {GRID};border-radius:10px;padding:18px 20px;margin:14px 0}}
+.warn{{background:#FBF3E9;border-left:3px solid {ACCENT}}}
+ul{{margin:8px 0;padding-left:20px}}li{{margin:5px 0}}
+table{{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px}}
+th,td{{border-bottom:1px solid {GRID};padding:8px 10px;text-align:left}}
+th{{background:#EDE8DD;font-size:12px}}
+td.num{{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}}
+td.big{{font-weight:700;font-size:14px}}
+.sub{{color:#8A7E72;font-size:11px}}.sub2{{color:#8A7E72;font-size:11px}}
+.look{{background:{LOOK};color:#fff;font-size:9.5px;padding:1px 5px;border-radius:4px;vertical-align:middle}}
+.hi{{color:{ACCENT};font-weight:700}}
+code{{background:#EDE8DD;padding:1px 5px;border-radius:4px;font-size:12px}}
+</style></head><body><div class="wrap">
+<h1>281 vs fable — 월요일 1회 리버설 효과</h1>
+<div class="subtitle">동일 주/종목/신호/F0 · 엔진만 교체(fable=281+월요일 플립) · 원자=주 · SEED={meta['seed']} · B={meta['B']:,} · 생성 {esc(meta['stamp'])}</div>
+
+<div class="card warn">
+<b>fable 규칙.</b> 281의 모든 규칙 그대로 + <b>그 주 첫 거래일(월요일)에 한해 최대 1회</b>,
+보유 포지션이 반대방향 트레일 진입신호를 만나면 <b>전량 손절 후 즉시 반대방향 전환</b>.
+전환된 포지션은 281 규칙(자기 +8% 게이트·무손절·금 15:15)으로 관리. 손절을 월요일 1회만 도입한 셈.
+</div>
+
+<h2>핵심 비교</h2>
+<div class="card"><ul>
+<li>최고 causal(281) <span class="hi">{c281[0]} {c281[2]['obs_mean']:+.2f}%</span> →
+    fable <span class="hi">{cfab[0]} {cfab[2]['obs_mean']:+.2f}%</span>
+    (<b>{cfab[2]['obs_mean']-c281[2]['obs_mean']:+.2f}%p</b>).</li>
+<li>균등(equal): 281 {eq0['obs_mean']:+.2f}% → fable {eqf['obs_mean']:+.2f}%
+    (<b>{eqf['obs_mean']-eq0['obs_mean']:+.2f}%p</b>).</li>
+<li>Δ = fable − 281 (같은 주 집합이므로 순수 월요일 플립 효과). 아래 표에서 규칙별 확인.</li>
+</ul></div>
+
+<h2>배분 규칙별 평균주간 net 수익률</h2>
+<div class="card"><table>
+<thead><tr><th rowspan="2">배분 규칙</th><th colspan="2">281</th><th colspan="2">fable</th>
+<th rowspan="2">Δ(fable−281)</th><th rowspan="2">P(&gt;0) 281→fable</th></tr>
+<tr><th>평균주간</th><th>95% CI</th><th>평균주간</th><th>95% CI</th></tr></thead>
+<tbody>{rows}</tbody></table>
+<div class="legend sub" style="margin-top:8px">평균주간 = 관측 net %/주. CI = 부트스트랩 95%. Δ&gt;0(초록)이면 그 규칙에서 월요일 플립이 유리.</div>
+</div>
+
+<h2>커버리지 · 한계</h2>
+<div class="card"><ul>
+<li>관측 <b>{cov['weeks_used']}주</b> · 사용 {cov['kept']} 종목-주(일봉없음 {cov['no_daily']} · F0불일치 {cov['bad_f0']} 제외).</li>
+<li>281 baseline은 <code>weekly_records.json</code>, fable은 <code>weekly_records_fable.json</code>. 두 리포트 모두 동일 파이프라인.</li>
+<li>한계: 같은 주 재조합(과적합 미해결·walk-forward 병행 필요) · 레짐 조건부 · 시장충격 미반영.
+    월요일=첫 거래일 정의(공휴일 시 화요일). 플립은 손절을 월요일 1회로만 제한.</li>
+</ul></div>
+<p class="sub">fable 단독(기존 포맷): <code>report/backtest_allocation_bootstrap_fable.html</code></p>
+</div></body></html>"""
+
+
+def _swmean(weeks):
+    r = [s["r"] for w in weeks for s in weeks[w]]
+    return sum(r) / len(r) * 100
+
+
+def main():
+    d281 = _load_or_build_281()
+    res281 = _results(d281["weeks"])
+    m0 = _swmean(d281["weeks"])
+
+    # 세 변형 records 생성 + 배분규칙별 결과
+    variant_res = {}
+    variant_weeks = {}
+    for key, sfx, desc, strat in VARIANTS:
+        print(f"build {key} ({desc}) …")
+        recs, stats = build_weekly.build(strat=strat, run_fn=engine_fable.run)
+        json.dump(dict(stats=stats, weeks=recs),
+                  open(os.path.join(HERE, f"weekly_records_fable{sfx}.json"), "w", encoding="utf-8"),
+                  ensure_ascii=False, indent=1)
+        variant_res[key] = _results(recs)
+        variant_weeks[key] = recs
+
+    # 4-way 요약 표 (종목-주 평균 + 배분규칙별)
+    print(f"\n종목-주 평균 net: 281 {m0:+.3f}%", end="")
+    for key, sfx, desc, strat in VARIANTS:
+        print(f"  {key} {_swmean(variant_weeks[key]):+.3f}%", end="")
+    print("\n\n배분규칙        281      v1       v3       v2")
+    by281 = {k: s for k, l, s, c in res281}
+    for key, label, fn in allocation.RULES:
+        line = f"  {key:14} {by281[key]['obs_mean']:+7.3f}%"
+        for vk in ("v1", "v3", "v2"):
+            s = next(s for k, l, s, c in variant_res[vk] if k == key)
+            line += f" {s['obs_mean']:+7.3f}%"
+        print(line)
+
+    # v1 단독 리포트(기존 포맷) + 2-way 비교(v1) 유지. 4-way는 make_artifact.py.
+    resfab = variant_res["v1"]
+    meta_fab = _meta(variant_weeks["v1"], dict(stock_weeks=d281["stats"]["stock_weeks"],
+                     kept=d281["stats"]["kept"], no_daily=d281["stats"]["no_daily"],
+                     bad_f0=d281["stats"]["bad_f0"]), "fable v1")
+    os.makedirs(os.path.dirname(OUT_FAB), exist_ok=True)
+    open(OUT_FAB, "w", encoding="utf-8").write(report.build_html(resfab, meta_fab))
+    print("\nwrote", OUT_FAB)
+    open(OUT_CMP, "w", encoding="utf-8").write(_cmp_html(res281, resfab, meta_fab))
+    print("wrote", OUT_CMP)
+    print("4-way 아티팩트: python3 make_artifact.py")
+
+
+if __name__ == "__main__":
+    main()

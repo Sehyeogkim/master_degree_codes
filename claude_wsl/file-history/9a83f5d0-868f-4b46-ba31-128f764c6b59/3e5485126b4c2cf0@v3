@@ -1,0 +1,190 @@
+"""방법론(부트스트랩) + 실험결과(causal 배분)를 하나로 합친 문서 → MD + HTML 각각.
+report/281_causal배분_방법론+결과.{md,html} 생성. run_all과 동일 통계 재계산.
+
+이메일 배포용 요약 문서. 박스플롯은 HTML에만(SVG), MD는 표 중심."""
+import os, json, datetime
+import allocation, bootstrap
+from report import _boxplot, _row, BG, INK, ACCENT, GRID, POS, NEG, LOOK
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+
+
+def _compute():
+    data = json.load(open(os.path.join(HERE, "weekly_records.json"), encoding="utf-8"))
+    weeks_recs, stats = data["weeks"], data["stats"]
+    results = []
+    for key, label, fn in allocation.RULES:
+        weekly = allocation.weekly_returns(weeks_recs, fn)
+        st = bootstrap.analyze(weekly)
+        results.append((key, label, st, key in allocation.CAUSAL))
+    return results, stats, len(weeks_recs)
+
+
+def _stamp():
+    now = datetime.datetime.now()
+    wd = ["월", "화", "수", "목", "금", "토", "일"][now.weekday()]
+    return now.strftime(f"%Y-%m-%d ({wd}) %H:%M")
+
+
+# ── MARKDOWN ────────────────────────────────────────────────────
+def build_md(results, stats, nweeks, stamp):
+    best = max((r for r in results if r[3]), key=lambda r: r[2]["obs_mean"])
+    eq = next(r for r in results if r[0] == "equal")
+    look = next(r for r in results if r[0] == "lookahead_gap4")
+    def row(k, l, s, c):
+        tag = "" if c else " *(look-ahead)*"
+        return (f"| `{k}`{tag}<br>{l} | **{s['obs_mean']:+.2f}%** | "
+                f"[{s['ci_lo']:+.2f}, {s['ci_hi']:+.2f}] | {s['iqr_lo']:+.2f} ~ {s['iqr_hi']:+.2f} | "
+                f"{s['t']:.2f} | {s['prob_pos']*100:.1f}% | {s['ann_median']:+.1f}% |")
+    rows = "\n".join(row(*r) for r in results)
+    return f"""# 281 자본배분 방법론 + causal 부트스트랩 결과
+
+> 생성 {stamp} · 원자=주 · SEED={bootstrap.SEED} · B={bootstrap.B:,} · 관측 {nweeks}주
+
+## 1. 왜 이 실험인가 — look-ahead 문제
+
+옛 281 배분은 **진입 gap⁴**로 5종목에 자본을 나눴다. 그런데 진입은 주중 시점이 종목마다
+다르다(월~목). gap⁴ 가중을 정규화하려면 **5종목 gap을 동시에 알아야** 하는데, 월요일에
+1번 종목에 자본을 넣는 순간 목요일에 뚫릴 4번 종목의 gap을 알 수 없다 →
+**look-ahead(미래참조), 실시간 실행 불가**.
+
+해법: 배분 신호를 **매매주 시작 전 확정되는 '직전주 주간변동율'**로 대체한다.
+`신호 = (직전 금종가 / 직전 월시가 − 1) × 100`. 토요일 선정 시점에 이미 아는 값이라
+완전 **causal**. 이 신호를 어떤 스케일(선형·제곱·⁴제곱·시그모이드…)로 배분에 쓰는 게
+최적인지 비교한다. **종목별 엔진(`run_281`)은 원래부터 causal**(봉 순서 판단) — 고친 곳은
+배분 한 곳뿐, 엔진은 불변.
+
+## 2. 부트스트랩 방법론 (`bootstrap_method.md` 준수)
+
+- **원자 = 주(week).** 5분봉을 재표본하지 않고 **주간 포트폴리오 net 수익률 1스칼라**를 재표본한다.
+  근거: (1) 엔진이 월 진입~금 청산으로 주마다 독립 완결 (2) 주를 통째 뽑아 5종목 상관구조 보존
+  (3) 주간 수익률은 자기상관 약함.
+- **절차(§4.3 평균 CI):** 관측 {nweeks}주 net 벡터에서 {nweeks}개를 복원추출 ×{bootstrap.B:,}
+  (SEED={bootstrap.SEED}) → 평균의 표집분포 → 2.5/97.5% 분위 = **95% CI**, 25/75% = IQR.
+- **시대 무관성:** 주를 뒤섞어 뽑으므로 2020~2026 시대 순서가 파괴된다. 그래도 양수면 실력.
+- **net 기준:** 수수료 1.5bp + 거래세 15bp + 슬리피지 5bp + 정수주 라운딩 반영(gross 아님).
+
+## 3. 결과 ({nweeks}주)
+
+| 배분 규칙 | 평균주간 | 95% CI | IQR | t | P(&gt;0) | 연율(중앙) |
+|---|---|---|---|---|---|---|
+{rows}
+
+**해석**
+1. **옛 "+2.81"의 정체 = look-ahead.** `lookahead_gap4` = **{look[2]['obs_mean']:+.2f}%/주**인데
+   이건 진입 gap을 미리 안다는 가정 → 실행 불가·비교 상한선일 뿐.
+2. **실시간 실행가능한 진짜 엣지 = ~+0.7%/주.** causal 규칙 전부 +0.6~0.73%에 몰려 있고,
+   최고는 **`{best[0]}`({best[1]}) {best[2]['obs_mean']:+.2f}%**. 균등(`equal` {eq[2]['obs_mean']:+.2f}%)
+   대비 {best[2]['obs_mean']-eq[2]['obs_mean']:+.2f}%p — **집중의 이득이 미미**.
+3. **강한 집중(⁴제곱·softmax)은 오히려 손해** — 평균 낮아지고 CI 넓어지고 P(&gt;0) 84%로 하락.
+   직전주 모멘텀은 이번주 수익의 **약한 예측자**라 몰빵하면 분산만 커진다. 최적은 살짝 기운 제곱(²) 정도.
+
+## 4. 커버리지 · 한계
+
+- 커버리지: {stats['stock_weeks']} 종목-주 중 **{stats['kept']} 사용** · 일봉없음 {stats['no_daily']} ·
+  F0 불일치 제외 {stats['bad_f0']}(yfinance 분할조정 vs CREON 원주가 괴리&gt;35%).
+- **F0·직전주변동율은 yfinance 일봉**으로 조달(CREON 5분봉 시가와 일치 확인). CREON엔 일봉/F0 미포함.
+- **한계**: (1) 같은 {nweeks}주 재조합이라 **과적합은 못 고침** → walk-forward 병행 필요
+  (2) 2020~2026 레짐 조건부 (3) 대량주문 시장충격·미체결 미반영
+  (4) look-ahead 열은 실행 불가·상한선.
+
+*상세 박스플롯(95% CI·IQR)은 첨부 HTML 참조.*
+"""
+
+
+# ── HTML ────────────────────────────────────────────────────────
+def build_html(results, stats, nweeks, stamp):
+    best = max((r for r in results if r[3]), key=lambda r: r[2]["obs_mean"])
+    eq = next(r for r in results if r[0] == "equal")
+    look = next(r for r in results if r[0] == "lookahead_gap4")
+    rows = "".join(_row(k, l, s, c) for k, l, s, c in results)
+    plot = _boxplot(results)
+    gap = best[2]["obs_mean"] - look[2]["obs_mean"]
+    return f"""<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>281 자본배분 방법론 + causal 부트스트랩 결과</title>
+<style>
+:root{{color-scheme:light}} *{{box-sizing:border-box}}
+body{{margin:0;background:{BG};color:{INK};font-family:system-ui,-apple-system,"Segoe UI",sans-serif;line-height:1.65}}
+.wrap{{max-width:1000px;margin:0 auto;padding:32px 22px 72px}}
+h1{{font-size:25px;margin:0 0 4px}} .subtitle{{color:#6B5E54;font-size:13.5px;margin-bottom:22px}}
+h2{{font-size:18px;margin:34px 0 12px;border-bottom:2px solid {ACCENT};padding-bottom:5px;display:inline-block}}
+.card{{background:#fff;border:1px solid {GRID};border-radius:10px;padding:18px 20px;margin:14px 0}}
+.warn{{background:#FBF3E9;border-left:3px solid {ACCENT}}}
+.plotwrap{{overflow-x:auto}} ul{{margin:8px 0;padding-left:20px}} li{{margin:6px 0}}
+table{{border-collapse:collapse;width:100%;font-size:13px;margin-top:6px}}
+th,td{{border-bottom:1px solid {GRID};padding:8px 10px;text-align:left}}
+th{{background:#EDE8DD;font-size:12px}}
+td.num{{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}}
+td.big{{font-weight:700;font-size:14px}} .sub{{color:#8A7E72;font-size:11px}}
+.look{{background:{LOOK};color:#fff;font-size:9.5px;padding:1px 5px;border-radius:4px}}
+.ok{{color:{POS};font-weight:700}} .mid{{color:#B8860B}} .low{{color:{NEG}}}
+.legend{{font-size:12px;color:#6B5E54;margin-top:10px}} .legend b{{color:{INK}}}
+code{{background:#EDE8DD;padding:1px 5px;border-radius:4px;font-size:12px}} .hi{{color:{ACCENT};font-weight:700}}
+</style></head><body><div class="wrap">
+<h1>281 자본배분 방법론 + causal 부트스트랩 결과</h1>
+<div class="subtitle">직전주 변동율 신호 · 원자=주 · SEED={bootstrap.SEED} · B={bootstrap.B:,} · 관측 {nweeks}주 · 생성 {stamp}</div>
+
+<h2>1. 왜 이 실험인가 — look-ahead 문제</h2>
+<div class="card warn">
+옛 281 배분은 <b>진입 gap⁴</b>로 5종목에 자본을 나눴다. 그런데 진입은 주중 시점이 종목마다 다르다(월~목).
+gap⁴ 정규화는 <b>5종목 gap을 동시에 알아야</b> 하는데, 월요일에 1번에 넣는 순간 목요일에 뚫릴 4번 gap을
+알 수 없다 → <b>look-ahead(실시간 실행 불가)</b>. 해법: 배분 신호를 <b>매매주 시작 전 확정되는
+'직전주 주간변동율'</b>로 대체(=<code>(직전금종가/직전월시가−1)×100</code>) → 완전 causal.
+종목별 엔진은 원래부터 causal(봉 순서) — 고친 곳은 배분 한 곳뿐, 엔진 불변.
+</div>
+
+<h2>2. 부트스트랩 방법론</h2>
+<div class="card"><ul>
+<li><b>원자 = 주.</b> 5분봉이 아니라 <b>주간 포트폴리오 net 수익률 1스칼라</b>를 재표본. 주마다 월 진입~금 청산으로
+독립 완결 + 주 통째로 뽑아 5종목 상관구조 보존 + 주간은 자기상관 약함.</li>
+<li><b>절차(§4.3):</b> 관측 {nweeks}주 벡터에서 {nweeks}개 복원추출 ×{bootstrap.B:,}(SEED={bootstrap.SEED})
+→ 평균의 표집분포 → 2.5/97.5% = <b>95% CI</b>, 25/75% = IQR.</li>
+<li><b>시대 무관성:</b> 주를 뒤섞어 뽑아 2020~2026 순서를 파괴. 그래도 양수면 실력.</li>
+<li><b>net 기준:</b> 수수료 1.5 + 거래세 15 + 슬리피지 5 bp + 정수주 라운딩.</li>
+</ul></div>
+
+<h2>3. 결과 ({nweeks}주)</h2>
+<div class="card"><div class="plotwrap">{plot}</div>
+<div class="legend">◆ 관측 평균 · 박스 = <b>IQR</b>(25~75%) · whisker = <b>95% CI</b> · 가운데선 = 부트스트랩 중앙값 ·
+<b style="color:{POS}">초록</b>/<b style="color:{NEG}">빨강</b> = causal(+/−) · <b style="color:{LOOK}">회색 점선</b> = look-ahead 참고상한.</div>
+</div>
+<div class="card"><table>
+<thead><tr><th>배분 규칙</th><th>평균주간</th><th>95% CI</th><th>IQR</th><th>t</th><th>P(&gt;0)</th><th>연율(중앙)</th></tr></thead>
+<tbody>{rows}</tbody></table></div>
+
+<h2>4. 핵심 결론</h2>
+<div class="card"><ul>
+<li><b>옛 "+2.81"의 정체 = look-ahead.</b> <code>lookahead_gap4</code> = <span class="hi">{look[2]['obs_mean']:+.2f}%/주</span>는
+진입 gap을 미리 안다는 가정 → 실행 불가·상한선.</li>
+<li><b>실시간 실행가능한 진짜 엣지 = ~+0.7%/주.</b> 최고 causal = <span class="hi">{best[0]} ({best[1]})</span>
+{best[2]['obs_mean']:+.2f}%, 균등({eq[2]['obs_mean']:+.2f}%) 대비 <b>{best[2]['obs_mean']-eq[2]['obs_mean']:+.2f}%p</b> — 집중 이득 미미.</li>
+<li><b>강집중(⁴제곱·softmax)은 손해</b> — 평균↓·CI↑·P(&gt;0) 84%로 하락. 직전주 모멘텀은 이번주의 약한 예측자.</li>
+<li><b>Causal의 대가:</b> 최고 causal은 look-ahead 상한 대비 <b>{gap:+.2f}%p</b>. 실행가능성의 값어치.</li>
+</ul></div>
+
+<h2>5. 커버리지 · 한계</h2>
+<div class="card"><ul>
+<li>커버리지: {stats['stock_weeks']} 종목-주 중 <b>{stats['kept']} 사용</b> · 일봉없음 {stats['no_daily']} · F0 불일치 제외 {stats['bad_f0']}.</li>
+<li><b>F0·직전주변동율은 yfinance 일봉</b>으로 조달(CREON 5분봉 시가와 일치). CREON엔 일봉/F0 미포함.</li>
+<li><b>한계:</b> (1) 같은 {nweeks}주 재조합 → 과적합 미해결, walk-forward 병행 필요 (2) 레짐 조건부 (3) 시장충격·미체결 미반영 (4) look-ahead는 상한선.</li>
+</ul></div>
+</div></body></html>"""
+
+
+def generate():
+    results, stats, nweeks = _compute()
+    stamp = _stamp()
+    md = build_md(results, stats, nweeks, stamp)
+    hh = build_html(results, stats, nweeks, stamp)
+    md_path = os.path.join(ROOT, "report", "281_causal배분_방법론+결과.md")
+    html_path = os.path.join(ROOT, "report", "281_causal배분_방법론+결과.html")
+    open(md_path, "w", encoding="utf-8").write(md)
+    open(html_path, "w", encoding="utf-8").write(hh)
+    return md_path, html_path, results
+
+
+if __name__ == "__main__":
+    m, h, _ = generate()
+    print("wrote", m); print("wrote", h)

@@ -1,0 +1,33 @@
+"""fable2 정식 전략 정의 — 채택후보 플립(d1~09:30x1) + 익절 사다리 조건부 리셋.
+
+fable2 v1 = 281 규칙
+  + 리버설 플립: 월요일 09:30까지 · 최대 1회 (실험 15 채택후보 d1~09:30x1)
+  + 익절 사다리 리셋: 첫 익절 시점 피보 극값 대비 새 극값이 tp_reset_pct(3%) 이상
+    추가 갱신 시 익절 순서 초기화 — 남은 물량을 새 피보 1단계부터 재분할 익절.
+
+tp_reset_pct=None 이면 engine_fable(d1~09:30x1)과 동일, flip까지 끄면 281과 동일.
+"""
+from engine_fable2 import run
+
+# 281 공통 베이스 + 채택후보 플립 창
+_COMMON = dict(
+    tp_gate=0.08,               # 익절 활성화 게이트: 고점이익 진입가 대비 +8%
+    entries=("trail",),         # 신고점 돌파(모멘텀)만
+    stop_mode="none",           # 무손절 (금 15:15 + 플립만)
+    fee=0.00015, slip=0.0005, tax=0.0015,   # 편도 비용
+    round_shares=True,          # 정수주
+    flip_monday=True, flip_days=1, flip_cutoff_hm="09:30", flip_max=1,  # d1~09:30x1
+)
+
+# v1: 사다리 리셋 임계 3%
+STRAT_FABLE2_V1 = dict(_COMMON, tp_reset_pct=0.03)
+
+
+def strat_with_reset(pct):
+    """tp_reset_pct 스윕용 — pct=None 이면 리셋 없음(플립만)."""
+    return dict(_COMMON, tp_reset_pct=pct)
+
+
+def run_fable2(bars, F0, capital=10_000_000.0):
+    """종목-주 1건에 fable2 v1 적용 → (events, ctx)."""
+    return run(bars, F0, capital=capital, **STRAT_FABLE2_V1)

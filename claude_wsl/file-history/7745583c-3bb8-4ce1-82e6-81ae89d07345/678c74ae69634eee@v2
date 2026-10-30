@@ -1,0 +1,45 @@
+import numpy as np, pyvista as pv
+W = "/home/jeff/project/54_analysis/mesh_independent_test_solid/results"
+Z = 0.02
+PCTS = [90, 95, 99]
+
+def gz(m):
+    g = np.asarray(m.point_data["Group"]) == 5
+    X = np.asarray(m.points); wz = X[g][:, 2]
+    return np.where(g & (X[:, 2] > wz.min() + Z) & (X[:, 2] < wz.max() - Z))[0]
+
+def vals(path):
+    m = pv.read(path); i = gz(m)
+    s = np.asarray(m.point_data["Principal_stress"], float)[i]
+    out = {f"p{p}": np.nanpercentile(s, p) for p in PCTS}
+    out["max"] = np.nanmax(s); out["n"] = len(i)
+    return out
+
+# lineup: coarse / PRODUCTION mesh / fine ; reference = finest 6.81e6
+grids = [
+    ("1.07e6  h0.0625", "FC_case_961_a6_0.0625_{bc}.vtu"),
+    ("2.22e6  PRODUCTION", "FC_case_961_prod_{bc}.vtu"),
+    ("3.61e6  h0.04", "FC_case_961_a6_0.04_{bc}.vtu"),
+    ("6.81e6  finest(ref)", "FC_case_961_a6_0.032_{bc}.vtu"),
+]
+
+import os
+for bc, name in (("peak", "SYSTOLIC"), ("low", "DIASTOLIC")):
+    rows = []
+    for label, pat in grids:
+        f = f"{W}/{pat.format(bc=bc)}"
+        rows.append((label, vals(f) if os.path.exists(f) else None))
+    ref = rows[-1][1]
+    print(f"===== {name} cap max-principal stress (kPa / % vs finest) =====")
+    hdr = f"{'grid':22s}{'cap_n':>8s}" + "".join(f"{c:>13s}" for c in ["p90", "p95", "p99", "max"])
+    print(hdr)
+    for label, v in rows:
+        if v is None:
+            print(f"{label:22s}{'--- not solved yet ---':>50s}")
+            continue
+        cells = []
+        for c in ["p90", "p95", "p99", "max"]:
+            d = abs(v[c] - ref[c]) / ref[c] * 100 if ref else float("nan")
+            cells.append(f"{v[c]*1e-4:6.1f}/{d:4.2f}%")
+        print(f"{label:22s}{v['n']:8d}" + "".join(f"{c:>13s}" for c in cells))
+    print()

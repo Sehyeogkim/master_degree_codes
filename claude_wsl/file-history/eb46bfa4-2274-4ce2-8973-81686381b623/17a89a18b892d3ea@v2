@@ -1,0 +1,42 @@
+#!/bin/bash
+#SBATCH --job-name=mi_fluid
+#SBATCH --partition=harvey01
+#SBATCH --nodes=1
+#SBATCH --ntasks=24
+#SBATCH --time=04:00:00
+#SBATCH --output=/home/jeff/project/54_analysis/mesh_independent_test_fluid/logs/mi_%j.out
+#SBATCH --error=/home/jeff/project/54_analysis/mesh_independent_test_fluid/logs/mi_%j.err
+#
+# Fluid mesh-independence, case 0. GRID env 로 격자 하나를 받아 PRE -> SOLVE(peak,low) -> POST.
+# nproc 은 3개 격자 모두 24 로 통일 (svpost 가 <NP>-procs_case 를 읽으므로).
+set -uo pipefail
+
+source /HL8/HMod/modules/5.1.1/init/bash
+module purge
+module load cmake/3.25.2 gcc/11.3.0 mpi/gcc-11.3.0/openmpi-4.1.5
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib64/:/home/jkim/repos/svSolverPrivate/build/svSolver-build/bin/:/home/jkim/repos/svSolverPrivate/build/svSolver-build/lib/:/opt/cvbml/libraries/VTK-8.2.0/lib64/
+
+BASE=/home/jeff/project/54_analysis
+MI=$BASE/mesh_independent_test_fluid
+PY=/home/jeff/miniconda3/bin/python3
+SV=/opt/cvbml/repos/svSolverPrivate/build/svSolver-build/bin/svsolver
+NP=24
+export NP
+export PHASES="${PHASES:-peak low}"
+
+: "${GRID:?need GRID}"
+echo "[mi] GRID=$GRID NP=$NP PHASES='$PHASES' node=$SLURM_JOB_NODELIST start=$(date -Is)"
+
+$PY -u $MI/../mi_steady_pre.py "$GRID" || { echo "PRE failed"; exit 1; }
+
+for ph in $PHASES; do
+  CD=$MI/mesh/$GRID/steady_3d/$ph
+  [ -f "$CD/solver.inp" ] || { echo "[$GRID/$ph] no solver.inp"; continue; }
+  [ -d "$CD/${NP}-procs_case" ] && rm -rf "$CD/${NP}-procs_case"
+  cd "$CD" || continue
+  echo "==== [$GRID/$ph] SOLVE $(date +%T) ===="
+  mpirun -np $NP $SV solver.inp
+done
+
+$PY -u $MI/../mi_steady_post.py "$GRID"
+echo "[mi] GRID=$GRID DONE $(date -Is)"

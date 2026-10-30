@@ -1,0 +1,5 @@
+{
+    "simmetrix": {
+    "meshing": "/opt/cvbml/repos/SyntheticTreeGenerator/build/apps/MeshGenerator/mesh_generator",
+    "license": "/opt/cvbml/repos/SyntheticTreeGenerator/apps/MeshGenerator/floating.lic"}
+}

@@ -1,0 +1,186 @@
+"""
+Radius-selection criteria beyond the median: tail quantiles, critical-node location
+stability, region-classification agreement, near-tie diagnostic, and r/h ratio.
+"""
+import numpy as np
+import pandas as pd
+import pyvista as pv
+from scipy.spatial import cKDTree
+from scipy.stats import spearmanr
+
+D = "/home/jeff/project/66_post_processing_journal/LAP_data"
+SOLID = "/home/jeff/project/65_final_0723/solid_0723"
+PARAM = "/home/jeff/project/65_final_0723/pre_data/parameter.csv"
+
+RAD = [("r0005", 0.005), ("r001", 0.010), ("r0015", 0.015), ("r002", 0.020)]
+PAIRS = [("r0005", "r001"), ("r001", "r0015"), ("r0015", "r002")]
+
+d = {s: pd.read_csv(f"{D}/PSS_result_0727_{s}.csv").set_index("case_id").sort_index()
+     for s, _ in RAD}
+par = pd.read_csv(PARAM)
+
+BAR = "=" * 104
+
+
+def q(x, p):
+    return float(np.percentile(np.asarray(x, dtype=float), p))
+
+
+# ---------------------------------------------------------------- A. magnitude
+print(BAR)
+print("A. RELATIVE CHANGE IN VI: median (current criterion) vs tail quantiles")
+print(BAR)
+print(f"{'pair':<16}{'metric':<8}{'median':>9}{'mean':>9}{'p75':>9}{'p90':>9}{'p95':>9}{'max':>9}")
+for a, b in PAIRS:
+    for lbl, col in (("PSS", "PSS_Principal"), ("dPSS", "del_PSS_Principal")):
+        rel = ((d[b][col] - d[a][col]).abs() / d[a][col].abs() * 100).values
+        print(f"{a+'->'+b:<16}{lbl:<8}{np.median(rel):>8.2f}%{rel.mean():>8.2f}%"
+              f"{q(rel,75):>8.2f}%{q(rel,90):>8.2f}%{q(rel,95):>8.2f}%{rel.max():>8.2f}%")
+
+print()
+print(BAR)
+print("B. RANK PRESERVATION (Spearman) — magnitude ranking across the 384 samples")
+print(BAR)
+for a, b in PAIRS:
+    sp, _ = spearmanr(d[a].PSS_Principal, d[b].PSS_Principal)
+    sd, _ = spearmanr(d[a].del_PSS_Principal, d[b].del_PSS_Principal)
+    print(f"{a+'->'+b:<16}Spearman PSS = {sp:.4f}   Spearman dPSS = {sd:.4f}")
+
+# ---------------------------------------------------------------- C. location
+print()
+print(BAR)
+print("C. CRITICAL-NODE LOCATION SHIFT (3-D euclidean distance between the two "
+      "critical nodes, cm)")
+print(BAR)
+print(f"{'pair':<16}{'median':>9}{'mean':>9}{'p75':>9}{'p90':>9}{'p95':>9}"
+      f"{'>0.05cm':>10}{'>0.10cm':>10}")
+dist3d = {}
+for a, b in PAIRS:
+    dv = np.sqrt(sum((d[b][f"PSS_crit_{k}"] - d[a][f"PSS_crit_{k}"]) ** 2
+                     for k in "xyz")).values
+    dist3d[(a, b)] = dv
+    print(f"{a+'->'+b:<16}{np.median(dv):>9.4f}{dv.mean():>9.4f}{q(dv,75):>9.4f}"
+          f"{q(dv,90):>9.4f}{q(dv,95):>9.4f}"
+          f"{100*(dv>0.05).mean():>9.1f}%{100*(dv>0.10).mean():>9.1f}%")
+
+# region classification: proximal / throat / distal, relative to z_MLA
+# throat band = +-25% of the lesion half-length
+print()
+print(BAR)
+print("D. RUPTURE-REGION CLASSIFICATION AGREEMENT")
+print("   region = proximal / throat / distal, throat band = |z_crit - z_MLA| <= "
+      "0.25 * (lesion_length/2)")
+print(BAR)
+L = par["lesion_length"].values          # cm, indexed by case_id
+half = L / 2.0
+
+
+def region(df):
+    dz = (df["PSS_crit_z"] - df["z_MLA"]).values
+    band = 0.25 * half
+    r = np.where(dz < -band, "proximal", np.where(dz > band, "distal", "throat"))
+    return r
+
+
+def side(df):
+    dz = (df["PSS_crit_z"] - df["z_MLA"]).values
+    return np.where(dz < 0, "proximal", "distal")
+
+
+reg = {s: region(d[s]) for s, _ in RAD}
+sid = {s: side(d[s]) for s, _ in RAD}
+print(f"{'pair':<16}{'3-region agree':>16}{'prox/dist side agree':>24}")
+for a, b in PAIRS:
+    print(f"{a+'->'+b:<16}{100*(reg[a]==reg[b]).mean():>15.1f}%"
+          f"{100*(sid[a]==sid[b]).mean():>23.1f}%")
+print()
+print("   region mix per radius:")
+for s, rr in RAD:
+    u, c = np.unique(reg[s], return_counts=True)
+    print(f"     r={rr}: " + "  ".join(f"{k}={v}" for k, v in zip(u, c)))
+
+print()
+print(BAR)
+print("E. CIRCUM_INDEX SHIFT")
+print(BAR)
+print(f"{'pair':<16}{'median':>9}{'mean':>9}{'p90':>9}{'p95':>9}{'>0.1':>9}")
+for a, b in PAIRS:
+    dc = (d[b].PSS_circum_index - d[a].PSS_circum_index).abs().values
+    print(f"{a+'->'+b:<16}{np.median(dc):>9.4f}{dc.mean():>9.4f}{q(dc,90):>9.4f}"
+          f"{q(dc,95):>9.4f}{100*(dc>0.1).mean():>8.1f}%")
+
+# ------------------------------------------------- F. near-tie diagnostic + r/h
+TOP_PCT, Z_EPS = 95.0, 0.02
+
+
+def load_case(ci):
+    p = pv.read(f"{SOLID}/case_{ci}/ansys_results_dist_0723/FC_case_{ci}_peak.vtk")
+    l = pv.read(f"{SOLID}/case_{ci}/ansys_results_dist_0723/FC_case_{ci}_low.vtk")
+    wall = np.asarray(p.point_data["WALL_IN_FC"]).astype(bool)
+    pts = np.asarray(p.points)
+    wz = pts[wall][:, 2]
+    mz = (pts[:, 2] > wz.min() + Z_EPS) & (pts[:, 2] < wz.max() - Z_EPS)
+    idx = np.where(wall & mz)[0]
+    sp = np.asarray(p.point_data["Principal_stress"], dtype=np.float64)[idx]
+    return pts[idx], sp
+
+
+def sphere_avg_at(points_sub, stress_sub, tree, centre, radius):
+    nb = tree.query_ball_point(centre, radius)
+    if not nb:
+        return np.nan
+    v = stress_sub[nb]
+    return np.nan if np.isnan(v).all() else float(np.nanmean(v))
+
+
+print()
+print(BAR)
+print("F. NEAR-TIE DIAGNOSTIC — for cases whose critical node MOVES between "
+      "r=0.010 and r=0.015,")
+print("   is the r=0.015 winner nearly tied at r=0.010?  (i.e. is the jump "
+      "inherent bimodality,")
+print("   not a radius artefact?)   metric = sphere-avg stress deficit at r=0.010")
+print(BAR)
+moved = np.where(dist3d[("r001", "r0015")] > 0.05)[0]
+print(f"   cases with >0.05 cm shift: {len(moved)} / 384 "
+      f"({100*len(moved)/384:.1f}%)")
+deficits = []
+for ci in moved:
+    pts_sub, s_sub = load_case(int(ci))
+    tree = cKDTree(pts_sub)
+    c_a = d["r001"].loc[ci, ["PSS_crit_x", "PSS_crit_y", "PSS_crit_z"]].values.astype(float)
+    c_b = d["r0015"].loc[ci, ["PSS_crit_x", "PSS_crit_y", "PSS_crit_z"]].values.astype(float)
+    va = sphere_avg_at(pts_sub, s_sub, tree, c_a, 0.010)
+    vb = sphere_avg_at(pts_sub, s_sub, tree, c_b, 0.010)
+    if va and not np.isnan(va) and not np.isnan(vb):
+        deficits.append(100.0 * (va - vb) / va)
+deficits = np.array(deficits)
+print(f"   evaluated {len(deficits)} cases")
+print(f"   stress deficit of the runner-up location, measured at r=0.010:")
+print(f"     median={np.median(deficits):.2f}%  mean={deficits.mean():.2f}%  "
+      f"p75={q(deficits,75):.2f}%  p90={q(deficits,90):.2f}%  max={deficits.max():.2f}%")
+for thr in (1, 2, 5, 10):
+    print(f"     deficit < {thr}%  (near-tie): {100*(deficits<thr).mean():.1f}% of moved cases")
+
+print()
+print(BAR)
+print("G. LOCAL MESH SIZE h AND r/h  (nearest-neighbour spacing of valid FC wall "
+      "nodes, 40-case sample)")
+print(BAR)
+sample = list(range(0, 384, 10))
+hs = []
+for ci in sample:
+    pts_sub, s_sub = load_case(ci)
+    ok = ~np.isnan(s_sub)
+    pv_ok = pts_sub[ok]
+    tr = cKDTree(pv_ok)
+    dd, _ = tr.query(pv_ok, k=2)
+    hs.append(np.median(dd[:, 1]))
+hs = np.array(hs)
+print(f"   h (median nn-spacing of stress-carrying wall nodes) over {len(hs)} cases:")
+print(f"     median={hs.mean():.5f} cm = {10000*np.median(hs):.1f} um   "
+      f"min={hs.min():.5f}  max={hs.max():.5f} cm")
+h_ref = float(np.median(hs))
+print(f"   r/h using h = {h_ref:.5f} cm:")
+for s, rr in RAD:
+    print(f"     r={rr} cm ({rr*10:.2f} mm) -> r/h = {rr/h_ref:.2f}")

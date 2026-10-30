@@ -1,0 +1,30 @@
+"""
+Mesh ONE case (default 438) on this workstation, from its lumen.stp, using the
+reference LumenMeshingCase pipeline (stp -> vtk -> vtp -> Simmetrix -> mesh-complete
++ tree.dat/xyzts.dat). Output: 54_analysis/fluid_data/case_<i>/.
+
+Usage: python -u mesh_case_438.py [grid_size] [case_id]
+       (grid_size default 0.015, case_id default 438)
+"""
+import sys
+from pathlib import Path
+
+HERE = Path("/home/jeff/project/54_analysis")
+sys.path.insert(0, str(HERE))
+from lumen_Simmetrix_meshing import LumenMeshingCase
+
+grid = float(sys.argv[1]) if len(sys.argv) > 1 else 0.015
+cid = int(sys.argv[2]) if len(sys.argv) > 2 else 438
+
+stp = HERE / "solid_data" / f"case_{cid}" / "lumen.stp"
+out = HERE / "fluid_data" / f"case_{cid}"
+par = HERE / "pre_data" / "parameter_0728.csv"
+cfg = HERE / "pre_data" / "solver_path.json"
+
+print(f"[mesh] case {cid}  grid={grid}  stp={stp}", flush=True)
+case = LumenMeshingCase(cid, out, par, cfg)
+case.run(stp_path=stp, grid_size=grid)
+mc = out / "meshing" / "mesh-complete"
+print(f"MESH_DONE case={cid} grid={grid} mesh_complete_exists={mc.exists()}", flush=True)
+if mc.exists():
+    print("mesh-complete contents:", [p.name for p in mc.iterdir()][:20], flush=True)

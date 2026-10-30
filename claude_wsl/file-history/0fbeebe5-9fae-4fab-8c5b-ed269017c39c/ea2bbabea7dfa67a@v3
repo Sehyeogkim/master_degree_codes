@@ -1,0 +1,101 @@
+# bullet281
+
+한국주식 **5분봉 주간 모멘텀 퀀트 전략**을 실험·설계·검증하는 저장소.
+핵심 엔진 **281**(CREON 5년 백테스트 기준 net 평균 **+2.81%/주**)을 베이스로,
+파생 실험을 돌리고 실시간 주간 파이프라인으로 모의 운영한다.
+
+## 무엇을 하는가
+
+1. **엔진 실험** — 과거 5분봉 데이터로 bootstrap(시대 흐름 배제, 주간 변동성만 사용) 백테스트를 돌려
+   "고집스러운(stubborn)" 트레이딩 규칙을 다듬는다.
+2. **실시간 시스템** — 매주 주말에 종목을 선정하고, 월~금 5분봉에 281 엔진을 가동해
+   진입·익절·청산을 추적하는 워크스루 리포트를 만든다.
+
+## 디렉토리 구조
+
+```
+bullet281/
+├── engines/            ★ 검증된 엔진들 (독립 폴더 단위)
+│   └── engine281/         281 핵심 로직 — 이 폴더의 README가 규칙 전문
+│       ├── engine.py        순수 로직 엔진 (종목-주 1건 → 이벤트·수익률). 외부 의존성 없음
+│       ├── strategy281.py   281 정식 정의 (엔진 설정 + 포트폴리오 배분)
+│       └── chart.py         보고서용 캔들 SVG 렌더러
+│
+├── pipeline/           ★ 3 함수 + 3 프로세스 파이프라인
+│   ├── weekcal.py           순수 날짜 계산 (target 월요일 → 주 경계·직전주·F0일)
+│   ├── f_select_stocks.py   [F1] select_stocks(target_monday) 종목선정 → [{code,chg,val,fri_close(=F0),..}]
+│   ├── f_run_engine.py      [F2] run_engine(code,start,end,F0) 5분봉+엔진 → 섹션 번들
+│   ├── f_build_report.py    [F3] build_report(sections,meta) 순수코드 HTML 렌더
+│   ├── p_report.py          [P1] (종목,기간) → 주별 섹션 → 1 html
+│   ├── p_backtest.py        [P2] 과거주 선정+검증 → 1 html
+│   ├── p_live.py            [P3] 실시간 --mode select|update (cron 5분 갱신)
+│   ├── data_source.py       bars_5m/f0_close (tvDatafeed 메인 + yfinance fallback)
+│   └── {select_stocks,run_live_report}.py   옛 CLI 보존 shim
+│
+├── data/               백테스트 원본 데이터 (CREON API, .gitignore — 로컬 전용)
+│   └── data_creon_API/      주별 5·10분봉 CSV + 수집 manifest
+│
+├── experiment_report/  엔진 실험 기록 (날짜별 .md, 한글 자유양식)
+│                         어떤 엔진→어떤 엔진으로 왜 바꿨고 주간수익률이 어떻게 변했는지
+│
+├── report/             산출 리포트
+│   ├── live/               live-281-thisweek.html (이번 주 라이브 워크스루)
+│   └── workflow/           workflow-overall.md/html (전체 방법론 문서)
+│
+├── .claude/            에이전트·스킬·워크플로우 정의
+│   ├── workflows/         live-weekly-pipeline.md (주간 파이프라인 실행 절차)
+│   ├── skills/            차트/검증 HTML 렌더링 스킬
+│   └── agents/            종목 스크리너 등 서브에이전트
+│
+└── claude.md           프로젝트 목표·작업 계획 (한글)
+```
+
+★ = 코드가 사는 핵심 폴더.
+
+## 281 규칙 (한눈에)
+
+- **선정**: 진입 갭 `방향×(진입가/F0−1) ≥ 3%` 종목만. 갭⁴ 가중, 통과종목 집중, 무레버.
+- **진입**: 그 주 신고점/신저점을 새로 돌파하는 5분봉 **종가**로 롱/숏.
+- **익절**: 고점이익 **+8%** 도달 후, 피보 되돌림 0.75/0.5/0.25 통과 시 1/3·2/3·전량 분할 청산.
+- **손절**: 없음 (불리해도 홀드).
+- **청산**: **금요일 15:15 전량** — 손실은 이 강제청산으로만 실현(한 주로 제한).
+- **F0** = 전주 마지막 거래일(금) 종가.
+
+자세한 규칙·수치는 [`engines/engine281/README.md`](engines/engine281/README.md) 참고.
+
+## 빠른 시작
+
+**엔진 직접 호출:**
+```python
+import sys; sys.path.insert(0, "engines/engine281")
+from strategy281 import run_281, portfolio_281
+from engine import load_bars
+
+bars = load_bars("data/.../{code}_5m.csv")
+events, ctx = run_281(bars, F0=prior_friday_close)
+print(ctx["weekly_return"])          # 종목-주 net 수익률
+```
+
+**3 프로세스:**
+```bash
+cd pipeline
+python3 p_report.py 005930 2026-06-01 2026-07-06    # 임의 종목·기간 → 주별 워크스루
+python3 p_backtest.py 2026-06-29                    # 과거주 선정+검증 → 1 html
+python3 p_live.py --mode select                     # 주말: 다음주 종목선정
+python3 p_live.py --mode update                     # 평일 5분마다(cron): 라이브 갱신
+```
+전체 절차: [`.claude/workflows/live-weekly-pipeline.md`](.claude/workflows/live-weekly-pipeline.md)
+
+## 데이터 소스
+
+| 목적 | 도구 | 상태 |
+|---|---|---|
+| 시총/스크리닝 | tradingview-screener | ✅ |
+| 일봉·5분봉 | yfinance (`{6자리}.KS`, UTC→KST 변환) | ✅ |
+| 과거 백테스트 | CREON Plus API (Windows 수집) | ✅ |
+
+## 주의
+
+- 백테스트 수치(+2.81%)는 **낙관 상한** — forward OOS(TradingView 13주)에선 더 약하다.
+- 라이브 가격은 yfinance 기준으로 TradingView와 미세차 가능 → 운영 전 공식 API 교차검증 권장.
+- `data/`는 대용량이라 git 추적 제외(`.gitignore`).

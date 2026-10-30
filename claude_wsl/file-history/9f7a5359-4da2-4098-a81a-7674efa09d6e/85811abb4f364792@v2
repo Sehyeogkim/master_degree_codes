@@ -1,0 +1,199 @@
+# LAP mesh — geometry-failure cases (need Autodesk Inventor re-generation)
+
+**Project:** `54_analysis` LAP (Type-1 solid) mesh, case id < 500
+**Date:** 2026-07-28
+**Meshed OK:** 441 / 500 · **Missing:** 59 · **of which geometry-defect (re-gen needed): 46 (+2 likely)**
+
+These cases fail in the OCC boolean / surface stage — the mesher cannot fix them, the **STEP geometry must be re-made**. (The 9 remaining "missing" cases are just heavy/timeout, geometry is fine, not listed here.)
+
+Geometry inputs live at `solid_data/case_<id>/{lumen,solid,lipid,fc}.stp`.
+
+---
+
+## Re-generate these 46 (grouped by failure cause)
+
+### STEP4 — `solid − (lipid+fc+lumen) ≠ 1 volume` (sliver / non-conformal cut) — 31 cases
+Usually lumen/solid boundary non-conformity or a sliver volume. Check lumen positioning vs solid.
+- [ ] 8
+- [ ] 13
+- [ ] 48
+- [ ] 66
+- [ ] 69
+- [ ] 115
+- [ ] 126
+- [ ] 135
+- [ ] 183
+- [ ] 194
+- [ ] 205
+- [ ] 239
+- [ ] 240
+- [ ] 280
+- [ ] 290
+- [ ] 301
+- [ ] 312
+- [ ] 331
+- [ ] 338
+- [ ] 345
+- [ ] 355
+- [ ] 357
+- [ ] 360
+- [ ] 403
+- [ ] 413
+- [ ] 416
+- [ ] 426
+- [ ] 429
+- [ ] 453
+- [ ] 486
+- [ ] 494
+
+### overlapping facets — self-intersecting BSpline surface — 8 cases
+The fc/solid surface self-intersects. Smooth / rebuild the offending face.
+- [ ] 3
+- [ ] 23
+- [ ] 54
+- [ ] 121
+- [ ] 148
+- [ ] 164
+- [ ] 351
+- [ ] 414
+
+### STEP1 — `lipid ∩ fc` empty (lipid not overlapping fibrous cap) — 2 cases
+Lipid core sits outside the fibrous cap radially. Check lipid alpha / positioning.
+- [ ] 52
+- [ ] 222
+
+### PLC error — segment/facet intersection — 3 cases
+- [ ] 49
+- [ ] 211
+- [ ] 401
+
+### Unknown OCC boolean op failure — 2 cases
+- [ ] 171
+- [ ] 484
+
+---
+
+## Likely also geometry (2) — verify
+- [ ] 291 — 1D mesh failure (degenerate edge/curve)
+- [ ] 427 — impossible to mesh (periodic / degenerate face)
+
+---
+
+## Plain list (copy-paste)
+
+**46 geometry re-gen:**
+```
+3, 8, 13, 23, 48, 49, 52, 54, 66, 69, 115, 121, 126, 135, 148, 164, 171, 183, 194,
+205, 211, 222, 239, 240, 280, 290, 301, 312, 331, 338, 345, 351, 355, 357, 360, 401,
+403, 413, 414, 416, 426, 429, 453, 484, 486, 494
+```
+
+**+2 likely geometry:**
+```
+291, 427
+```
+
+---
+
+## NOT geometry (do not re-make) — heavy/timeout, mesh with coarser size instead — 9 cases
+```
+30, 40, 176, 189, 196, 223, 246, 379, 443
+```
+Also 195, 204 = exit-120 crashes (retry, not geometry).
+
+
+---
+---
+
+# LAP mesh — geometry-failure cases, case id 500–999
+
+**Project:** `54_analysis` LAP (Type-1 solid) mesh, case id ≥ 500 (meshed on cvbml02)
+**Date:** 2026-07-28
+**Meshed OK:** 437 / 500 · **Missing:** 63 · **of which geometry-defect (re-gen needed): 48**
+
+Same pipeline as 0–499. These 48 fail in the OCC boolean / surface stage — the mesher cannot fix them, the **STEP geometry must be re-made**. (The 15 remaining "missing" cases are just heavy/timeout, geometry is fine, listed separately at the bottom.)
+
+Geometry inputs live at `solid_data/case_<id>/{lumen,solid,lipid,fc}.stp`.
+
+---
+
+## Re-generate these 48 (grouped by failure cause)
+
+### STEP4 — `solid − (lipid+fc+lumen) ≠ 1 volume` (sliver / non-conformal cut) — 30 cases
+Usually lumen/solid boundary non-conformity or a sliver volume. Check lumen positioning vs solid.
+- [ ] 503
+- [ ] 515
+- [ ] 522
+- [ ] 534
+- [ ] 536
+- [ ] 544
+- [ ] 561
+- [ ] 565
+- [ ] 566
+- [ ] 599
+- [ ] 634
+- [ ] 642
+- [ ] 643
+- [ ] 656
+- [ ] 667
+- [ ] 670
+- [ ] 677
+- [ ] 686
+- [ ] 700
+- [ ] 719
+- [ ] 732
+- [ ] 740
+- [ ] 744
+- [ ] 774
+- [ ] 792
+- [ ] 812
+- [ ] 867
+- [ ] 935
+- [ ] 964
+- [ ] 973
+
+### overlapping facets — self-intersecting BSpline surface — 8 cases
+The fc/solid surface self-intersects. Smooth / rebuild the offending face.
+- [ ] 603
+- [ ] 720
+- [ ] 722
+- [ ] 809
+- [ ] 893
+- [ ] 902
+- [ ] 918
+- [ ] 926
+
+### PLC error — segment/facet intersection — 4 cases
+- [ ] 636
+- [ ] 751
+- [ ] 830
+- [ ] 938
+
+### Unknown OCC boolean op failure — 3 cases
+- [ ] 770
+- [ ] 814
+- [ ] 884
+
+### 1D mesh failure (degenerate edge/curve) — 3 cases
+- [ ] 524
+- [ ] 721
+- [ ] 730
+
+---
+
+## Plain list (copy-paste)
+
+**48 geometry re-gen:**
+```
+503, 515, 522, 524, 534, 536, 544, 561, 565, 566, 599, 603, 634, 636, 642, 643,
+656, 667, 670, 677, 686, 700, 719, 720, 721, 722, 730, 732, 740, 744, 751, 770,
+774, 792, 809, 812, 814, 830, 867, 884, 893, 902, 918, 926, 935, 938, 964, 973
+```
+
+---
+
+## NOT geometry (do not re-make) — heavy/timeout, mesh with coarser size or higher nproc instead — 15 cases
+```
+585, 655, 793, 804, 829, 843, 849, 887, 889, 895, 920, 924, 952, 970, 992
+```
+Geometry is fine; these hit the 180s-per-rung cap on large meshes. Recover by raising CAP / nproc.

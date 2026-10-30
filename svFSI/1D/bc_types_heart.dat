@@ -1,0 +1,26 @@
+0 NeumannHeart 0 0 11
+cardiac_cycle 1
+cardiac_output 83.333
+time_in_systole 0.33
+atrial_elastance 200
+atrial_resistance 5
+atrial_inductance 1
+initial_ventricular_volume 100
+initial_atrial_volume 100
+ventricular_resistance 10
+ventricular_inductance 10
+maximum_elastance 2666.4
+49 NeumannCoronary 0 0 13
+arterial_resistance 476.10
+arterial_compliance 0.0000396
+arterial_microcirculation_resistance 773.66714
+myocardial_compliance 0.0003204
+venous_microcirculation_resistance 119.025
+venous_resistance 119.025
+venous_compliance 1.00E+40
+venous_pressure 20000
+total_compliance 0
+arterial_resistance_ratio 0
+venous_resistance_ratio 0
+total_resistance 0
+scale_ratio 1.0000

@@ -1,0 +1,168 @@
+"""
+Radius sweep 0.005 - 0.08 cm: locate the plateau and the over-smoothing roll-off.
+Writes a 4-panel supplementary figure + prints the numbers behind it.
+"""
+import numpy as np
+import pandas as pd
+from scipy.stats import spearmanr
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+D = "/home/jeff/project/66_post_processing_journal/LAP_data"
+PARAM = "/home/jeff/project/65_final_0723/pre_data/parameter.csv"
+H_LOCAL = 0.00398          # cm, measured median nn-spacing of stress-carrying wall nodes
+DYN_TO_KPA = 1.0e-4        # dyn/cm^2 -> kPa
+SELECTED = 0.015
+
+RAD = [("r0005", 0.005), ("r001", 0.010), ("r0015", 0.015), ("r002", 0.020),
+       ("r003", 0.030), ("r005", 0.050), ("r008", 0.080)]
+d = {s: pd.read_csv(f"{D}/PSS_result_0727_{s}.csv").set_index("case_id").sort_index()
+     for s, _ in RAD}
+par = pd.read_csv(PARAM)
+half = par["lesion_length"].values / 2.0
+rv = np.array([r for _, r in RAD])
+BAR = "=" * 112
+
+
+def qq(x, p):
+    return float(np.percentile(np.asarray(x, float), p))
+
+
+# ---------------------------------------------------------------- level curves
+print(BAR)
+print("A. VI LEVEL vs RADIUS  (384 samples; stress in kPa)")
+print(BAR)
+print(f"{'r [cm]':>8}{'r/h':>7}{'n_sph med':>11}{'n_sph min':>11}"
+      f"{'PSS med':>10}{'PSS p25':>10}{'PSS p75':>10}{'CV%':>8}"
+      f"{'dPSS med':>11}{'vs r=0.01':>11}")
+ref = d["r001"].PSS_Principal.values
+for s, r in RAD:
+    p = d[s].PSS_Principal.values * DYN_TO_KPA
+    dp = d[s].del_PSS_Principal.values * DYN_TO_KPA
+    rel = np.median((d[s].PSS_Principal.values - ref) / ref * 100)
+    print(f"{r:>8.3f}{r/H_LOCAL:>7.2f}{d[s].PSS_n_sphere.median():>11.0f}"
+          f"{d[s].PSS_n_sphere.min():>11.0f}"
+          f"{np.median(p):>10.1f}{qq(p,25):>10.1f}{qq(p,75):>10.1f}"
+          f"{100*p.std()/p.mean():>8.1f}{np.median(dp):>11.1f}{rel:>10.2f}%")
+
+# ------------------------------------------------------- consecutive behaviour
+print()
+print(BAR)
+print("B. CONSECUTIVE-STEP CHANGE  -- small in the plateau, large at BOTH ends")
+print(BAR)
+print(f"{'step':<22}{'median|rel|':>13}{'p90|rel|':>11}{'Spearman':>11}"
+      f"{'3-region agree':>17}{'|dz|>0.05cm':>13}")
+
+
+def region(df):
+    dz = (df["PSS_crit_z"] - df["z_MLA"]).values
+    band = 0.25 * half
+    return np.where(dz < -band, "proximal", np.where(dz > band, "distal", "throat"))
+
+
+reg = {s: region(d[s]) for s, _ in RAD}
+steps, med_rel, p90_rel, agree, spear = [], [], [], [], []
+for (sa, ra), (sb, rb) in zip(RAD[:-1], RAD[1:]):
+    a, b = d[sa].PSS_Principal.values, d[sb].PSS_Principal.values
+    rel = np.abs(b - a) / np.abs(a) * 100
+    sp, _ = spearmanr(a, b)
+    ag = 100 * (reg[sa] == reg[sb]).mean()
+    dz = np.sqrt(sum((d[sb][f"PSS_crit_{k}"] - d[sa][f"PSS_crit_{k}"]) ** 2
+                     for k in "xyz")).values
+    print(f"{f'{ra:.3f} -> {rb:.3f}':<22}{np.median(rel):>12.2f}%{qq(rel,90):>10.2f}%"
+          f"{sp:>11.4f}{ag:>16.1f}%{100*(dz>0.05).mean():>12.1f}%")
+    steps.append(rb); med_rel.append(np.median(rel)); p90_rel.append(qq(rel, 90))
+    agree.append(ag); spear.append(sp)
+
+print()
+print(BAR)
+print("C. REGION MIX  -- loss of spatial discrimination as r grows")
+print(BAR)
+for s, r in RAD:
+    u, c = np.unique(reg[s], return_counts=True)
+    m = dict(zip(u, c))
+    print(f"   r={r:.3f}: proximal={m.get('proximal',0):>4}  throat={m.get('throat',0):>4}"
+          f"  distal={m.get('distal',0):>4}")
+
+print()
+print(BAR)
+print("D. SPHERE COVERAGE  -- measured n_sphere vs 2-D surface-patch prediction "
+      "pi*r^2/h^2")
+print(BAR)
+for s, r in RAD:
+    pred2d = np.pi * (r / H_LOCAL) ** 2
+    print(f"   r={r:.3f} cm: measured median={d[s].PSS_n_sphere.median():>6.0f}   "
+          f"2-D predicted={pred2d:>7.0f}   3-D predicted="
+          f"{4/3*np.pi*(r/H_LOCAL)**3:>8.0f}")
+
+# ------------------------------------------------------------------- figure
+fig, ax = plt.subplots(2, 2, figsize=(11, 8))
+band_kw = dict(alpha=0.20, lw=0)
+
+# (a) absolute PSS / dPSS with p10-p90 band
+a0 = ax[0, 0]
+for col, lbl, c in (("PSS_Principal", "PSS", "#1f4e79"),
+                    ("del_PSS_Principal", r"$\Delta$PSS", "#c0392b")):
+    med = np.array([np.median(d[s][col].values) for s, _ in RAD]) * DYN_TO_KPA
+    lo = np.array([qq(d[s][col].values, 10) for s, _ in RAD]) * DYN_TO_KPA
+    hi = np.array([qq(d[s][col].values, 90) for s, _ in RAD]) * DYN_TO_KPA
+    a0.plot(rv, med, "o-", color=c, label=lbl, zorder=3)
+    a0.fill_between(rv, lo, hi, color=c, **band_kw)
+a0.set_xscale("log"); a0.set_xlabel(r"averaging radius $r$  [cm]")
+a0.set_ylabel("stress  [kPa]")
+a0.set_title("(a) VI level (median, p10–p90 band)")
+a0.legend(frameon=False)
+
+# (b) consecutive relative change, p90
+a1 = ax[0, 1]
+a1.plot(steps, p90_rel, "s-", color="#1f4e79", label=r"p90 $|\delta_r|$")
+a1.plot(steps, med_rel, "o--", color="#7f8c8d", label=r"median $|\delta_r|$")
+a1.axhline(5, color="k", ls=":", lw=1)
+a1.text(steps[0], 5.4, "5% criterion", fontsize=8)
+a1.set_xscale("log"); a1.set_yscale("log")
+a1.set_xlabel(r"radius $r$  [cm]  (change from previous radius)")
+a1.set_ylabel("relative change in PSS  [%]")
+a1.set_title("(b) step-to-step change: large at BOTH ends")
+a1.legend(frameon=False)
+
+# (c) sphere sample size
+a2 = ax[1, 0]
+nmed = np.array([d[s].PSS_n_sphere.median() for s, _ in RAD])
+nmin = np.array([d[s].PSS_n_sphere.min() for s, _ in RAD])
+a2.plot(rv, nmed, "o-", color="#1f4e79", label="median")
+a2.plot(rv, nmin, "v--", color="#7f8c8d", label="minimum")
+a2.axhline(5, color="k", ls=":", lw=1)
+a2.text(rv[0], 5.6, "n = 5 floor", fontsize=8)
+a2.set_xscale("log"); a2.set_yscale("log")
+a2.set_xlabel(r"averaging radius $r$  [cm]")
+a2.set_ylabel("valid nodes inside sphere")
+a2.set_title("(c) sphere sample size")
+a2.legend(frameon=False)
+
+# (d) rupture-region classification agreement
+a3 = ax[1, 1]
+a3.plot(steps, agree, "o-", color="#1f4e79")
+a3.axhline(95, color="k", ls=":", lw=1)
+a3.text(steps[0], 95.4, "95% criterion", fontsize=8)
+a3.set_xscale("log")
+a3.set_xlabel(r"radius $r$  [cm]  (agreement with previous radius)")
+a3.set_ylabel("rupture-region agreement  [%]")
+a3.set_title("(d) location classification stability")
+
+for a in ax.ravel():
+    a.axvspan(0.010, 0.020, color="#2e8b57", alpha=0.08, zorder=0)
+    a.axvline(SELECTED, color="#2e8b57", ls="--", lw=1.4, zorder=1)
+    a.set_xticks(rv)
+    a.set_xticklabels([f"{r:g}" for r in rv], fontsize=8)
+    a.minorticks_off()
+    a.grid(alpha=0.25, lw=0.5)
+
+fig.suptitle("Averaging-radius sensitivity of the cap-stress vulnerability indices "
+             f"(n = 384);  selected r = {SELECTED} cm", fontsize=11)
+fig.tight_layout(rect=[0, 0, 1, 0.96])
+out = f"{D}/FigS_radius_sensitivity.png"
+fig.savefig(out, dpi=220)
+fig.savefig(out.replace(".png", ".pdf"))
+print()
+print(f"figure written: {out}  (+ .pdf)")

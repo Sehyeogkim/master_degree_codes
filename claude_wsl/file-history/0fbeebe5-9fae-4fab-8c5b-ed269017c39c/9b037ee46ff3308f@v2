@@ -1,0 +1,12 @@
+"""[shim] 기존 CLI 보존 — 이번 주 라이브 리포트 생성을 process3.update에 위임.
+
+렌더 로직(week_chart/narrative/skeleton)은 function3.py, 오케스트레이션은 process3.py로 이동.
+옛 `python3 run_live_report.py`는 _top5.json으로 이번 주 라이브 리포트를 갱신한다.
+새 코드는 process3(실시간)·process2(과거)·process1(임의 종목·기간)을 직접 쓸 것.
+"""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from process3 import update
+
+if __name__ == "__main__":
+    update()

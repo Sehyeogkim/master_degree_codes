@@ -1,0 +1,4 @@
+- [Solid mesh env on cv1](solid-mesh-env-cv1.md) — run HXT pipeline via conda `ansys_new`; utils package comes from master_python editable install
+- [Solid mesh two types](solid-mesh-two-types.md) — "2 meshes" = Type 1 (no cal) + Type 2 (cal); scripts and inputs
+- [Focus solid not lumen](focus-solid-not-lumen.md) — 65_final_0723 meshing: solid only, ignore lumen/Simmetrix; user handles copy
+- [Lumen mesh WSL setup](lumen-mesh-wsl-setup.md) — run lumen Simmetrix meshing locally in WSL; mesh_generator paths, tirpc build fix, script path bugs
